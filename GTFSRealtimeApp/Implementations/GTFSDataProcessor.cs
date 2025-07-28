@@ -42,9 +42,9 @@ namespace GTFSRealtimeApp.Implementations
                 // Process RapidPenang data
                 _logger.LogInformation("Fetching RapidPenang data...");
                 var rapidPenangData = await _apiClient.GetDataAsync(settings.Prasarana.RapidPenang, cancellationToken);
-                await _storage.SaveDataAsync("RapidPenang", rapidPenangData, cancellationToken);
+                await _storage.SaveDataAsync("RapidPenang", rapidPenangData.ToString(), cancellationToken);
                 processedCount++;
-                _logger.LogInformation("RapidPenang data processed successfully. Size: {Size} bytes", rapidPenangData.Length);
+                _logger.LogInformation("RapidPenang data processed successfully. Size: {Size} bytes", rapidPenangData.ToString().Length);
 
                 result.IsSuccess = true;
                 result.ProcessedItems = processedCount;

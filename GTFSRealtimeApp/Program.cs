@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.Net;
 
 namespace GTFSRealtimeApp
 {
@@ -42,10 +43,13 @@ namespace GTFSRealtimeApp
                 {
                     var env = context.HostingEnvironment.EnvironmentName;
 
+                    // Clear default configuration sources to have full control
+                    config.Sources.Clear();
+
                     config.SetBasePath(Directory.GetCurrentDirectory())
-                          .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-                          .AddJsonFile($"appsettings.{env}.json", optional: true, reloadOnChange: true)
-                          .AddEnvironmentVariables("GTFS_")
+                          .AddJsonFile("appsettings.json", optional: false, reloadOnChange: false)
+                          .AddJsonFile($"appsettings.{env}.json", optional: true, reloadOnChange: false)
+                          .AddEnvironmentVariables()
                           .AddCommandLine(args);
                 })
                 .ConfigureServices((context, services) =>
@@ -63,6 +67,10 @@ namespace GTFSRealtimeApp
                     {
                         client.Timeout = TimeSpan.FromSeconds(30);
                         client.DefaultRequestHeaders.Add("User-Agent", "GTFS-Realtime-Console-App/1.0");
+                    })
+                    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler()
+                    {
+                        AutomaticDecompression = DecompressionMethods.Brotli
                     });
 
                     // Register application services

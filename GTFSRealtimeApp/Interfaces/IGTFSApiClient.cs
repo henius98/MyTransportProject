@@ -1,10 +1,11 @@
 ﻿using GTFSRealtimeAppSettings;
 using Models;
+using TransitRealtime;
 
 namespace GTFSRealtimeApp.Interfaces
 {
     public interface IGTFSApiClient
     {
-        Task<string> GetDataAsync(string url, CancellationToken cancellationToken = default);
+        Task<FeedMessage> GetDataAsync(string url, CancellationToken cancellationToken = default);
     }
 }
