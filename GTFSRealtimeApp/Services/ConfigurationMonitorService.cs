@@ -36,8 +36,8 @@ namespace GTFSRealtimeApp.Services
 
             using var appSettingsChangeToken = _appSettings.OnChange((settings, name) =>
             {
-                _logger.LogInformation("App configuration changed: {Name}. New polling interval: {Interval} minutes",
-                    name ?? "default", settings.PollingIntervalMinutes);
+                _logger.LogInformation("App configuration changed: {Name}. New polling interval: {Interval} seconds",
+                    name ?? "default", settings.PollingIntervalSeconds);
             });
 
             // Keep the service running to monitor changes

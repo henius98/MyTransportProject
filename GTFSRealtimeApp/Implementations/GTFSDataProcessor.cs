@@ -32,17 +32,10 @@ namespace GTFSRealtimeApp.Implementations
 
             try
             {
-                // Process RapidKL data
-                //_logger.LogInformation("Fetching RapidKL data...");
-                //var rapidKLData = await _apiClient.GetDataAsync(settings.Prasarana.RapidKL, cancellationToken);
-                //await _storage.SaveDataAsync("RapidKL", rapidKLData, cancellationToken);
-                //processedCount++;
-                //_logger.LogInformation("RapidKL data processed successfully. Size: {Size} bytes", rapidKLData.Length);
-
                 // Process RapidPenang data
                 _logger.LogInformation("Fetching RapidPenang data...");
                 var rapidPenangData = await _apiClient.GetDataAsync(settings.Prasarana.RapidPenang, cancellationToken);
-                await _storage.SaveDataAsync("RapidPenang", rapidPenangData.ToString(), cancellationToken);
+                await _storage.SaveDataAsync("RapidPenang", rapidPenangData, cancellationToken);
                 processedCount++;
                 _logger.LogInformation("RapidPenang data processed successfully. Size: {Size} bytes", rapidPenangData.ToString().Length);
 

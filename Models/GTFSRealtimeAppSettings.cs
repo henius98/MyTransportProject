@@ -20,11 +20,9 @@ namespace GTFSRealtimeAppSettings
 
     public class AppSettings
     {
-        public int PollingIntervalMinutes { get; set; } = 1;
+        public int PollingIntervalSeconds { get; set; } = 30;
         public int MaxRetryAttempts { get; set; } = 3;
         public int RetryDelaySeconds { get; set; } = 5;
-        public bool EnableHealthMonitoring { get; set; } = true;
-        public bool SaveToDatabase { get; set; } = false;
-        public string OutputDirectory { get; set; } = "GTFSData";
+        public bool EnableHealthMonitoring { get; set; } = false;
     }
 }

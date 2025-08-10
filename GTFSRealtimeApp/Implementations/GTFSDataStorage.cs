@@ -1,12 +1,16 @@
-﻿using GTFSRealtimeApp.Interfaces;
+﻿using Dapper;
+using GTFSRealtimeApp.Interfaces;
 using GTFSRealtimeAppSettings;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Transactions;
+using TransitRealtime;
 
 namespace GTFSRealtimeApp.Implementations
 {
@@ -14,36 +18,48 @@ namespace GTFSRealtimeApp.Implementations
     {
         private readonly ILogger<GTFSDataStorage> _logger;
         private readonly IOptionsMonitor<AppSettings> _settings;
+        private readonly IDbConnection _connection;
 
-        public GTFSDataStorage(ILogger<GTFSDataStorage> logger, IOptionsMonitor<AppSettings> settings)
+        public GTFSDataStorage(ILogger<GTFSDataStorage> logger, IOptionsMonitor<AppSettings> settings, IDbConnection connection)
         {
             _logger = logger;
             _settings = settings;
+            _connection = connection;
         }
 
-        public async Task SaveDataAsync(string source, string data, CancellationToken cancellationToken = default)
+        public async Task SaveDataAsync(string source, FeedMessage data, CancellationToken cancellationToken = default)
         {
             try
             {
-                var appSettings = _settings.CurrentValue;
+                var sbTrip = new StringBuilder();
+                sbTrip.Append("INSERT OR IGNORE INTO Trip (TripId, RouteId, VehicleId) VALUES ");
 
-                if (appSettings.SaveToDatabase)
+                var sbPos = new StringBuilder();
+                sbPos.Append("INSERT INTO VehiclePositions (TripId, Latitude, Longitude, Bearing, Speed, Timestamp) VALUES ");
+
+                for (int i = 0; i < data.Entity.Count; i++)
                 {
-                    // TODO: Implement database storage
-                    _logger.LogInformation("Saving {Source} data to database (not implemented)", source);
-                }
-                else
-                {
-                    // Save to file
-                    var outputDir = appSettings.OutputDirectory;
-                    Directory.CreateDirectory(outputDir);
+                    var r = data.Entity[i].Vehicle;
 
-                    var fileName = $"{source}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.json";
-                    var filePath = Path.Combine(outputDir, fileName);
+                    sbTrip.Append($"('{r.Trip.TripId}', '{r.Trip.RouteId}', '{r.Vehicle.Id}')");
+                    sbPos.Append($"('{r.Trip.TripId}', {r.Position.Latitude}, {r.Position.Longitude}, {r.Position.Bearing}, {r.Position.Speed}, {r.Timestamp})");
 
-                    await File.WriteAllTextAsync(filePath, data, cancellationToken);
-                    _logger.LogInformation("Saved {Source} data to file: {FilePath}", source, filePath);
+                    if (i < data.Entity.Count - 1)
+                    {
+                        sbTrip.Append(",");
+                        sbPos.Append(",");
+                    }
                 }
+                sbTrip.Append(";");
+                sbPos.Append(";");
+
+                _connection.Open();
+                using var transaction = _connection.BeginTransaction();
+                await _connection.ExecuteAsync(sbTrip.ToString(), transaction: transaction);
+                await _connection.ExecuteAsync(sbPos.ToString(), transaction: transaction);
+                transaction.Commit();
+                _connection.Close();
+                
             }
             catch (Exception ex)
             {

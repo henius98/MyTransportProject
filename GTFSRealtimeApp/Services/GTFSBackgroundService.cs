@@ -1,13 +1,9 @@
 ﻿using GTFSRealtimeApp.Interfaces;
 using GTFSRealtimeAppSettings;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace GTFSRealtimeApp.Services
 {
@@ -19,6 +15,7 @@ namespace GTFSRealtimeApp.Services
         private readonly IGTFSDataProcessor _dataProcessor;
         private readonly IHealthMonitor _healthMonitor;
         private readonly IHostApplicationLifetime _lifetime;
+        private readonly IServiceScopeFactory _scopeFactory;
 
         public GTFSBackgroundService(
             ILogger<GTFSBackgroundService> logger,
@@ -26,7 +23,9 @@ namespace GTFSRealtimeApp.Services
             IOptionsMonitor<AppSettings> appSettings,
             IGTFSDataProcessor dataProcessor,
             IHealthMonitor healthMonitor,
-            IHostApplicationLifetime lifetime)
+            IHostApplicationLifetime lifetime,
+            IServiceScopeFactory scopeFactory
+            )
         {
             _logger = logger;
             _apiSettings = apiSettings;
@@ -34,6 +33,7 @@ namespace GTFSRealtimeApp.Services
             _dataProcessor = dataProcessor;
             _healthMonitor = healthMonitor;
             _lifetime = lifetime;
+            _scopeFactory = scopeFactory;
         }
 
         public override async Task StartAsync(CancellationToken cancellationToken)
@@ -47,8 +47,7 @@ namespace GTFSRealtimeApp.Services
                 var appConfig = _appSettings.CurrentValue;
 
                 _logger.LogInformation("Configuration validated successfully");
-                _logger.LogInformation("Polling interval: {Interval} minutes", appConfig.PollingIntervalMinutes);
-                _logger.LogInformation("RapidKL API: {Url}", apiConfig.Prasarana.RapidKL);
+                _logger.LogInformation("Polling interval: {Interval} seconds", appConfig.PollingIntervalSeconds);
                 _logger.LogInformation("RapidPenang API: {Url}", apiConfig.Prasarana.RapidPenang);
             }
             catch (Exception ex)
@@ -112,8 +111,8 @@ namespace GTFSRealtimeApp.Services
                     }
 
                     // Wait for next polling interval
-                    var delay = TimeSpan.FromMinutes(appConfig.PollingIntervalMinutes);
-                    _logger.LogDebug("Waiting {Delay} minutes until next cycle", appConfig.PollingIntervalMinutes);
+                    var delay = TimeSpan.FromSeconds(appConfig.PollingIntervalSeconds);
+                    _logger.LogDebug("Waiting {Delay} seconds until next cycle", appConfig.PollingIntervalSeconds);
 
                     await Task.Delay(delay, stoppingToken);
                 }

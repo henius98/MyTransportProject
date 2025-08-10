@@ -46,7 +46,6 @@ namespace GTFSRealtimeApp.Implementations
                         _logger.LogInformation($"Content Length: {responseBytes.Length} bytes");
 
                         message = await ProtocolBufferUtils.ParseAsync<FeedMessage>(responseBytes);
-                        Console.WriteLine($"Parsed message: {message}");
                     }
 
                     _logger.LogDebug("Successfully fetched data from {Url} on attempt {Attempt}", url, attempt);

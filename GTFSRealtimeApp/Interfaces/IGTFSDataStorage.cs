@@ -1,10 +1,9 @@
-﻿using GTFSRealtimeAppSettings;
-using Models;
+﻿using TransitRealtime;
 
 namespace GTFSRealtimeApp.Interfaces
 {
     public interface IGTFSDataStorage
     {
-        Task SaveDataAsync(string source, string data, CancellationToken cancellationToken = default);
+        Task SaveDataAsync(string source, FeedMessage data, CancellationToken cancellationToken = default);
     }
 }
