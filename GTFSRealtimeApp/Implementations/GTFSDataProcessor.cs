@@ -36,6 +36,10 @@ namespace GTFSRealtimeApp.Implementations
                 _logger.LogInformation("Fetching RapidPenang data...");
                 var rapidPenangData = await _apiClient.GetDataAsync(settings.Prasarana.RapidPenang, cancellationToken);
                 await _storage.SaveDataAsync("RapidPenang", rapidPenangData, cancellationToken);
+
+                await using var httpStream = await _apiClient.GetGtfsStaticDataAsync("rapid-bus-penang", cancellationToken);
+                await _storage.SaveGtfsStaticDataAsync(httpStream, cancellationToken);
+
                 processedCount++;
                 _logger.LogInformation("RapidPenang data processed successfully. Size: {Size} bytes", rapidPenangData.ToString().Length);
 

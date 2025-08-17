@@ -6,10 +6,10 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using System.Data;
-using System.Net;
-using Microsoft.Data.Sqlite;
 using NReco.Logging.File;
+using System.Data;
+using System.Data.SQLite;
+using System.Net;
 
 namespace GTFSRealtimeApp
 {
@@ -39,11 +39,12 @@ namespace GTFSRealtimeApp
             }
         }
 
-        private static IHostBuilder CreateHostBuilder(string[] args) =>
-            Host.CreateDefaultBuilder(args)
+        private static IHostBuilder CreateHostBuilder(string[] args)
+        {
+            return Host.CreateDefaultBuilder(args)
                 .ConfigureAppConfiguration((context, config) =>
                 {
-                    var env = context.HostingEnvironment.EnvironmentName;
+                    string env = context.HostingEnvironment.EnvironmentName;
 
                     // Clear default configuration sources to have full control
                     config.Sources.Clear();
@@ -75,10 +76,16 @@ namespace GTFSRealtimeApp
                     });
 
                     // Register IDbConnection as Singleton for SQLite
-                    services.AddSingleton<IDbConnection>(provider =>
+                    //services.AddTransient<IDbConnection>(provider =>
+                    //{
+                    //    string? connectionString = context.Configuration.GetConnectionString("DefaultConnection");
+                    //    return new SqliteConnection(connectionString);
+                    //});
+
+                    services.AddTransient<IDbConnection>(provider =>
                     {
                         var connectionString = context.Configuration.GetConnectionString("DefaultConnection");
-                        return new SqliteConnection(connectionString);
+                        return new SQLiteConnection(connectionString);
                     });
 
                     // Register application services
@@ -116,7 +123,7 @@ namespace GTFSRealtimeApp
                     {
                         FormatLogEntry = (msg) =>
                         {
-                            var exceptionText = msg.Exception != null ? $" {msg.Exception}" : "";
+                            string exceptionText = msg.Exception != null ? $" {msg.Exception}" : "";
                             return $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] [{msg.LogLevel}] {msg.Message}{exceptionText}";
                         }
                     });
@@ -125,18 +132,25 @@ namespace GTFSRealtimeApp
                 {
                     options.SuppressStatusMessages = true;
                 });
+        }
 
         private static void ValidateSettings(GTFSRealtimeApiSettings settings)
         {
             if (settings?.Prasarana == null)
+            {
                 throw new InvalidOperationException("Prasarana configuration section is missing");
+            }
 
             if (string.IsNullOrWhiteSpace(settings.Prasarana.RapidPenang))
+            {
                 throw new InvalidOperationException("RapidPenang API URL is required");
+            }
 
             // Validate URLs
             if (!Uri.TryCreate(settings.Prasarana.RapidPenang, UriKind.Absolute, out _))
+            {
                 throw new InvalidOperationException("RapidPenang API URL is not valid");
+            }
         }
     }
 }
