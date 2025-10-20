@@ -13,6 +13,11 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Core", "Core", "{02EA681E-C
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Models", "Models\Models.csproj", "{F3927A0F-3A55-490C-90C0-F33EE85DB2EE}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Data", "Data", "{4B29DF3D-BC1A-47D3-8D76-1C4F1E745A0F}"
+	ProjectSection(SolutionItems) = preProject
+		Data\init tables.sql = Data\init tables.sql
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
