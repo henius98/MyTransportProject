@@ -14,17 +14,21 @@ CREATE TABLE VehiclePositions (
     Timestamp INTEGER NOT NULL,
     FOREIGN KEY (TripId) REFERENCES Trip(TripId)
 );
--- static API data
+
+-- static API data --
 CREATE TABLE trips (
     route_id INTEGER,
     service_id INTEGER,
     trip_id VARCHAR(20) PRIMARY KEY,
     trip_headsign TEXT,
-    direction_id INTEGER,
+    direction_id INTEGER, -- 0 = from Jetty or 1 = end Jetty
     shape_id TEXT
+    -- FOREIGN KEY (route_id) REFERENCES trips(routes),
+    -- FOREIGN KEY (service_id) REFERENCES trips(calendar),
+    -- FOREIGN KEY (shape_id) REFERENCES trips(shapes),
 );
 CREATE TABLE calendar (
-    service_id INTEGER PRIMARY KEY,
+    service_id INTEGER,
     monday BOOLEAN,
     tuesday BOOLEAN,
     wednesday BOOLEAN,
@@ -33,7 +37,8 @@ CREATE TABLE calendar (
     saturday BOOLEAN,
     sunday BOOLEAN,
     start_date INTEGER,
-    end_date INTEGER
+    end_date INTEGER,
+    PRIMARY KEY (service_id, start_date, end_date)
 );
 CREATE TABLE routes (
     route_id INTEGER PRIMARY KEY,
@@ -41,6 +46,7 @@ CREATE TABLE routes (
     route_short_name TEXT,
     route_long_name TEXT,
     route_type INTEGER
+    -- FOREIGN KEY (agency_id) REFERENCES trips(agency),
 );
 CREATE TABLE shapes (
     shape_id INTEGER,
@@ -69,16 +75,3 @@ CREATE TABLE stop_times (
     -- FOREIGN KEY (trip_id) REFERENCES trips(trip_id),
     -- FOREIGN KEY (stop_id) REFERENCES stops(stop_id)
 );
-
-
-
-
-drop TABLE VehiclePosition
-
-
-SELECT * FROM VehiclePositions
-limit 99;
-
-SELECT * FROM Trip
-order by TripId, RouteId
-limit 99;

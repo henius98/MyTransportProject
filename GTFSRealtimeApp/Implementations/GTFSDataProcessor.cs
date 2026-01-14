@@ -27,21 +27,21 @@ namespace GTFSRealtimeApp.Implementations
 
         public async Task<JobResult> ProcessAllDataAsync(GTFSRealtimeApiSettings settings, CancellationToken cancellationToken)
         {
-            var result = new JobResult();
-            var processedCount = 0;
+            JobResult result = new();
+            int processedCount = 0;
 
             try
             {
                 // Process RapidPenang data
                 _logger.LogInformation("Fetching RapidPenang data...");
-                var rapidPenangData = await _apiClient.GetDataAsync(settings.Prasarana.RapidPenang, cancellationToken);
-                await _storage.SaveDataAsync("RapidPenang", rapidPenangData, cancellationToken);
+                //var rapidPenangData = await _apiClient.GetDataAsync(settings.Prasarana.RapidPenang, cancellationToken);
+                //await _storage.SaveDataAsync("RapidPenang", rapidPenangData, cancellationToken);
 
-                await using var httpStream = await _apiClient.GetGtfsStaticDataAsync("rapid-bus-penang", cancellationToken);
+                await using Stream httpStream = await _apiClient.GetGtfsStaticDataAsync("rapid-bus-penang", cancellationToken);
                 await _storage.SaveGtfsStaticDataAsync(httpStream, cancellationToken);
 
                 processedCount++;
-                _logger.LogInformation("RapidPenang data processed successfully. Size: {Size} bytes", rapidPenangData.ToString().Length);
+                //_logger.LogInformation("RapidPenang data processed successfully. Size: {Size} bytes", rapidPenangData.ToString().Length);
 
                 result.IsSuccess = true;
                 result.ProcessedItems = processedCount;
