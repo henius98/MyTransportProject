@@ -1,0 +1,15 @@
+@inherits LayoutComponentBase
+@inject ThemeService Theme
+
+<div class="auth-layout @(Theme.IsDarkMode ? "theme-dark" : "")">
+    <main>
+        @Body
+    </main>
+</div>
+
+<style>
+    .auth-layout {
+        min-height: 100vh;
+        background: var(--bg-color, #f8f9fa);
+    }
+</style>

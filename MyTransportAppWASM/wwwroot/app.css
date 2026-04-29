@@ -1,0 +1,213 @@
+:root {
+    --bg-color: #fcfcfd;
+    --text-color: #1a1c1e;
+    --text-dim: #64748b;
+    --card-bg: rgba(255, 255, 255, 0.85);
+    --border-color: rgba(0, 0, 0, 0.08);
+    --sidebar-bg: #1e293b;
+    --primary-blue: #006bb7;
+    --primary-blue-hover: #005a9b;
+    --primary-blue-transparent: rgba(0, 107, 183, 0.08);
+    --primary-purple: #6366f1;
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    
+    /* Navigation Defaults */
+    --nav-link-color: #d7d7d7;
+    --nav-link-hover: #ffffff;
+    --nav-link-active-bg: rgba(255, 255, 255, 0.15);
+}
+
+.theme-dark {
+    --bg-color: #0f172a;
+    --text-color: #f8fafc;
+    --text-dim: #94a3b8;
+    --card-bg: rgba(30, 41, 59, 0.75);
+    --border-color: rgba(255, 255, 255, 0.1);
+    --sidebar-bg: #020617;
+    --primary-blue: #60a5fa;
+    --primary-blue-hover: #93c5fd;
+    --primary-blue-transparent: rgba(96, 165, 250, 0.15);
+    --primary-purple: #818cf8;
+}
+
+html, body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Typography */
+.section-title {
+    font-size: clamp(2rem, 5vw, 3.5rem);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-purple) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1.1;
+}
+
+.section-subtitle {
+    color: var(--text-dim);
+    font-size: 1.1rem;
+    margin-bottom: 2rem;
+    line-height: 1.6;
+}
+
+/* Common Cards */
+.standard-card {
+    background: var(--card-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-color);
+    padding: 1.75rem;
+    border-radius: 20px;
+    box-shadow: var(--shadow-md);
+    color: var(--text-color);
+    transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.standard-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+    border-color: var(--primary-blue-transparent);
+}
+
+/* Forms */
+.standard-input {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-color);
+    color: var(--text-color);
+    font-size: 0.95rem;
+    transition: all 0.2s ease;
+}
+
+.standard-input:focus {
+    outline: none;
+    border-color: var(--primary-blue);
+    box-shadow: 0 0 0 4px var(--primary-blue-transparent);
+}
+
+.standard-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--text-dim);
+}
+
+/* Buttons */
+.standard-button {
+    padding: 0.75rem 1.5rem;
+    border-radius: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+.standard-button-primary {
+    background: linear-gradient(135deg, var(--primary-blue) 0%, var(--primary-purple) 100%);
+    color: white;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+}
+
+.standard-button-primary:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(99, 102, 241, 0.3);
+    filter: brightness(1.1);
+}
+
+.standard-button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Badges & Chips */
+.standard-badge {
+    display: inline-flex;
+    padding: 4px 12px;
+    border-radius: 100px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border: 1px solid var(--border-color);
+}
+
+.standard-chip {
+    display: inline-flex;
+    align-items: center;
+    background: var(--primary-blue-transparent);
+    color: var(--primary-blue);
+    border-radius: 8px;
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+
+/* Status Badges */
+.status-live {
+    border-color: rgba(34, 197, 94, 0.3);
+    color: #22c55e;
+    background: rgba(34, 197, 94, 0.1);
+}
+
+.status-error {
+    border-color: rgba(249, 115, 22, 0.3);
+    color: #f97316;
+    background: rgba(249, 115, 22, 0.1);
+}
+
+.status-muted {
+    border-color: var(--border-color);
+    color: var(--text-dim);
+    background: var(--primary-blue-transparent);
+}
+
+/* Loading States */
+.standard-spinner {
+    width: 40px;
+    height: 40px;
+    border: 4px solid var(--primary-blue-transparent);
+    border-top-color: var(--primary-blue);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Error UI */
+#blazor-error-ui {
+    background: #fff3cd;
+    color: #856404;
+    bottom: 0;
+    box-shadow: var(--shadow-lg);
+    display: none;
+    left: 0;
+    padding: 1rem;
+    position: fixed;
+    width: 100%;
+    z-index: 1000;
+    border-top: 1px solid #ffeeba;
+    text-align: center;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    margin-left: 1rem;
+}

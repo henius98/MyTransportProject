@@ -1,0 +1,50 @@
+@inherits LayoutComponentBase
+@inject ThemeService Theme
+@implements IDisposable
+
+<div class="page @(Theme.IsDarkMode ? "theme-dark" : "theme-light")" style="--sidebar-width: @(isCollapsed ? "70px" : "250px");">
+    <div class="sidebar @(isCollapsed ? "collapsed" : "")" @onclick="ExpandSidebar" @onclick:stopPropagation>
+        <NavMenu IsCollapsed="isCollapsed" />
+    </div>
+
+    <main @onclick="CollapseSidebar">
+        <article class="content px-4">
+            <ErrorBoundary>
+                <ChildContent>
+                    @Body
+                </ChildContent>
+                <ErrorContent>
+                    <div class="alert alert-danger m-3">
+                        <h4>Oops! Something went wrong.</h4>
+                        <p>We encountered an unexpected error. Please try refreshing the page.</p>
+                    </div>
+                </ErrorContent>
+            </ErrorBoundary>
+        </article>
+    </main>
+</div>
+
+
+@code {
+    private bool isCollapsed = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Theme.InitializeAsync();
+        Theme.OnThemeChanged += StateHasChanged;
+    }
+
+    private void ExpandSidebar() => isCollapsed = false;
+    private void CollapseSidebar() => isCollapsed = true;
+
+    public void Dispose()
+    {
+        Theme.OnThemeChanged -= StateHasChanged;
+    }
+}
+
+<div id="blazor-error-ui">
+    An unhandled error has occurred.
+    <a href="" class="reload">Reload</a>
+    <a class="dismiss">🗙</a>
+</div>

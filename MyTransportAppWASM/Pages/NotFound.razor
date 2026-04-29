@@ -1,0 +1,54 @@
+@page "/not-found"
+@layout MainLayout
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+
+<div class="auth-popup-container" @onclick="GoHome">
+    <div class="auth-modal" @onclick:stopPropagation="true">
+        <button type="button" class="auth-close-btn" @onclick="GoHome" aria-label="Close">&times;</button>
+        
+        <div class="welcome-icon">🔍</div>
+        
+        <h2 class="fw-bold">Page Not Found</h2>
+        <p>Sorry, the content you are looking for does not exist or has been moved.</p>
+        
+        <div class="app-stats mb-3">
+            <div class="stat-item">
+                <span class="stat-value">404</span>
+                <span class="stat-label">Error Code</span>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+                <span class="stat-value">@countdown</span>
+                <span class="stat-label">Seconds Left</span>
+            </div>
+        </div>
+
+        <button class="auth-action-btn" @onclick="GoHome">Return to Home</button>
+    </div>
+</div>
+
+@code {
+    private int countdown = 10;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _ = StartCountdown();
+    }
+
+    private async Task StartCountdown()
+    {
+        while (countdown > 0)
+        {
+            await Task.Delay(1000);
+            countdown--;
+            StateHasChanged();
+        }
+        GoHome();
+    }
+
+    private void GoHome()
+    {
+        Navigation.NavigateTo("/");
+    }
+}

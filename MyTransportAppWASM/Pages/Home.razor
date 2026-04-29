@@ -1,0 +1,186 @@
+@page "/"
+@using MyTransportAppWASM.Services
+@using MyTransportAppWASM.Services.Interfaces
+@inject IFormFactor FormFactor
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Home - MyTransportApp</PageTitle>
+
+<div class="home-hero">
+    <div class="hero-content animate-fade-in">
+        <h1 class="section-title">Ready for your next journey?</h1>
+        <p class="section-subtitle">Track real-time bus locations and plan your trips with live weather insights across Malaysia.</p>
+        
+        <div class="dashboard-grid">
+            <div class="standard-card card-map" @onclick='() => Navigation.NavigateTo("map")'>
+                <div class="dash-icon">📍</div>
+                <h3>Live Bus Map</h3>
+                <p>Track rapid bus positions in real-time on our interactive map.</p>
+                <div class="dash-footer">
+                    <span class="dash-link">Open Map</span>
+                    <span class="arrow">&rarr;</span>
+                </div>
+            </div>
+            
+            <div class="standard-card card-weather" @onclick='() => Navigation.NavigateTo("weather")'>
+                <div class="dash-icon">🌦️</div>
+                <h3>Weather Planner</h3>
+                <p>Get precise weather forecasts for your departure and return.</p>
+                <div class="dash-footer">
+                    <span class="dash-link">Plan Trip</span>
+                    <span class="arrow">&rarr;</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (showWelcome)
+{
+    <div class="auth-popup-container" style="position: fixed; z-index: 5000; top: 0; left: 0; width: 100%; height: 100%;" @onclick="CloseWelcome">
+        <div class="auth-modal" @onclick:stopPropagation="true">
+            <button type="button" class="auth-close-btn" @onclick="CloseWelcome">&times;</button>
+            <div class="welcome-icon">👋</div>
+            <h2 class="fw-bold">Welcome to MyTransportApp!</h2>
+            <p>Your ultimate companion for navigating public transport in Malaysia. We've combined real-time GTFS data with precise weather modeling.</p>
+            
+            <div class="app-stats mb-3">
+                <div class="stat-item">
+                    <span class="stat-value">@factor</span>
+                    <span class="stat-label">Form Factor</span>
+                </div>
+                <div class="stat-divider"></div>
+                <div class="stat-item">
+                    <span class="stat-value">@platform</span>
+                    <span class="stat-label">Platform</span>
+                </div>
+            </div>
+            
+            <button class="standard-button standard-button-primary w-100" @onclick="CloseWelcome">Let's Get Started!</button>
+        </div>
+    </div>
+}
+
+<style>
+    .home-hero {
+        padding: 4rem 1rem;
+        text-align: center;
+        min-height: calc(100vh - 3.5rem);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .hero-content {
+        max-width: 1000px;
+        width: 100%;
+    }
+
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 2.5rem;
+        margin-top: 1rem;
+    }
+
+    .dash-icon {
+        font-size: 3.5rem;
+        margin-bottom: 2rem;
+        transition: transform 0.3s ease;
+    }
+
+    .standard-card:hover .dash-icon {
+        transform: scale(1.1) rotate(5deg);
+    }
+
+    .dash-footer {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--primary-blue);
+        font-weight: 700;
+        font-size: 1rem;
+    }
+
+    .arrow {
+        transition: transform 0.3s ease;
+    }
+
+    .standard-card:hover .arrow {
+        transform: translateX(8px);
+    }
+
+    /* Animations */
+    .animate-fade-in {
+        animation: fadeIn 0.8s ease-out forwards;
+    }
+
+    @@keyframes fadeIn {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Stats Styling in Welcome Popup */
+    .app-stats {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 2.5rem;
+        background: var(--primary-blue-transparent);
+        padding: 1.5rem;
+        border-radius: 16px;
+        margin: 2rem 0;
+    }
+
+    .stat-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .stat-value {
+        font-weight: 800;
+        font-size: 1.2rem;
+        color: var(--primary-blue);
+    }
+
+    .stat-label {
+        font-size: 0.7rem;
+        color: var(--text-dim);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+    .stat-divider {
+        width: 1px;
+        height: 40px;
+        background: var(--border-color);
+    }
+</style>
+
+@code {
+    private string factor => FormFactor.GetFormFactor();
+    private string platform => FormFactor.GetPlatform();
+    
+    private bool showWelcome;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var hasSeen = await JS.InvokeAsync<bool>("welcomeManager.hasSeen");
+            if (!hasSeen)
+            {
+                showWelcome = true;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task CloseWelcome() 
+    {
+        showWelcome = false;
+        await JS.InvokeVoidAsync("welcomeManager.setSeen");
+    }
+}

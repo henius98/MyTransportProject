@@ -1,0 +1,197 @@
+/* Map styles use global theme variables from app.css */
+
+#map-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 1000;
+  background: white;
+}
+
+/* Adjust for desktop sidebar */
+@media (min-width: 641px) {
+  #map-container {
+    left: var(--sidebar-width, 250px);
+    width: calc(100vw - var(--sidebar-width, 250px));
+    transition: left 0.3s ease, width 0.3s ease;
+  }
+}
+
+#map {
+  height: 100%;
+  width: 100%;
+}
+
+.map-overlay {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  width: 320px;
+  padding: 0; /* Remove padding here, move to body/header */
+  background: var(--card-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  box-shadow: var(--shadow-lg);
+  z-index: 10;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.map-overlay.collapsed {
+  width: 56px;
+  height: 56px;
+  border-radius: 28px; /* Circle when collapsed */
+}
+
+.overlay-header {
+  padding: 15px 20px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+
+.map-overlay.collapsed .overlay-header {
+  padding: 0;
+  justify-content: center;
+}
+
+.collapsed-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.overlay-header:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.overlay-body {
+  padding: 0 20px 20px 20px;
+}
+
+.map-overlay h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  color: var(--text-color);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.collapse-icon {
+  font-size: 0.8rem;
+  color: var(--primary-blue);
+  font-weight: bold;
+}
+
+.control-group {
+  margin-bottom: 15px;
+}
+
+.control-group label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-dim);
+}
+
+
+.tracker-status {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  background: #34a853; /* Use standard green for success */
+  border-radius: 50%;
+  display: inline-block;
+  animation: pulse 2s infinite;
+}
+
+.theme-dark .pulse-dot {
+  background: #81c995;
+}
+
+@keyframes pulse {
+  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(52, 168, 83, 0.7); }
+  70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(52, 168, 83, 0); }
+  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(52, 168, 83, 0); }
+}
+
+.bus-info-window {
+  padding: 12px;
+  min-width: 180px;
+}
+
+.bus-info-header {
+  font-weight: 800;
+  font-size: 1.2rem;
+  margin-bottom: 8px;
+  color: var(--primary-blue);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 8px;
+}
+
+.bus-info-item {
+  font-size: 0.9rem;
+  margin-bottom: 6px;
+  color: var(--text-color);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.bus-info-item b {
+  color: var(--text-dim);
+  font-weight: 600;
+  margin-right: 12px;
+}
+
+.bus-marker {
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.bus-marker:hover {
+  transform: scale(1.2);
+}
+
+/* Style Google Maps InfoWindow to match theme only in dark mode */
+.theme-dark .gm-style .gm-style-iw-c {
+  background-color: var(--card-bg) !important;
+  color: var(--text-color) !important;
+  border-radius: 12px;
+  padding: 0 !important; /* Remove default padding that exposes white background */
+}
+
+.theme-dark .gm-style .gm-style-iw-tc::after {
+  background: var(--card-bg) !important;
+}
+
+/* Fix scrollbar and inner background for dark mode */
+.theme-dark .gm-style .gm-style-iw-d {
+  background-color: transparent !important;
+  overflow: hidden !important; /* Hide the scrollbar entirely to prevent white tracks */
+}
+
+/* Hide close button via CSS (fallback if headerDisabled is not supported) */
+.gm-ui-hover-effect {
+  display: none !important;
+}

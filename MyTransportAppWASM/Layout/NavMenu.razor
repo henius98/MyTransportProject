@@ -1,0 +1,155 @@
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@inject NavigationManager Navigation
+@inject ThemeService Theme
+@inject IJSRuntime JS
+
+@implements IDisposable
+
+<div class="nav-menu-container @(IsCollapsed ? "collapsed" : "")">
+    <div class="top-row ps-3 navbar navbar-dark">
+        <div class="container-fluid d-flex justify-content-start align-items-center">
+            <div class="user-profile me-3 position-relative">
+                <button class="btn btn-link p-0 text-white shadow-none" @onclick="ToggleUserMenu" title="User Profile">
+                    <AuthorizeView>
+                        <Authorized>
+                            @if (!string.IsNullOrEmpty(context.User?.FindFirst("picture")?.Value))
+                            {
+                                <img src="@context.User?.FindFirst("picture")?.Value" class="profile-pic-nav" alt="Profile" />
+                            }
+                            else
+                            {
+                                <span class="bi bi-person-circle-nav-menu" aria-hidden="true"></span>
+                            }
+                        </Authorized>
+                        <NotAuthorized>
+                            <span class="bi bi-person-circle-nav-menu" aria-hidden="true"></span>
+                        </NotAuthorized>
+                    </AuthorizeView>
+                </button>
+
+                @if (showUserMenu)
+                {
+                    <div class="menu-overlay" @onclick="ToggleUserMenu"></div>
+                    <div class="user-menu-floating p-3 shadow-lg" style="min-width: 250px;">
+                        <AuthorizeView>
+                            <Authorized>
+                                <div class="d-flex align-items-center mb-3">
+                                    @if (!string.IsNullOrEmpty(context.User?.FindFirst("picture")?.Value))
+                                    {
+                                        <img src="@context.User?.FindFirst("picture")?.Value" class="profile-pic-large me-3" alt="Profile" />
+                                    }
+                                    <div class="text-truncate">
+                                        <div class="user-name fw-bold">@(context.User?.Identity?.Name ?? "User")</div>
+                                        <div class="text-muted extra-small text-truncate" style="font-size: 0.75rem;">@(context.User?.FindFirst("email")?.Value ?? "")</div>
+                                    </div>
+                                </div>
+                                <small class="text-muted d-block mb-2">Signed in with Google</small>
+                            </Authorized>
+                        </AuthorizeView>
+
+                        <hr class="my-2 border-secondary" />
+
+                        <div class="mb-3 mt-3">
+                            <small class="text-muted d-block mb-2 text-uppercase" style="font-size: 0.65rem; font-weight: 700; letter-spacing: 0.5px;">Preferences</small>
+                            <div class="theme-toggle-section d-flex align-items-center justify-content-between p-2 rounded">
+                                <div class="d-flex align-items-center">
+                                    <span class="bi bi-moon-stars-fill-nav-menu me-2" aria-hidden="true"></span>
+                                    <span style="font-size: 0.85rem;">Dark Mode</span>
+                                </div>
+                                <div class="form-check form-switch m-0">
+                                    <input class="form-check-input custom-switch shadow-none" type="checkbox" role="switch" 
+                                           checked="@Theme.IsDarkMode" @onchange="Theme.ToggleThemeAsync" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <hr class="my-2 border-secondary" />
+                        
+                        <AuthorizeView>
+                            <Authorized>
+                                <button class="nav-link btn btn-link text-start w-100 p-0" @onclick="BeginLogOut">
+                                    <span class="bi bi-box-arrow-right-nav-menu" aria-hidden="true"></span> Log out
+                                </button>
+                            </Authorized>
+                            <NotAuthorized>
+                                <button class="nav-link btn btn-link text-start w-100 p-0" @onclick="BeginLogin">
+                                    <span class="bi bi-box-arrow-in-right-nav-menu" aria-hidden="true"></span> Log in
+                                </button>
+                            </NotAuthorized>
+                        </AuthorizeView>
+                    </div>
+                }
+            </div>
+            @if (!IsCollapsed)
+            {
+                <a class="navbar-brand text-truncate" href="">MyTransportApp</a>
+            }
+        </div>
+    </div>
+
+    <input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+    <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+        <nav class="nav flex-column">
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                    <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span>
+                    @if (!IsCollapsed)
+                    {
+                        <span class="nav-text ms-2">Home</span>
+                    }
+                </NavLink>
+            </div>
+
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="weather">
+                    <span class="bi bi-cloud-sun-fill-nav-menu" aria-hidden="true"></span>
+                    @if (!IsCollapsed)
+                    {
+                        <span class="nav-text ms-2">Weather</span>
+                    }
+                </NavLink>
+            </div>
+
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="map">
+                    <span class="bi bi-geo-alt-fill-nav-menu" aria-hidden="true"></span>
+                    @if (!IsCollapsed)
+                    {
+                        <span class="nav-text ms-2">Map</span>
+                    }
+                </NavLink>
+            </div>
+        </nav>
+    </div>
+</div>
+
+@code {
+    [Parameter] public bool IsCollapsed { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    private bool showUserMenu;
+
+    protected override void OnInitialized()
+    {
+        Theme.OnThemeChanged += StateHasChanged;
+    }
+
+    private void ToggleUserMenu() => showUserMenu = !showUserMenu;
+
+    private void BeginLogin()
+    {
+        Navigation.NavigateTo($"authentication/login?returnUrl={Uri.EscapeDataString(Navigation.Uri)}");
+    }
+
+    private void BeginLogOut()
+    {
+        Navigation.NavigateToLogout("authentication/logout");
+    }
+
+    public void Dispose()
+    {
+        Theme.OnThemeChanged -= StateHasChanged;
+    }
+}
+
