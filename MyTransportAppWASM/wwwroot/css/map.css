@@ -28,35 +28,38 @@
 
 .map-overlay {
   position: absolute;
-  top: 20px;
-  left: 20px;
-  width: 320px;
-  padding: 0; /* Remove padding here, move to body/header */
+  top: 16px;
+  left: 16px;
+  width: 300px;
   background: var(--card-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
+  border-radius: 20px;
   box-shadow: var(--shadow-lg);
   z-index: 10;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .map-overlay.collapsed {
   width: 56px;
   height: 56px;
   border-radius: 28px; /* Circle when collapsed */
+  overflow: hidden;
 }
 
 .overlay-header {
-  padding: 15px 20px;
-  height: 56px;
+  padding: 12px 16px;
+  height: 52px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
   user-select: none;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(var(--primary-blue-rgb), 0.03);
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
 }
 
 .map-overlay.collapsed .overlay-header {
@@ -74,7 +77,7 @@
 }
 
 .overlay-body {
-  padding: 0 20px 20px 20px;
+  padding: 16px;
 }
 
 .map-overlay h2 {

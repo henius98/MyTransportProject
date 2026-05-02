@@ -1,7 +1,7 @@
 using Google.Protobuf;
 using System;
 using System.Buffers;
-using System.Collections.Frozen;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
@@ -13,11 +13,11 @@ namespace MyTransportAppWASM.Utils;
 
 /// <summary>
 /// High-performance utility class for parsing Protocol Buffer messages with thread-safe caching,
-/// memory pooling, and comprehensive error handling optimized for .NET 9.
+/// memory pooling, and comprehensive error handling optimized for .NET 10.
 /// </summary>
 public static class ProtocolBufferUtils
 {
-    private static readonly FrozenDictionary<Type, object> _parserCache = CreateParserCache();
+    private static readonly ConcurrentDictionary<Type, object> _parserCache = new();
     private static readonly ActivitySource _activitySource = new("GTFSRealtimeApp.ProtocolBuffer");
 
     /// <summary>
@@ -264,43 +264,8 @@ public static class ProtocolBufferUtils
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static MessageParser<T> GetParser<T>() where T : class, IMessage<T>, new()
     {
-        var type = typeof(T);
-
-        // First check the frozen cache
-        if (_parserCache.TryGetValue(type, out var cachedParser))
-        {
-            return (MessageParser<T>)cachedParser;
-        }
-
-        // Lazy initialization with double-checked locking
-        _mutableParserCache ??= new Dictionary<Type, object>();
-
-        if (_mutableParserCache.TryGetValue(type, out var parser))
-        {
-            return (MessageParser<T>)parser;
-        }
-
-        lock (_parserCacheLock)
-        {
-            if (_mutableParserCache.TryGetValue(type, out parser))
-            {
-                return (MessageParser<T>)parser;
-            }
-
-            var newParser = new MessageParser<T>(() => new T());
-            _mutableParserCache[type] = newParser;
-            return newParser;
-        }
+        return (MessageParser<T>)_parserCache.GetOrAdd(typeof(T), _ => new MessageParser<T>(() => new T()));
     }
-
-    private static FrozenDictionary<Type, object> CreateParserCache()
-    {
-        // Cache will be populated lazily as parsers are requested
-        return FrozenDictionary<Type, object>.Empty;
-    }
-
-    private static readonly object _parserCacheLock = new();
-    private static volatile Dictionary<Type, object>? _mutableParserCache;
 }
 
 /// <summary>

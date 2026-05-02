@@ -1,9 +1,12 @@
 @page "/map"
 @using MyTransportAppWASM.Services.Interfaces
+@using MyTransportAppWASM.Models.Transport
+@using MyTransportAppWASM.Services
 @inject IJSRuntime JS
 @inject IGtfsService GtfsService
 @inject IConfiguration Config
 @inject ThemeService Theme
+@inject ILocationService LocationService
 @implements IAsyncDisposable
 
 <link href="css/map.css" rel="stylesheet"/>
@@ -29,12 +32,12 @@
             <div class="overlay-body">
                 <div class="control-group mb-3">
                     <label class="standard-label">Origin</label>
-                    <input id="origin-input" @bind="origin" class="standard-input" placeholder="Search origin..."/>
+                    <div id="origin-input" class="standard-input autocomplete-container"></div>
                 </div>
 
                 <div class="control-group mb-3">
                     <label class="standard-label">Destination</label>
-                    <input id="destination-input" @bind="destination" class="standard-input" placeholder="Search destination..."/>
+                    <div id="destination-input" class="standard-input autocomplete-container"></div>
                 </div>
 
                 <div class="control-group mb-3">
@@ -52,7 +55,7 @@
                 </button>
 
                 <div class="d-flex gap-2 mb-3">
-                    <button @onclick="() => RefreshLocation()" class="standard-button bg-light text-dark flex-grow-1" style="font-size: 0.85rem;">
+                    <button @onclick="() => RequestManualLocationUpdate()" class="standard-button bg-light text-dark flex-grow-1" style="font-size: 0.85rem;">
                         🎯 My Location
                     </button>
                     <button @onclick="RefreshBusPosition" class="standard-button bg-light text-dark flex-grow-1" style="font-size: 0.85rem;">
@@ -70,13 +73,9 @@
 </div>
 
 @code {
-
-    private record struct GeoPosition(double Latitude, double Longitude, double? Accuracy = null);
-
     private double FallbackLatitude;
     private double FallbackLongitude;
 
-    private IJSObjectReference? geoModule;
     private IJSObjectReference? mapModule;
     private DotNetObjectReference<Map>? objRef;
     private DateTime lastUpdated;
@@ -84,10 +83,10 @@
     private string origin = "";
     private string destination = "";
     private string mode = "TRANSIT";
-    private GeoPosition? lastPosition = null;
     private bool _isDisposed = false;
     private string locationStatus = "Initializing...";
     private bool isCollapsed = false;
+    private Dictionary<string, List<object>> _providerVehicleCache = new();
 
 
     private void ToggleCollapse() => isCollapsed = !isCollapsed;
@@ -103,8 +102,15 @@
     {
         if (mapModule != null && !_isDisposed)
         {
-            await mapModule.InvokeVoidAsync("setMapTheme", Theme.IsDarkMode ? "DARK" : "LIGHT");
-            await InvokeAsync(StateHasChanged);
+            try
+            {
+                await mapModule.InvokeVoidAsync("setMapTheme", Theme.IsDarkMode ? "DARK" : "LIGHT");
+                if (!_isDisposed) await InvokeAsync(StateHasChanged);
+            }
+            catch (Exception ex)
+            {
+                if (!_isDisposed) Console.Error.WriteLine($"Theme update failed: {ex.Message}");
+            }
         }
     }
 
@@ -115,27 +121,16 @@
         try
         {
             objRef = DotNetObjectReference.Create(this);
-
-            // Step 1: Start importing modules in parallel
-            var geoTask = JS.InvokeAsync<IJSObjectReference>("import", "./js/geolocation.js").AsTask();
-            var mapTask = JS.InvokeAsync<IJSObjectReference>("import", "./js/googleMap.js").AsTask();
-
-            await Task.WhenAll(geoTask, mapTask);
-
-            geoModule = geoTask.Result;
-            mapModule = mapTask.Result;
+            mapModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/googleMap.js?v=" + DateTime.Now.Ticks);
 
             if (_isDisposed) return;
 
-            // Step 2: Optimistic Map Initialization (Don't wait for GPS yet)
-            // Start map immediately with fallback while GPS is still finding its lock
-            _ = InitializeMapOptimisticallyAsync();
-
-            // Step 3: Background Initialization (Autocomplete & Timer)
+            // Initialize autocomplete concurrently so it's not blocked by GPS loading
             _ = InitializeAutocompleteAsync();
+            await InitializeMapOptimisticallyAsync();
 
             locationTimer = new System.Timers.Timer(15000);
-            locationTimer.Elapsed += OnLocationTimerElapsed;
+            locationTimer.Elapsed += async (s, e) => await InvokeAsync(RefreshBusPosition);
             locationTimer.AutoReset = true;
             locationTimer.Start();
         }
@@ -152,43 +147,28 @@
         try
         {
             var apiKey = Config["GoogleMaps:ApiKey"];
+            var initialLat = LocationService.LastKnownLocation?.Latitude ?? FallbackLatitude;
+            var initialLng = LocationService.LastKnownLocation?.Longitude ?? FallbackLongitude;
 
-            // 1. Initial render with fallback (FAST)
-            lastPosition = new GeoPosition(FallbackLatitude, FallbackLongitude);
-            await mapModule.InvokeVoidAsync("initGoogleMaps", "map", lastPosition.Value.Latitude, lastPosition.Value.Longitude, 14, apiKey, objRef, Theme.IsDarkMode ? "DARK" : "LIGHT");
+            await mapModule.InvokeVoidAsync("initGoogleMaps", "map", initialLat, initialLng, 14, apiKey, objRef, Theme.IsDarkMode ? "DARK" : "LIGHT");
 
             locationStatus = "Loading GPS...";
             StateHasChanged();
 
-            // 2. Fetch real GPS in background (can take several seconds)
-            var position = await GetGeoPositionAsync();
-            if (position is not null && !_isDisposed)
-            {
-                lastPosition = position;
-                await mapModule.InvokeVoidAsync("updateUserMarker", position.Value.Latitude, position.Value.Longitude);
-                locationStatus = "Live";
+            var position = await LocationService.GetCurrentLocationAsync();
+            if (_isDisposed) return;
 
-                // Fetch actual address instead of showing "My Location"
-                if (string.IsNullOrEmpty(origin))
-                {
-                    try
-                    {
-                        origin = await mapModule.InvokeAsync<string>("reverseGeocode", position.Value.Latitude, position.Value.Longitude);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.Error.WriteLine($"Reverse geocode failed: {ex.Message}");
-                    }
-                }
+            if (position is not null)
+            {
+                await mapModule.InvokeVoidAsync("updateUserMarker", position.Latitude, position.Longitude);
+                locationStatus = "Live";
+                await UpdateOriginFromLocation(position.Latitude, position.Longitude);
             }
             else
             {
                 locationStatus = "Using default location";
             }
 
-            lastUpdated = DateTime.Now;
-
-            // 3. Initial bus fetch AFTER map is ready
             await RefreshBusPosition();
             StateHasChanged();
         }
@@ -196,6 +176,22 @@
         {
             locationStatus = "Map error";
             Console.Error.WriteLine($"initGoogleMaps failed: {ex.Message}");
+        }
+    }
+
+    private async Task UpdateOriginFromLocation(double lat, double lng)
+    {
+        if (mapModule == null || _isDisposed || !string.IsNullOrEmpty(origin)) return;
+        try
+        {
+            origin = await mapModule.InvokeAsync<string>("reverseGeocode", lat, lng);
+            if (_isDisposed || mapModule == null) return;
+            await mapModule.InvokeVoidAsync("setAutocompleteValue", "origin-input", origin);
+        }
+        catch (Exception ex)
+        {
+            if (_isDisposed) return;
+            Console.Error.WriteLine($"Reverse geocode failed: {ex.Message}");
         }
     }
 
@@ -209,8 +205,7 @@
     [JSInvokable]
     public async Task UpdateUserPosition(double lat, double lng)
     {
-        lastPosition = new GeoPosition(lat, lng);
-        lastUpdated = DateTime.Now;
+        // This could be used to sync back to LocationService if needed
         await RefreshBusPosition();
         StateHasChanged();
     }
@@ -227,90 +222,51 @@
         if (mapModule is null || _isDisposed || objRef is null) return;
         var apiKey = Config["GoogleMaps:ApiKey"];
 
-        // Autocomplete can be initialized in parallel without blocking main UI
-        await Task.WhenAll(
-            mapModule.InvokeVoidAsync("initAutocomplete", "origin-input", objRef, "UpdateOrigin", apiKey).AsTask(),
-            mapModule.InvokeVoidAsync("initAutocomplete", "destination-input", objRef, "UpdateDestination", apiKey).AsTask()
-        );
-    }
-
-    private async void OnLocationTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
-    {
-        if (_isDisposed) return;
-        await InvokeAsync(async () =>
-        {
-            await RefreshBusPosition();
-        });
-    }
-
-    private async Task<GeoPosition?> GetGeoPositionAsync()
-    {
-        if (geoModule == null || _isDisposed) return null;
         try
         {
-            // Adding a small timeout logic here or just relying on the JS side
-            return await geoModule.InvokeAsync<GeoPosition?>("getUserLocation");
+            await Task.WhenAll(
+                mapModule.InvokeVoidAsync("initAutocomplete", "origin-input", objRef, "UpdateOrigin", apiKey).AsTask(),
+                mapModule.InvokeVoidAsync("initAutocomplete", "destination-input", objRef, "UpdateDestination", apiKey).AsTask()
+            );
         }
-        catch
+        catch (Exception ex)
         {
-            return null;
+            if (!_isDisposed) Console.Error.WriteLine($"Autocomplete init failed: {ex.Message}");
         }
     }
 
-    private async Task RefreshLocation(bool updateOrigin = true)
+    private async Task RequestManualLocationUpdate()
     {
-        if (mapModule == null || _isDisposed) return;
+        var position = await LocationService.GetCurrentLocationAsync();
+        if (_isDisposed || position == null || mapModule == null) return;
 
-        var position = await GetGeoPositionAsync();
-        if (position is null) return;
-
-        if (lastPosition == null || Math.Abs(lastPosition.Value.Latitude - position.Value.Latitude) > 0.0001)
+        try
         {
-            lastPosition = position.Value;
-            await mapModule.InvokeVoidAsync("updateUserMarker", position.Value.Latitude, position.Value.Longitude);
-            lastUpdated = DateTime.Now;
-
-            if (updateOrigin)
-            {
-                try
-                {
-                    origin = await mapModule.InvokeAsync<string>("reverseGeocode", position.Value.Latitude, position.Value.Longitude);
-                }
-                catch (Exception ex)
-                {
-                    Console.Error.WriteLine($"Reverse geocode failed: {ex.Message}");
-                }
-            }
-
+            await mapModule.InvokeVoidAsync("updateUserMarker", position.Latitude, position.Longitude);
+            origin = await mapModule.InvokeAsync<string>("reverseGeocode", position.Latitude, position.Longitude);
+            
+            if (_isDisposed || mapModule == null) return;
+            await mapModule.InvokeVoidAsync("setAutocompleteValue", "origin-input", origin);
+            await RefreshBusPosition();
             StateHasChanged();
         }
-        else if (updateOrigin)
+        catch (Exception ex)
         {
-            // Even if position hasn't changed much, if the user explicitly clicked "My Location", fetch the address
-            try
-            {
-                origin = await mapModule.InvokeAsync<string>("reverseGeocode", position.Value.Latitude, position.Value.Longitude);
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Reverse geocode failed: {ex.Message}");
-            }
-
-            StateHasChanged();
+            if (_isDisposed) return;
+            Console.Error.WriteLine($"Manual location update failed: {ex.Message}");
         }
     }
-
-    private record TransportProvider(string Name, string Endpoint, double CenterLat, double CenterLng, double RadiusKm);
 
     private async Task RefreshBusPosition()
     {
-        if (mapModule == null || _isDisposed || lastPosition == null) return;
+        var pos = LocationService.LastKnownLocation;
+        if (mapModule == null || _isDisposed || pos == null) return;
 
         try
         {
             var providers = Config.GetSection("TransportProviders").Get<List<TransportProvider>>() ?? new();
             var nearbyProviders = providers.Where(p =>
-                CalculateDistance(lastPosition.Value.Latitude, lastPosition.Value.Longitude, p.CenterLat, p.CenterLng) <= p.RadiusKm
+                CalculateDistance(pos.Latitude, pos.Longitude, p.CenterLat, p.CenterLng) <= p.RadiusKm
             ).ToList();
 
             if (!nearbyProviders.Any())
@@ -320,15 +276,16 @@
                 return;
             }
 
-            var allVehicles = new List<object>();
             foreach (var provider in nearbyProviders)
             {
                 var feed = await GtfsService.GetBusPositionsAsync(provider.Endpoint);
+                if (_isDisposed) return;
+                
                 if (feed?.Entity == null) continue;
 
-                allVehicles.AddRange(feed.Entity
+                _providerVehicleCache[provider.Endpoint] = feed.Entity
                     .Where(e => e.Vehicle?.Position != null)
-                    .Select(e => new
+                    .Select(e => (object)new
                     {
                         tripId = e.Vehicle.Trip?.TripId,
                         routeId = e.Vehicle.Trip?.RouteId,
@@ -338,8 +295,15 @@
                         bearing = e.Vehicle.Position.Bearing,
                         speed = e.Vehicle.Position.Speed,
                         timestamp = e.Vehicle.Timestamp
-                    }));
+                    }).ToList();
             }
+
+            if (_isDisposed || mapModule == null) return;
+
+            var allVehicles = nearbyProviders
+                .Where(p => _providerVehicleCache.ContainsKey(p.Endpoint))
+                .SelectMany(p => _providerVehicleCache[p.Endpoint])
+                .ToList();
 
             await mapModule.InvokeVoidAsync("syncMarkers", allVehicles);
             lastUpdated = DateTime.Now;
@@ -348,20 +312,20 @@
         }
         catch (Exception ex)
         {
+            if (_isDisposed) return;
             Console.Error.WriteLine($"RefreshBusPosition failed: {ex.Message}");
         }
     }
 
     private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
     {
-        var R = 6371; // Radius of the earth in km
+        var R = 6371;
         var dLat = ToRadians(lat2 - lat1);
         var dLon = ToRadians(lon2 - lon1);
         var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
                 Math.Cos(ToRadians(lat1)) * Math.Cos(ToRadians(lat2)) *
                 Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
-        var c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
-        return R * c;
+        return R * 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
     }
 
     private double ToRadians(double deg) => deg * (Math.PI / 180);
@@ -375,6 +339,7 @@
         }
         catch (Exception ex)
         {
+            if (_isDisposed) return;
             Console.Error.WriteLine($"Route display failed: {ex.Message}");
         }
     }
@@ -385,14 +350,11 @@
         Theme.OnThemeChanged -= OnThemeChanged;
         if (locationTimer is not null)
         {
-            locationTimer.Elapsed -= OnLocationTimerElapsed;
             locationTimer.Stop();
             locationTimer.Dispose();
         }
 
         objRef?.Dispose();
-        if (geoModule is not null) await geoModule.DisposeAsync();
         if (mapModule is not null) await mapModule.DisposeAsync();
     }
-
 }

@@ -1,7 +1,12 @@
 let mapsApiPromise = null;
-let map, userMarker, directionsService, directionsRenderer, infoWindow;
+let map, userMarker, infoWindow;
 let storedApiKey = null;
 const activeMarkers = Object.create(null);
+const autocompletes = Object.create(null);
+
+// Route rendering state (replaces legacy DirectionsRenderer)
+let routePolylines = [];
+let routeMarkers = [];
 
 
 
@@ -45,10 +50,9 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 	if (!el) throw new Error(`Element #${elementId} not found.`);
 
 	// Using modern importLibrary pattern
-	const [{ Map }, { AdvancedMarkerElement }, { InfoWindow }] = await Promise.all([
+	const [{ Map, InfoWindow }, { AdvancedMarkerElement }] = await Promise.all([
 		google.maps.importLibrary("maps"),
 		google.maps.importLibrary("marker"),
-		google.maps.importLibrary("maps"),
 	]);
 
 	map = new Map(el, {
@@ -66,7 +70,6 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 	// Close infoWindow when clicking anywhere else on the map
 	map.addListener("click", () => {
 		infoWindow.close();
-		infoWindow.setAnchor(null);
 	});
 
 	const pin = document.createElement("div");
@@ -81,17 +84,6 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 		content: pin,
 	});
 
-	directionsService = new google.maps.DirectionsService();
-	directionsRenderer = new google.maps.DirectionsRenderer({
-		map,
-		suppressMarkers: true,
-		preserveViewport: true,
-		polylineOptions: {
-			strokeColor: "#4285F4",
-			strokeWeight: 5,
-		},
-	});
-
 	// Add dragend listener to update origin in Blazor
 	userMarker.addListener("dragend", async () => {
 		const newPos = userMarker.position;
@@ -100,6 +92,9 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 			if (dotNetHelper) {
 				await dotNetHelper.invokeMethodAsync("UpdateOrigin", address);
 				await dotNetHelper.invokeMethodAsync("UpdateUserPosition", newPos.lat, newPos.lng);
+				
+				// Update the origin autocomplete widget value visually
+				setAutocompleteValue("origin-input", address);
 			}
 		} catch (err) {
 			console.error("Dragend geocode failed:", err);
@@ -116,34 +111,62 @@ export async function setMapTheme(theme) {
 }
 
 /**
- * Initializes Autocomplete using the Places (New) compatible patterns.
+ * Initializes Autocomplete using the new PlaceAutocompleteElement (replaces legacy Autocomplete widget).
+ * The new widget is a custom HTML element appended inside the container identified by elementId.
  */
 export async function initAutocomplete(elementId, dotNetHelper, methodName, apiKey) {
 	await loadGoogleMaps(apiKey);
-	const { Autocomplete } = await google.maps.importLibrary("places");
-	
-	const input = document.getElementById(elementId);
-	if (!input) return;
+	const { PlaceAutocompleteElement } = await google.maps.importLibrary("places");
 
-	// The standard Autocomplete works with Places API (New) enabled in Console
-	const autocomplete = new Autocomplete(input, {
-		fields: ["formatted_address", "geometry", "name"],
-		strictBounds: false,
-	});
+	const container = document.getElementById(elementId);
+	if (!container) return;
 
-	autocomplete.addListener("place_changed", () => {
-		const place = autocomplete.getPlace();
+	// Create the new PlaceAutocompleteElement widget
+	const placeAutocomplete = new PlaceAutocompleteElement({});
+
+	// Style the widget to fill its parent container
+	placeAutocomplete.style.width = "100%";
+
+	// Clear the container and append the new element
+	container.innerHTML = "";
+	container.appendChild(placeAutocomplete);
+	autocompletes[elementId] = placeAutocomplete;
+
+	// Listen for place selection via the new gmp-select event
+	placeAutocomplete.addEventListener("gmp-select", async ({ placePrediction }) => {
+		const place = placePrediction.toPlace();
+		await place.fetchFields({ fields: ["displayName", "formattedAddress", "location"] });
+
+		const displayText = place.displayName || place.formattedAddress;
+
 		if (dotNetHelper) {
-			dotNetHelper.invokeMethodAsync(methodName, place.name || place.formatted_address);
+			dotNetHelper.invokeMethodAsync(methodName, displayText);
 
-			if (methodName === "UpdateOrigin" && place.geometry && place.geometry.location) {
-				const lat = place.geometry.location.lat();
-				const lng = place.geometry.location.lng();
+			if (methodName === "UpdateOrigin" && place.location) {
+				const lat = place.location.lat();
+				const lng = place.location.lng();
 				updateUserMarker(lat, lng);
 				dotNetHelper.invokeMethodAsync("UpdateUserPosition", lat, lng);
 			}
 		}
 	});
+}
+
+/**
+ * Updates the text value of a PlaceAutocompleteElement widget.
+ */
+export function setAutocompleteValue(elementId, value) {
+	const widget = autocompletes[elementId];
+	if (widget) {
+		widget.value = value || "";
+		
+		// Also find the internal input and trigger an input event if needed
+		// although setting .value on the web component should suffice for display.
+		const internalInput = widget.querySelector('input');
+		if (internalInput) {
+			internalInput.value = value || "";
+		}
+	}
 }
 
 export async function updateUserMarker(lat, lng) {
@@ -157,29 +180,74 @@ export async function updateUserMarker(lat, lng) {
 	}
 }
 
+/**
+ * Clears any previously rendered route polylines and markers from the map.
+ */
+export function clearRoute() {
+	routePolylines.forEach(p => p.setMap(null));
+	routePolylines = [];
+	routeMarkers.forEach(m => (m.map = null));
+	routeMarkers = [];
+}
+
+/**
+ * Computes and renders a route using the new Routes library (Route.computeRoutes).
+ * Replaces legacy DirectionsService.route() + DirectionsRenderer.setDirections().
+ */
 export async function showRoute(origin, destination, travelMode = "TRANSIT") {
 	await loadGoogleMaps();
-	if (!directionsService || !directionsRenderer)
-		throw new Error("Map not initialized.");
+	if (!map) throw new Error("Map not initialized.");
+
+	const { Route } = await google.maps.importLibrary("routes");
+
+	// Clear any existing route before drawing a new one
+	clearRoute();
 
 	const request = {
 		origin,
 		destination,
-		travelMode: google.maps.TravelMode[travelMode],
+		travelMode,
+		fields: ["path"],
 	};
 
-	const result = await directionsService.route(request);
-	directionsRenderer.setDirections(result);
+	const { routes } = await Route.computeRoutes(request);
+
+	if (!routes || routes.length === 0) {
+		throw new Error("No routes found.");
+	}
+
+	// Draw polylines on the map
+	routePolylines = routes[0].createPolylines();
+	routePolylines.forEach(polyline => {
+		polyline.setOptions({
+			strokeColor: "#4285F4",
+			strokeWeight: 5,
+		});
+		polyline.setMap(map);
+	});
+
+	// Draw origin/destination markers
+	try {
+		routeMarkers = await routes[0].createWaypointAdvancedMarkers();
+		routeMarkers.forEach(marker => (marker.map = map));
+	} catch {
+		// Marker creation is optional; some route types may not support it
+	}
 }
 
 export async function showRouteByName(originName, destinationName, travelMode = "TRANSIT") {
 	await loadGoogleMaps();
-	const [originLoc, destinationLoc] = await Promise.all([
-		geocodePlaceName(originName),
-		geocodePlaceName(destinationName)
-	]);
+	try {
+		const [originLoc, destinationLoc] = await Promise.all([
+			geocodePlaceName(originName),
+			geocodePlaceName(destinationName)
+		]);
 
-	await showRoute(originLoc, destinationLoc, travelMode);
+		await showRoute(originLoc, destinationLoc, travelMode);
+	} catch (err) {
+		console.error("showRouteByName failed:", err);
+		throw err;
+	}
 }
 
 export async function geocodePlaceName(name) {
@@ -215,77 +283,86 @@ export async function reverseGeocode(lat, lng) {
 }
 
 export async function syncMarkers(locations) {
+	if (!map || !infoWindow) return;
+	
+	// Safety check for Blazor interop
+	if (!locations || !Array.isArray(locations)) {
+		console.warn("syncMarkers: locations is not an array", locations);
+		return;
+	}
+
 	await loadGoogleMaps();
 	const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
 
-	const currentIds = new Set(locations.map(l => l.vehicleId));
+	try {
+		const currentIds = new Set(locations.map(l => l.vehicleId).filter(id => id != null));
 
-	// Remove old markers
-	for (const id in activeMarkers) {
-		if (!currentIds.has(id)) {
-			activeMarkers[id].map = null;
-			delete activeMarkers[id];
+		// Remove old markers
+		for (const id in activeMarkers) {
+			if (!currentIds.has(id)) {
+				activeMarkers[id].map = null;
+				delete activeMarkers[id];
+			}
 		}
-	}
 
-	locations.forEach(loc => {
-		const id = loc.vehicleId;
-		const pos = { lat: loc.lat, lng: loc.lng };
-		
-		if (activeMarkers[id]) {
-			const marker = activeMarkers[id];
-			const oldLoc = marker.busData;
-			marker.position = pos;
-
-			// Convert speed if provided (GTFS-RT speed is m/s)
-			// If speed is 0 or missing, assume not provided and show "-"
-			const speedKmh = (loc.speed || 0) * 3.6;
-			loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
+		locations.forEach(loc => {
+			const id = loc.vehicleId;
+			if (id == null) return;
 			
-			marker.busData = loc;
-		} else {
-			const el = document.createElement("div");
-			el.textContent = loc.icon || "🚌";
-			el.className = "bus-marker";
-			el.style.fontSize = "28px";
+			const pos = { lat: loc.lat, lng: loc.lng };
+			
+			if (activeMarkers[id]) {
+				const marker = activeMarkers[id];
+				marker.position = pos;
 
-			const marker = new AdvancedMarkerElement({
-				position: pos,
-				map,
-				title: `Route ${loc.routeId} - ${id}`,
-				content: el,
-			});
+				// Convert speed if provided (GTFS-RT speed is m/s)
+				const speedKmh = (loc.speed || 0) * 3.6;
+				loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
+				
+				marker.busData = loc;
+			} else {
+				const el = document.createElement("div");
+				el.textContent = loc.icon || "🚌";
+				el.className = "bus-marker";
+				el.style.fontSize = "28px";
 
-			// Initial speed conversion (GTFS-RT speed is m/s)
-			const speedKmh = (loc.speed || 0) * 3.6;
-			loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
-			marker.busData = loc;
-
-			marker.addListener("click", () => {
-				// If the same marker is clicked again, toggle the info window
-				if (infoWindow.getAnchor() === marker) {
-					infoWindow.close();
-					infoWindow.setAnchor(null);
-					return;
-				}
-
-				const currentLoc = marker.busData;
-				const content = `
-					<div class="bus-info-window">
-						<div class="bus-info-header">Bus ${id}</div>
-						<div class="bus-info-item"><b>Route</b> <span>${currentLoc.routeId}</span></div>
-						<div class="bus-info-item"><b>Speed</b> <span>${currentLoc.displaySpeed}${currentLoc.displaySpeed === "-" ? "" : " km/h"}</span></div>
-						<div class="bus-info-item"><b>Updated</b> <span>${new Date(currentLoc.timestamp * 1000).toLocaleTimeString()}</span></div>
-					</div>
-				`;
-				infoWindow.setContent(content);
-				infoWindow.open({
-					anchor: marker,
+				const marker = new AdvancedMarkerElement({
+					position: pos,
 					map,
+					title: `Route ${loc.routeId || 'Unknown'} - ${id}`,
+					content: el,
 				});
-			});
 
-			activeMarkers[id] = marker;
-		}
-	});
+				const speedKmh = (loc.speed || 0) * 3.6;
+				loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
+				marker.busData = loc;
+
+				marker.addListener("gmp-click", () => {
+					if (infoWindow.get("anchor") === marker) {
+						infoWindow.close();
+						return;
+					}
+
+					const currentLoc = marker.busData;
+					const content = `
+						<div class="bus-info-window">
+							<div class="bus-info-header">Bus ${id}</div>
+							<div class="bus-info-item"><b>Route</b> <span>${currentLoc.routeId || 'N/A'}</span></div>
+							<div class="bus-info-item"><b>Speed</b> <span>${currentLoc.displaySpeed}${currentLoc.displaySpeed === "-" ? "" : " km/h"}</span></div>
+							<div class="bus-info-item"><b>Updated</b> <span>${new Date(currentLoc.timestamp * 1000).toLocaleTimeString()}</span></div>
+						</div>
+					`;
+					infoWindow.setContent(content);
+					infoWindow.open({
+						anchor: marker,
+						map,
+					});
+				});
+
+				activeMarkers[id] = marker;
+			}
+		});
+	} catch (err) {
+		console.error("syncMarkers internal error:", err);
+	}
 }

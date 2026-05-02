@@ -43,12 +43,22 @@ namespace MyTransportAppWASM.Models.Weather
     public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
   }
 
-  public class WeatherProviderOptions
+  public record WeatherProviderOptions
   {
     public string Name { get; set; } = string.Empty;
     public string Source { get; set; } = string.Empty;
     public string? Endpoint { get; set; }
+    public Dictionary<string, string> Suffixes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string? ApiKey { get; set; }
     public bool Enabled { get; set; }
+  }
+
+  public class WeatherOptions
+  {
+    public WeatherProviderOptions MetMalaysia { get; set; } = new();
+    public WeatherProviderOptions SingaporeNEA { get; set; } = new();
+    public WeatherProviderOptions Radar { get; set; } = new();
+    public List<WeatherProviderOptions> Outlooks { get; set; } = new();
+    public WeatherProviderOptions Weatherbit { get; set; } = new();
   }
 }

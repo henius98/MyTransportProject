@@ -1,0 +1,72 @@
+@using MyTransportAppWASM.Models.Weather
+
+<div class="standard-card">
+    <div class="d-flex align-items-center justify-content-between mb-3">
+        <div>
+            <h3 class="m-0" style="font-size: 1.25rem;">@Provider.Provider</h3>
+            <div class="text-dim" style="font-size: 0.75rem;">@Provider.Source</div>
+        </div>
+        <span class="standard-badge @GetStatusClass(Provider.Status)">@Provider.Status</span>
+    </div>
+    
+    @if (!string.IsNullOrWhiteSpace(Provider.Note))
+    {
+        <div class="mb-2 text-dim" style="font-size: 13px;">@Provider.Note</div>
+    }
+
+    @if (Provider.Periods != null)
+    {
+        @foreach (var slice in Provider.Periods)
+        {
+            <div class="period pt-3 mt-3 border-top border-secondary border-opacity-10">
+                <div class="d-flex justify-content-between">
+                    <strong>@slice.Label</strong>
+                    <span class="text-dim" style="font-size: 12px;">@slice.Time.ToLocalTime().ToString("ddd HH:mm")</span>
+                </div>
+                <div class="d-flex flex-wrap gap-2" style="font-size: 14px;">
+                    @if (slice.TemperatureC.HasValue)
+                    {
+                        <span>@($"{slice.TemperatureC:0.#}°C")</span>
+                    }
+                    @if (slice.PrecipitationMm.HasValue)
+                    {
+                        <span>@($"{slice.PrecipitationMm:0.#} mm")</span>
+                    }
+                    @if (slice.ProbabilityOfRain.HasValue)
+                    {
+                        <span>@($"{slice.ProbabilityOfRain * 100:0}% rain")</span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(slice.Wind))
+                    {
+                        <span>@slice.Wind</span>
+                    }
+                </div>
+                @if (!string.IsNullOrWhiteSpace(slice.Summary))
+                {
+                    <div class="text-dim" style="font-size: 13px;">@slice.Summary</div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public required WeatherProviderResult Provider { get; set; }
+
+    private static string GetStatusClass(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status)) return "status-muted";
+        
+        if (status.Contains("Live", StringComparison.OrdinalIgnoreCase)) return "status-live";
+
+        if (status.Contains("HTTP", StringComparison.OrdinalIgnoreCase) ||
+            status.Contains("Unavailable", StringComparison.OrdinalIgnoreCase) ||
+            status.Contains("Error", StringComparison.OrdinalIgnoreCase))
+        {
+            return "status-error";
+        }
+
+        return "status-muted";
+    }
+}

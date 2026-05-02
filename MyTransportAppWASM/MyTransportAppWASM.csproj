@@ -5,7 +5,6 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
-    <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,10 +21,6 @@
 
   <ItemGroup>
     <Protobuf Include="Models\Protos\gtfs-realtime.proto" GrpcServices="None" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ServiceWorker Include="wwwroot\service-worker.js" PublishedContent="wwwroot\service-worker.published.js" />
   </ItemGroup>
 
 </Project>

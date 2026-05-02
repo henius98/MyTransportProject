@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using MyTransportAppWASM.Services;
 using MyTransportAppWASM.Services.Interfaces;
+using MyTransportAppWASM.Models.Weather;
 
 namespace MyTransportAppWASM
 {
@@ -9,15 +10,20 @@ namespace MyTransportAppWASM
     {
         public static async Task Main(string[] args)
         {
+            // Automatically loads appsettings.json and appsettings.{Environment}.json from wwwroot.
+            // The framework fetches these via HTTP and merges them into builder.Configuration.
             var builder = WebAssemblyHostBuilder.CreateDefault(args);
             builder.RootComponents.Add<App>("#app");
             builder.RootComponents.Add<HeadOutlet>("head::after");
+
+            builder.Services.Configure<WeatherOptions>(builder.Configuration.GetSection("WeatherProviders"));
 
             builder.Services.AddSingleton<IFormFactor, FormFactor>();
             builder.Services.AddHttpClient<IGtfsService, GtfsService>();
             builder.Services.AddHttpClient<IWeatherPlannerService, WeatherPlannerService>();
             builder.Services.AddHttpClient<IGeocodingService, GeocodingService>();
             builder.Services.AddScoped<ThemeService>();
+            builder.Services.AddScoped<ILocationService, LocationService>();
 
             builder.Services.AddOidcAuthentication(options =>
             {

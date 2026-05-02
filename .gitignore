@@ -361,3 +361,8 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Environment-specific appsettings (contains API keys and secrets)
+**/wwwroot/appsettings.Development.json
+
+.codex

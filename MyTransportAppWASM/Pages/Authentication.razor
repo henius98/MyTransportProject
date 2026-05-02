@@ -3,6 +3,8 @@
 @using Microsoft.AspNetCore.Components.WebAssembly.Authentication
 @inject IJSRuntime JS
 @inject NavigationManager Navigation
+@using System.Threading
+@implements IDisposable
 
 <div class="auth-popup-container" @onclick="CloseWindow">
     <div class="auth-modal" @onclick:stopPropagation="true">
@@ -47,7 +49,7 @@
                     </div>
                     <div class="stat-divider"></div>
                     <div class="stat-item">
-                        <span class="stat-value">6s</span>
+                        <span class="stat-value">@(_countdown)s</span>
                         <span class="stat-label">Auto-Close</span>
                     </div>
                 </div>
@@ -60,22 +62,75 @@
 @code {
     [Parameter] public string? Action { get; set; }
 
+    private int _countdown = 6;
+    private CancellationTokenSource? _timerCts;
+
+    public void Dispose()
+    {
+        _timerCts?.Cancel();
+        _timerCts?.Dispose();
+    }
+
     private void CloseWindow()
     {
+        _timerCts?.Cancel();
         Navigation.NavigateTo("/");
     }
 
     private void HandleSuccess()
     {
-        // Start 6 second auto-close timer to return to homepage
+        if (Action == "login" || Action == "login-callback")
+        {
+            _ = JS.InvokeVoidAsync("appAuth.clearExplicitLogout");
+        }
+
+        // Cancel any existing timer to allow restarting (e.g. if transitioning states)
+        _timerCts?.Cancel();
+        _timerCts?.Dispose();
+        _timerCts = new CancellationTokenSource();
+        var token = _timerCts.Token;
+
+        _countdown = 6;
+
+        // Start 6 second auto-close timer to return to homepage with dynamic countdown
         _ = Task.Run(async () => {
-            await Task.Delay(6000);
-            Navigation.NavigateTo("/");
+            try
+            {
+                await InvokeAsync(StateHasChanged);
+
+                for (int i = 5; i >= 0; i--)
+                {
+                    await Task.Delay(1000, token);
+                    if (token.IsCancellationRequested) return;
+
+                    _countdown = i;
+                    await InvokeAsync(StateHasChanged);
+                }
+
+                // Brief pause at 0s before navigating
+                await Task.Delay(300, token);
+
+                // Only navigate if we're still on the authentication page and not cancelled
+                if (!token.IsCancellationRequested && Navigation.Uri.Contains("/authentication/"))
+                {
+                    Navigation.NavigateTo("/");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Timer was cancelled
+            }
         });
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        // Internal logic for RemoteAuthenticatorView
+        if (firstRender && Action == "logout")
+        {
+            // Purge all OIDC-related keys from sessionStorage to prevent
+            // the auth library from silently restoring the Google session on refresh.
+            await JS.InvokeVoidAsync("appAuth.noteExplicitLogout");
+            await JS.InvokeVoidAsync("appAuth.purgeOidcState");
+        }
     }
 }

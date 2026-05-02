@@ -6,16 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MyTransportAppWASM</title>
     <base href="/" />
-    <link rel="preload" id="webassembly" />
     <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" />
     <link rel="stylesheet" href="app.css" />
-    <link rel="icon" type="image/png" href="favicon.png" />
+    <link rel="icon" type="image/svg+xml" href="myTransport.svg" />
     <link href="MyTransportAppWASM.styles.css" rel="stylesheet" />
     <link href="manifest.webmanifest" rel="manifest" />
-    <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png" />
-    <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png" />
+    <link rel="apple-touch-icon" href="myTransport.svg" />
     <link rel="stylesheet" href="css/auth-modal.css" />
-    <script type="importmap"></script>
+
 </head>
 
 <body>
@@ -40,13 +38,44 @@
                 return localStorage.getItem('hasSeenWelcome') === 'true';
             }
         };
+
+        // Purge all OIDC session state to prevent silent re-authentication after logout.
+        // The Blazor AuthenticationService.js stores tokens under 'oidc.*' keys in sessionStorage.
+        window.appAuth = {
+            explicitLogoutKey: 'mytransport.explicitLogout',
+            noteExplicitLogout: function () {
+                sessionStorage.setItem(this.explicitLogoutKey, 'true');
+            },
+            clearExplicitLogout: function () {
+                sessionStorage.removeItem(this.explicitLogoutKey);
+            },
+            wasExplicitLogout: function () {
+                return sessionStorage.getItem(this.explicitLogoutKey) === 'true';
+            },
+            purgeOidcState: function () {
+                var keysToRemove = [];
+                for (var i = 0; i < sessionStorage.length; i++) {
+                    var key = sessionStorage.key(i);
+                    if (key && key !== this.explicitLogoutKey && (key.startsWith('oidc.') || key.startsWith('Microsoft.AspNetCore.Components.WebAssembly.Authentication'))) {
+                        keysToRemove.push(key);
+                    }
+                }
+                keysToRemove.forEach(function (k) { sessionStorage.removeItem(k); });
+                console.log('[appAuth] Purged ' + keysToRemove.length + ' OIDC key(s) from sessionStorage');
+            }
+        };
     </script>
     <script src="_content/Microsoft.AspNetCore.Components.WebAssembly.Authentication/AuthenticationService.js"></script>
     <script src="_framework/blazor.webassembly.js"></script>
-    <script type="module" src="js/googleMap.js"></script>
-    <script type="module" src="js/geolocation.js"></script>
     <script src="js/auth.js" type="module"></script>
-    <script>navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });</script>
+    <script>
+        // Unregister any previously cached service workers to suppress stale no-op fetch handler warnings
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function (registrations) {
+                for (let reg of registrations) { reg.unregister(); }
+            });
+        }
+    </script>
 </body>
 
 </html>

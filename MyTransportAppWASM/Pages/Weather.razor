@@ -3,8 +3,10 @@
 @using MyTransportAppWASM.Models.Weather
 @using MyTransportAppWASM.Services.Interfaces
 @using MyTransportAppWASM.Services
+@using MyTransportAppWASM.Pages.Components
 @inject IWeatherPlannerService WeatherPlannerService
 @inject IGeocodingService GeocodingService
+@inject ILocationService LocationService
 
 <PageTitle>Trip Weather Planner</PageTitle>
 
@@ -53,7 +55,7 @@
       <button class="standard-button standard-button-primary" @onclick="LoadPlanAsync" disabled="@isLoading">
         @(isLoading ? "Loading..." : "Get forecast")
       </button>
-      <button class="standard-button bg-light text-dark" @onclick="ResetToMalaysia" disabled="@isLoading">Reset to KL</button>
+      <button class="standard-button bg-light text-dark" @onclick="ResetToLocalLocation" disabled="@isLoading">Use My Location</button>
     </div>
   </div>
 </div>
@@ -71,19 +73,6 @@
                 <li class="mb-2">🌦️ <strong>Baseline:</strong> Real-time forecasts from high-availability providers.</li>
                 <li class="mb-2">📅 <strong>Outlooks:</strong> Multi-day weather trends for your return trip.</li>
             </ul>
-            
-            <div class="app-stats mb-3">
-                <div class="stat-item">
-                    <span class="stat-value">Open-Meteo</span>
-                    <span class="stat-label">Source</span>
-                </div>
-                <div class="stat-divider"></div>
-                <div class="stat-item">
-                    <span class="stat-value">Google</span>
-                    <span class="stat-label">Geocoding</span>
-                </div>
-            </div>
-
             <button class="standard-button standard-button-primary w-100" @onclick="ToggleHelp">Got it!</button>
         </div>
     </div>
@@ -124,56 +113,11 @@ else if (plan is not null)
   </div>
 
   <div class="planner-grid">
-    @foreach (WeatherProviderResult provider in GetProviders())
+    <WeatherCard Provider="plan.Baseline" />
+    <WeatherCard Provider="plan.Radar" />
+    @foreach (var outlook in plan.Outlooks)
     {
-      <div class="standard-card">
-        <div class="d-flex align-items-center justify-content-between mb-3">
-          <div>
-            <h3 class="m-0" style="font-size: 1.25rem;">@provider.Provider</h3>
-            <div class="text-dim" style="font-size: 0.75rem;">@provider.Source</div>
-          </div>
-          <span class="standard-badge @GetStatusClass(provider.Status)">@provider.Status</span>
-        </div>
-        @if (!string.IsNullOrWhiteSpace(provider.Note))
-        {
-          <div class="mb-2 text-dim" style="font-size: 13px;">@provider.Note</div>
-        }
-
-        @if (provider.Periods != null)
-        {
-          @foreach (WeatherTimeSlice slice in provider.Periods)
-          {
-            <div class="period pt-3 mt-3 border-top border-secondary border-opacity-10">
-              <div class="d-flex justify-content-between">
-                <strong>@slice.Label</strong>
-                <span class="text-dim" style="font-size: 12px;">@slice.Time.ToLocalTime().ToString("ddd HH:mm")</span>
-              </div>
-              <div class="d-flex flex-wrap gap-2" style="font-size: 14px;">
-                @if (slice.TemperatureC.HasValue)
-                {
-                  <span>@($"{slice.TemperatureC:0.#}°C")</span>
-                }
-                @if (slice.PrecipitationMm.HasValue)
-                {
-                  <span>@($"{slice.PrecipitationMm:0.#} mm")</span>
-                }
-                @if (slice.ProbabilityOfRain.HasValue)
-                {
-                  <span>@($"{slice.ProbabilityOfRain * 100:0}% rain")</span>
-                }
-                @if (!string.IsNullOrWhiteSpace(slice.Wind))
-                {
-                  <span>@slice.Wind</span>
-                }
-              </div>
-              @if (!string.IsNullOrWhiteSpace(slice.Summary))
-              {
-                <div class="text-dim" style="font-size: 13px;">@slice.Summary</div>
-              }
-            </div>
-          }
-        }
-      </div>
+      <WeatherCard Provider="outlook" />
     }
   </div>
 }
@@ -198,8 +142,17 @@ else if (plan is not null)
 
   protected override async Task OnInitializedAsync()
   {
-    // Ensure small delay to allow UI to settle and prevent transient start-up errors
     await Task.Yield();
+    
+    // Try to get current location automatically
+    var pos = await LocationService.GetCurrentLocationAsync();
+    if (pos != null)
+    {
+        query.Latitude = pos.Latitude;
+        query.Longitude = pos.Longitude;
+        query.PlaceName = "Current Location";
+    }
+
     await LoadPlanAsync();
   }
 
@@ -221,13 +174,13 @@ else if (plan is not null)
           }
           else
           {
-              error = "Could not find that location. Please try a more specific name.";
+              error = "Could not find that location.";
           }
       }
       catch (Exception ex)
       {
-          error = "Geocoding service is temporarily unavailable.";
-          Console.Error.WriteLine($"Geocoding error: {ex.Message}");
+          error = "Geocoding error.";
+          Console.Error.WriteLine(ex);
       }
       finally
       {
@@ -238,25 +191,7 @@ else if (plan is not null)
 
   private async Task HandleKeyUp(KeyboardEventArgs e)
   {
-      if (e.Key == "Enter")
-      {
-          await SearchLocation();
-      }
-  }
-
-  private IEnumerable<WeatherProviderResult> GetProviders()
-  {
-    if (plan is null)
-    {
-      return Enumerable.Empty<WeatherProviderResult>();
-    }
-
-    var list = new List<WeatherProviderResult>();
-    if (plan.Baseline != null) list.Add(plan.Baseline);
-    if (plan.Radar != null) list.Add(plan.Radar);
-    if (plan.Outlooks != null) list.AddRange(plan.Outlooks);
-
-    return list.Where(p => p != null);
+      if (e.Key == "Enter") await SearchLocation();
   }
 
   private async Task LoadPlanAsync()
@@ -271,13 +206,12 @@ else if (plan is not null)
     {
       query.Departure = departureDate.HasValue ? new DateTimeOffset(departureDate.Value) : null;
       query.Return = returnDate.HasValue ? new DateTimeOffset(returnDate.Value) : null;
-
       plan = await WeatherPlannerService.GetWeatherPlanAsync(query);
     }
     catch (Exception ex)
     {
-      error = "Unable to load the weather plan right now. Please try again.";
-      Console.Error.WriteLine($"Weather planner component error: {ex.Message}");
+      error = "Unable to load weather.";
+      Console.Error.WriteLine(ex);
     }
     finally
     {
@@ -286,49 +220,21 @@ else if (plan is not null)
     }
   }
 
-  private async Task ResetToMalaysia()
+  private async Task ResetToLocalLocation()
   {
-    query = new WeatherQuery
+    var pos = await LocationService.GetCurrentLocationAsync();
+    if (pos != null)
     {
-      PlaceName = "Kuala Lumpur Sentral",
-      Latitude = 3.1347,
-      Longitude = 101.6869,
-      Departure = DateTimeOffset.Now.Date,
-      Return = DateTimeOffset.Now.Date.AddDays(3)
-    };
-
-    departureDate = query.Departure?.Date;
-    returnDate = query.Return?.Date;
-
-    await LoadPlanAsync();
-  }
-
-  private static string GetStatusClass(string? status)
-  {
-    if (string.IsNullOrWhiteSpace(status)) return "status-muted";
-    
-    if (status.Contains("Live", StringComparison.OrdinalIgnoreCase))
-    {
-      return "status-live";
+        query.Latitude = pos.Latitude;
+        query.Longitude = pos.Longitude;
+        query.PlaceName = "Current Location";
+        await LoadPlanAsync();
     }
-
-    if (status.Contains("HTTP", StringComparison.OrdinalIgnoreCase) ||
-        status.Contains("Unavailable", StringComparison.OrdinalIgnoreCase) ||
-        status.Contains("Error", StringComparison.OrdinalIgnoreCase))
-    {
-      return "status-error";
-    }
-
-    return "status-muted";
   }
 
   private static string DisplayLocation(WeatherQuery value)
   {
-    if (value == null) return "Unknown";
-    string location = string.IsNullOrWhiteSpace(value.PlaceName)
-      ? "Custom location"
-      : value.PlaceName;
-
+    string location = string.IsNullOrWhiteSpace(value.PlaceName) ? "Custom location" : value.PlaceName;
     return $"{location} ({value.Latitude:F3}, {value.Longitude:F3})";
   }
 
@@ -336,12 +242,6 @@ else if (plan is not null)
   {
     string startText = start.HasValue ? start.Value.ToString("dd MMM") : "?";
     string endText = end.HasValue ? end.Value.ToString("dd MMM") : "?";
-
-    if (startText == "?" && endText == "?")
-    {
-      return string.Empty;
-    }
-
-    return $"{startText} → {endText}";
+    return (startText == "?" && endText == "?") ? string.Empty : $"{startText} → {endText}";
   }
 }

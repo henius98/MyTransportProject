@@ -137,13 +137,18 @@
 
     private void ToggleUserMenu() => showUserMenu = !showUserMenu;
 
-    private void BeginLogin()
+    private async Task BeginLogin()
     {
+        await JS.InvokeVoidAsync("appAuth.clearExplicitLogout");
         Navigation.NavigateTo($"authentication/login?returnUrl={Uri.EscapeDataString(Navigation.Uri)}");
     }
 
-    private void BeginLogOut()
+    private async Task BeginLogOut()
     {
+        // Purge OIDC session state first — Google doesn't support end_session_endpoint
+        // for implicit flow, so Blazor's standard logout may not fully clear the session.
+        await JS.InvokeVoidAsync("appAuth.noteExplicitLogout");
+        await JS.InvokeVoidAsync("appAuth.purgeOidcState");
         Navigation.NavigateToLogout("authentication/logout");
     }
 
@@ -152,4 +157,3 @@
         Theme.OnThemeChanged -= StateHasChanged;
     }
 }
-
