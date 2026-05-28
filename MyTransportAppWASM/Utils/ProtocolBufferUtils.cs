@@ -154,7 +154,7 @@ public static class ProtocolBufferUtils
 
             // Read length prefix (assuming little-endian 32-bit integer)
             var lengthBytes = data.Slice(offset, sizeof(int));
-            var length = BitConverter.ToInt32(lengthBytes.Span);
+            var length = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(lengthBytes.Span);
             offset += sizeof(int);
 
             if (length <= 0 || offset + length > dataLength)

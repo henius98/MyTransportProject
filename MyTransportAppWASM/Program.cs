@@ -17,11 +17,24 @@ namespace MyTransportAppWASM
             builder.RootComponents.Add<HeadOutlet>("head::after");
 
             builder.Services.Configure<WeatherOptions>(builder.Configuration.GetSection("WeatherProviders"));
+            builder.Services.AddMemoryCache();
 
             builder.Services.AddSingleton<IFormFactor, FormFactor>();
-            builder.Services.AddHttpClient<IGtfsService, GtfsService>();
-            builder.Services.AddHttpClient<IWeatherPlannerService, WeatherPlannerService>();
-            builder.Services.AddHttpClient<IGeocodingService, GeocodingService>();
+            
+            // Shared Resilience Policy
+            var retryPolicy = Polly.Extensions.Http.HttpPolicyExtensions
+                .HandleTransientHttpError()
+                .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
+
+            builder.Services.AddHttpClient<IGtfsService, GtfsService>()
+                .AddPolicyHandler(retryPolicy);
+
+            builder.Services.AddHttpClient<IWeatherPlannerService, WeatherPlannerService>()
+                .AddPolicyHandler(retryPolicy);
+
+            builder.Services.AddHttpClient<IGeocodingService, GeocodingService>()
+                .AddPolicyHandler(retryPolicy);
+
             builder.Services.AddScoped<ThemeService>();
             builder.Services.AddScoped<ILocationService, LocationService>();
 

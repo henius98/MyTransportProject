@@ -50,9 +50,14 @@
                     </select>
                 </div>
 
-                <button @onclick="ShowRoute" class="standard-button standard-button-primary w-100 mb-3">
-                    🗺️ Show Route
-                </button>
+                <div class="d-flex gap-2 mb-3">
+                    <button @onclick="ShowRoute" class="standard-button standard-button-primary flex-grow-1">
+                        🗺️ Route
+                    </button>
+                    <button @onclick="ClearRoute" class="standard-button bg-light text-dark flex-grow-1" style="font-size: 0.85rem;">
+                        🗑️ Clear
+                    </button>
+                </div>
 
                 <div class="d-flex gap-2 mb-3">
                     <button @onclick="() => RequestManualLocationUpdate()" class="standard-button bg-light text-dark flex-grow-1" style="font-size: 0.85rem;">
@@ -276,12 +281,10 @@
                 return;
             }
 
-            foreach (var provider in nearbyProviders)
+            var tasks = nearbyProviders.Select(async provider =>
             {
                 var feed = await GtfsService.GetBusPositionsAsync(provider.Endpoint);
-                if (_isDisposed) return;
-                
-                if (feed?.Entity == null) continue;
+                if (_isDisposed || feed?.Entity == null) return;
 
                 _providerVehicleCache[provider.Endpoint] = feed.Entity
                     .Where(e => e.Vehicle?.Position != null)
@@ -296,7 +299,9 @@
                         speed = e.Vehicle.Position.Speed,
                         timestamp = e.Vehicle.Timestamp
                     }).ToList();
-            }
+            });
+
+            await Task.WhenAll(tasks);
 
             if (_isDisposed || mapModule == null) return;
 
@@ -332,29 +337,71 @@
 
     private async Task ShowRoute()
     {
-        if (mapModule == null || _isDisposed || string.IsNullOrEmpty(origin) || string.IsNullOrEmpty(destination)) return;
+        if (string.IsNullOrEmpty(origin) || string.IsNullOrEmpty(destination))
+        {
+            locationStatus = "Please enter origin and destination.";
+            StateHasChanged();
+            return;
+        }
+
+        if (mapModule == null || _isDisposed) return;
+        
         try
         {
+            locationStatus = "Calculating route...";
+            StateHasChanged();
             await mapModule.InvokeVoidAsync("showRouteByName", origin, destination, mode);
+            locationStatus = "Route displayed.";
+            StateHasChanged();
         }
         catch (Exception ex)
         {
             if (_isDisposed) return;
+            locationStatus = "Route failed.";
             Console.Error.WriteLine($"Route display failed: {ex.Message}");
+            StateHasChanged();
+        }
+    }
+
+    private async Task ClearRoute()
+    {
+        if (mapModule == null || _isDisposed) return;
+        try
+        {
+            await mapModule.InvokeVoidAsync("clearRoute");
+            locationStatus = "Route cleared.";
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            if (_isDisposed) return;
+            Console.Error.WriteLine($"Clear route failed: {ex.Message}");
         }
     }
 
     public async ValueTask DisposeAsync()
     {
+        if (_isDisposed) return;
         _isDisposed = true;
+
         Theme.OnThemeChanged -= OnThemeChanged;
+        
         if (locationTimer is not null)
         {
             locationTimer.Stop();
             locationTimer.Dispose();
+            locationTimer = null;
         }
 
         objRef?.Dispose();
-        if (mapModule is not null) await mapModule.DisposeAsync();
+        
+        if (mapModule is not null)
+        {
+            try
+            {
+                await mapModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException) { /* Ignore during disposal */ }
+        }
     }
 }

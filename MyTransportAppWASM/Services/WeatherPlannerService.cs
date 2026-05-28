@@ -13,15 +13,24 @@ namespace MyTransportAppWASM.Services
     
     private readonly HttpClient _httpClient;
     private readonly WeatherOptions _options;
+    private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache _cache;
 
-    public WeatherPlannerService(HttpClient httpClient, IOptions<WeatherOptions> options)
+    public WeatherPlannerService(HttpClient httpClient, IOptions<WeatherOptions> options, Microsoft.Extensions.Caching.Memory.IMemoryCache cache)
     {
       _httpClient = httpClient;
       _options = options.Value;
+      _cache = cache;
     }
 
     public async Task<WeatherPlanResult> GetWeatherPlanAsync(WeatherQuery query, CancellationToken cancellationToken = default)
     {
+      // Cache key based on rounded coordinates (approx 1.1km grid)
+      string cacheKey = $"weather_{Math.Round(query.Latitude, 2)}_{Math.Round(query.Longitude, 2)}";
+      if (_cache.TryGetValue(cacheKey, out WeatherPlanResult? cachedResult) && cachedResult != null)
+      {
+          return cachedResult with { Query = query, Notes = cachedResult.Notes.Append("Restored from local cache.").ToList() };
+      }
+
       try
       {
         Task<WeatherProviderResult> baselineTask = IsNearSingapore(query.Latitude, query.Longitude)
@@ -38,7 +47,7 @@ namespace MyTransportAppWASM.Services
         var weatherbit = await weatherbitTask;
         if (weatherbit != null) outlooks.Add(weatherbit);
 
-        return new WeatherPlanResult
+        var result = new WeatherPlanResult
         {
           Query = query,
           Baseline = await baselineTask,
@@ -50,6 +59,9 @@ namespace MyTransportAppWASM.Services
             $"Request: {query.PlaceName ?? "Custom location"} ({query.Latitude:F3}, {query.Longitude:F3})."
           }
         };
+
+        _cache.Set(cacheKey, result, TimeSpan.FromMinutes(10));
+        return result;
       }
       catch (Exception ex)
       {

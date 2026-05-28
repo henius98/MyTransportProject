@@ -1,0 +1,58 @@
+name: Deploy and Release
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+jobs:
+  build-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore MyTransportAppWASM/MyTransportAppWASM.csproj
+
+      - name: Build and Publish
+        run: dotnet publish MyTransportAppWASM/MyTransportAppWASM.csproj -c Release -o release --nologo
+
+      - name: Prepare for GitHub Pages
+        run: |
+          # Copy index.html to 404.html for SPA support
+          cp release/wwwroot/index.html release/wwwroot/404.html
+          # Add .nojekyll to bypass Jekyll
+          touch release/wwwroot/.nojekyll
+          # Optional: Add script to handle base href dynamically if needed
+          # sed -i 's/<base href="\/" \/>/<base href="\/MyTransportProject\/" \/>/g' release/wwwroot/index.html
+
+      - name: Deploy to GitHub Pages
+        if: github.ref == 'refs/heads/main'
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          folder: release/wwwroot
+          branch: gh-pages
+
+      - name: Package for Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          cd release/wwwroot
+          zip -r ../../MyTransportAppWASM-beta.zip .
+          cd ../..
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MyTransportAppWASM-beta.zip
+          prerelease: true
+          generate_release_notes: true

@@ -50,7 +50,7 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 	if (!el) throw new Error(`Element #${elementId} not found.`);
 
 	// Using modern importLibrary pattern
-	const [{ Map, InfoWindow }, { AdvancedMarkerElement }] = await Promise.all([
+	const [{ Map, InfoWindow }, { AdvancedMarkerElement, PinElement }] = await Promise.all([
 		google.maps.importLibrary("maps"),
 		google.maps.importLibrary("marker"),
 	]);
@@ -228,10 +228,43 @@ export async function showRoute(origin, destination, travelMode = "TRANSIT") {
 
 	// Draw origin/destination markers
 	try {
-		routeMarkers = await routes[0].createWaypointAdvancedMarkers();
-		routeMarkers.forEach(marker => (marker.map = map));
-	} catch {
-		// Marker creation is optional; some route types may not support it
+		const { PinElement, AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+		const route = routes[0];
+		routeMarkers = [];
+
+		if (route.legs && route.legs.length > 0) {
+			// Add Start Marker
+			const startLeg = route.legs[0];
+			const startPin = new PinElement({
+				glyphText: 'A',
+				background: '#4285F4',
+				borderColor: '#FFFFFF'
+			});
+			const startMarker = new AdvancedMarkerElement({
+				position: startLeg.startLocation.latLng,
+				content: startPin,
+				title: "Origin"
+			});
+			startMarker.map = map;
+			routeMarkers.push(startMarker);
+
+			// Add End Marker (and intermediate ones if they existed, but for now we follow the legs)
+			const lastLeg = route.legs[route.legs.length - 1];
+			const endPin = new PinElement({
+				glyphText: 'B',
+				background: '#EA4335',
+				borderColor: '#FFFFFF'
+			});
+			const endMarker = new AdvancedMarkerElement({
+				position: lastLeg.endLocation.latLng,
+				content: endPin,
+				title: "Destination"
+			});
+			endMarker.map = map;
+			routeMarkers.push(endMarker);
+		}
+	} catch (err) {
+		console.error("Manual marker creation failed:", err);
 	}
 }
 

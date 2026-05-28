@@ -26,19 +26,19 @@
                 <div class="d-flex flex-wrap gap-2" style="font-size: 14px;">
                     @if (slice.TemperatureC.HasValue)
                     {
-                        <span>@($"{slice.TemperatureC:0.#}°C")</span>
+                        <span>🌡️ @($"{slice.TemperatureC:0.#}°C")</span>
                     }
                     @if (slice.PrecipitationMm.HasValue)
                     {
-                        <span>@($"{slice.PrecipitationMm:0.#} mm")</span>
+                        <span>💧 @($"{slice.PrecipitationMm:0.#} mm")</span>
                     }
                     @if (slice.ProbabilityOfRain.HasValue)
                     {
-                        <span>@($"{slice.ProbabilityOfRain * 100:0}% rain")</span>
+                        <span>🌧️ @($"{slice.ProbabilityOfRain * 100:0}% rain")</span>
                     }
                     @if (!string.IsNullOrWhiteSpace(slice.Wind))
                     {
-                        <span>@slice.Wind</span>
+                        <span>💨 @slice.Wind</span>
                     }
                 </div>
                 @if (!string.IsNullOrWhiteSpace(slice.Summary))

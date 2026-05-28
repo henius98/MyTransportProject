@@ -7,6 +7,7 @@
 @inject IWeatherPlannerService WeatherPlannerService
 @inject IGeocodingService GeocodingService
 @inject ILocationService LocationService
+@implements IDisposable
 
 <PageTitle>Trip Weather Planner</PageTitle>
 
@@ -83,7 +84,24 @@
   <div class="alert alert-danger" role="alert">@error</div>
 }
 
-@if (plan is null && !isLoading)
+@if (isLoading)
+{
+    <div class="planner-grid">
+        @for (int i = 0; i < 3; i++)
+        {
+            <div class="standard-card animate-pulse" style="min-height: 200px; opacity: 0.6;">
+                <div class="d-flex justify-content-between mb-4">
+                    <div style="width: 120px; height: 24px; background: var(--border-color); border-radius: 4px;"></div>
+                    <div style="width: 60px; height: 24px; background: var(--border-color); border-radius: 4px;"></div>
+                </div>
+                <div class="mb-3" style="width: 100%; height: 16px; background: var(--border-color); border-radius: 4px;"></div>
+                <div class="mb-2" style="width: 80%; height: 16px; background: var(--border-color); border-radius: 4px;"></div>
+                <div style="width: 90%; height: 16px; background: var(--border-color); border-radius: 4px;"></div>
+            </div>
+        }
+    </div>
+}
+else if (plan is null)
 {
   <p class="text-dim">Search for a location or adjust coordinates, then click "Get forecast".</p>
 }
@@ -137,23 +155,39 @@ else if (plan is not null)
   private bool isLoading;
   private bool isGeocoding;
   private bool showHelp;
+  private CancellationTokenSource cts = new();
 
   private void ToggleHelp() => showHelp = !showHelp;
+
+  public void Dispose()
+  {
+      cts.Cancel();
+      cts.Dispose();
+  }
 
   protected override async Task OnInitializedAsync()
   {
     await Task.Yield();
     
     // Try to get current location automatically
-    var pos = await LocationService.GetCurrentLocationAsync();
-    if (pos != null)
+    try
     {
-        query.Latitude = pos.Latitude;
-        query.Longitude = pos.Longitude;
-        query.PlaceName = "Current Location";
-    }
+        var pos = await LocationService.GetCurrentLocationAsync();
+        if (cts.IsCancellationRequested) return;
 
-    await LoadPlanAsync();
+        if (pos != null)
+        {
+            query.Latitude = pos.Latitude;
+            query.Longitude = pos.Longitude;
+            query.PlaceName = "Current Location";
+        }
+
+        await LoadPlanAsync();
+    }
+    catch (Exception ex) when (ex is TaskCanceledException || ex is OperationCanceledException)
+    {
+        // Suppress
+    }
   }
 
   private async Task SearchLocation()
@@ -206,7 +240,7 @@ else if (plan is not null)
     {
       query.Departure = departureDate.HasValue ? new DateTimeOffset(departureDate.Value) : null;
       query.Return = returnDate.HasValue ? new DateTimeOffset(returnDate.Value) : null;
-      plan = await WeatherPlannerService.GetWeatherPlanAsync(query);
+      plan = await WeatherPlannerService.GetWeatherPlanAsync(query, cts.Token);
     }
     catch (Exception ex)
     {
