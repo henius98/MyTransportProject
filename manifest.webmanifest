@@ -1,0 +1,17 @@
+{
+  "name": "MyTransportAppWASM",
+  "short_name": "MyTransportAppWASM",
+  "id": "./",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#03173d",
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "myTransport.svg",
+      "type": "image/svg+xml",
+      "sizes": "any"
+    }
+  ]
+}

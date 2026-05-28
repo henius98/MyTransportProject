@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  
+  <path d="M2 13v-3a1 1 0 0 1 1-1h18a1 1 0 0 1 1 1v6a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-3z" />
+  
+  <path d="M10 9h10v4H10zM6 9v4"/>
+  
+  <circle cx="6" cy="18" r="2" fill="#ef4444"/>
+  <circle cx="18" cy="18" r="2" fill="#ef4444"/>
+
+  <g id="ai-neural-net" fill="#ef4444" stroke="none">
+    <path d="M11 15 l 3 -2" stroke="#ef4444" stroke-width="1.5" />
+    <path d="M11 15 l 3 2" stroke="#ef4444" stroke-width="1.5" />
+    
+    <circle cx="11" cy="15" r="1.1"/>
+    <circle cx="14" cy="13" r="1.1"/>
+    <circle cx="14" cy="17" r="1.1"/>
+  </g>
+  
+</svg>

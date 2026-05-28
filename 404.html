@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MyTransportAppWASM</title>
+    <base href="/" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Outfit:wght@500;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="icon" type="image/svg+xml" href="myTransport.svg" />
+    <link href="MyTransportAppWASM.styles.css" rel="stylesheet" />
+    <link href="manifest.webmanifest" rel="manifest" />
+    <link rel="apple-touch-icon" href="myTransport.svg" />
+    <link rel="stylesheet" href="css/auth-modal.css" />
+
+</head>
+
+<body>
+    <div id="app">
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: var(--bg-color);">
+            <div class="standard-spinner"></div>
+            <div class="section-subtitle mt-3">Loading MyTransportApp...</div>
+        </div>
+    </div>
+
+    <div id="blazor-error-ui">
+        An unhandled error has occurred.
+        <a href="." class="reload">Reload</a>
+        <span class="dismiss">🗙</span>
+    </div>
+    <script>
+        window.welcomeManager = {
+            setSeen: function () {
+                localStorage.setItem('hasSeenWelcome', 'true');
+            },
+            hasSeen: function () {
+                return localStorage.getItem('hasSeenWelcome') === 'true';
+            }
+        };
+
+        // Purge all OIDC session state to prevent silent re-authentication after logout.
+        // The Blazor AuthenticationService.js stores tokens under 'oidc.*' keys in sessionStorage.
+        window.appAuth = {
+            explicitLogoutKey: 'mytransport.explicitLogout',
+            noteExplicitLogout: function () {
+                sessionStorage.setItem(this.explicitLogoutKey, 'true');
+            },
+            clearExplicitLogout: function () {
+                sessionStorage.removeItem(this.explicitLogoutKey);
+            },
+            wasExplicitLogout: function () {
+                return sessionStorage.getItem(this.explicitLogoutKey) === 'true';
+            },
+            purgeOidcState: function () {
+                var keysToRemove = [];
+                for (var i = 0; i < sessionStorage.length; i++) {
+                    var key = sessionStorage.key(i);
+                    if (key && key !== this.explicitLogoutKey && (key.startsWith('oidc.') || key.startsWith('Microsoft.AspNetCore.Components.WebAssembly.Authentication'))) {
+                        keysToRemove.push(key);
+                    }
+                }
+                keysToRemove.forEach(function (k) { sessionStorage.removeItem(k); });
+                console.log('[appAuth] Purged ' + keysToRemove.length + ' OIDC key(s) from sessionStorage');
+            }
+        };
+    </script>
+    <script src="_content/Microsoft.AspNetCore.Components.WebAssembly.Authentication/AuthenticationService.js"></script>
+    <script src="_framework/blazor.webassembly.js"></script>
+    <script src="js/auth.js" type="module"></script>
+    <script>
+        // Unregister any previously cached service workers to suppress stale no-op fetch handler warnings
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function (registrations) {
+                for (let reg of registrations) { reg.unregister(); }
+            });
+        }
+    </script>
+</body>
+
+</html>
