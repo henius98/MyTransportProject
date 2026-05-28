@@ -2,7 +2,7 @@ name: Deploy and Release
 
 on:
   push:
-    branches: [main]
+    branches: [master]
     tags: ["v*"]
 
 permissions:
@@ -36,7 +36,7 @@ jobs:
           sed -i 's/<base href="\/" \/>/<base href="\/MyTransportProject\/" \/>/g' release/wwwroot/index.html
 
       - name: Deploy to GitHub Pages
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/master'
         uses: JamesIves/github-pages-deploy-action@v4
         with:
           folder: release/wwwroot
