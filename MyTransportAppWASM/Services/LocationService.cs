@@ -1,18 +1,10 @@
 using Microsoft.JSInterop;
 using System;
 using System.Threading.Tasks;
+using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM.Services
 {
-    public interface ILocationService
-    {
-        Task<Location?> GetCurrentLocationAsync();
-        event Action<Location>? OnLocationChanged;
-        Location? LastKnownLocation { get; }
-    }
-
-    public record Location(double Latitude, double Longitude, double? Accuracy = null);
-
     public class LocationService : ILocationService, IAsyncDisposable
     {
         private readonly IJSRuntime _js;

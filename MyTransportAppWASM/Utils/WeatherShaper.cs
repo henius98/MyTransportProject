@@ -6,18 +6,23 @@ namespace MyTransportAppWASM.Utils
 {
     public static class WeatherShaper
     {
+        /// <summary>
+        /// Maximum recursion depth for JSON traversal to prevent stack overflow on adversarial payloads.
+        /// </summary>
+        private const int MaxTraversalDepth = 10;
+
         public static IReadOnlyList<WeatherTimeSlice> ShapeSlices(JsonDocument document, IReadOnlyList<WeatherTimeSlice> fallback, string label)
         {
             JsonElement root = document.RootElement;
             
-            double? temperature = FindFirstDouble(root, "temperature", "temperature_2m", "temperature_2m_max", "temp");
-            double? precipitation = FindFirstDouble(root, "precipitation", "rain", "precip_mm", "precip");
-            double? probability = FindFirstDouble(root, "probability", "precipitation_probability", "precipitation_probability_max", "pop");
+            double? temperature = FindFirstDouble(root, 0, "temperature", "temperature_2m", "temperature_2m_max", "temp");
+            double? precipitation = FindFirstDouble(root, 0, "precipitation", "rain", "precip_mm", "precip");
+            double? probability = FindFirstDouble(root, 0, "probability", "precipitation_probability", "precipitation_probability_max", "pop");
             probability = NormalizeProbability(probability);
             
-            string? summary = FindFirstString(root, "summary", "description", "weather", "forecast");
-            string? wind = FindFirstString(root, "wind", "wind_speed", "wind_speed_10m");
-            DateTimeOffset time = FindFirstDate(root, "time", "datetime", "ob_time", "ts") ?? DateTimeOffset.UtcNow;
+            string? summary = FindFirstString(root, 0, "summary", "description", "weather", "forecast");
+            string? wind = FindFirstString(root, 0, "wind", "wind_speed", "wind_speed_10m");
+            DateTimeOffset time = FindFirstDate(root, 0, "time", "datetime", "ob_time", "ts") ?? DateTimeOffset.UtcNow;
 
             if (temperature is null && precipitation is null && probability is null && summary is null && wind is null)
             {
@@ -48,13 +53,15 @@ namespace MyTransportAppWASM.Utils
             return 0;
         }
 
-        private static double? FindFirstDouble(JsonElement element, params string[] names)
+        private static double? FindFirstDouble(JsonElement element, int depth, params string[] names)
         {
+            if (depth >= MaxTraversalDepth) return null;
+
             if (element.ValueKind == JsonValueKind.Array)
             {
                 foreach (JsonElement item in element.EnumerateArray())
                 {
-                    double? nested = FindFirstDouble(item, names);
+                    double? nested = FindFirstDouble(item, depth + 1, names);
                     if (nested.HasValue) return nested;
                 }
             }
@@ -63,7 +70,7 @@ namespace MyTransportAppWASM.Utils
             {
                 foreach (JsonProperty property in element.EnumerateObject())
                 {
-                    if (names.Any(n => string.Equals(n, property.Name, StringComparison.OrdinalIgnoreCase)))
+                    if (MatchesAnyName(property.Name, names))
                     {
                         if (property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetDouble(out double number))
                             return number;
@@ -76,20 +83,22 @@ namespace MyTransportAppWASM.Utils
                         }
                     }
 
-                    double? nested = FindFirstDouble(property.Value, names);
+                    double? nested = FindFirstDouble(property.Value, depth + 1, names);
                     if (nested.HasValue) return nested;
                 }
             }
             return null;
         }
 
-        private static string? FindFirstString(JsonElement element, params string[] names)
+        private static string? FindFirstString(JsonElement element, int depth, params string[] names)
         {
+            if (depth >= MaxTraversalDepth) return null;
+
             if (element.ValueKind == JsonValueKind.Array)
             {
                 foreach (JsonElement item in element.EnumerateArray())
                 {
-                    string? nested = FindFirstString(item, names);
+                    string? nested = FindFirstString(item, depth + 1, names);
                     if (!string.IsNullOrWhiteSpace(nested)) return nested;
                 }
             }
@@ -98,26 +107,28 @@ namespace MyTransportAppWASM.Utils
             {
                 foreach (JsonProperty property in element.EnumerateObject())
                 {
-                    if (names.Any(n => string.Equals(n, property.Name, StringComparison.OrdinalIgnoreCase)) &&
+                    if (MatchesAnyName(property.Name, names) &&
                         property.Value.ValueKind == JsonValueKind.String)
                     {
                         return property.Value.GetString();
                     }
 
-                    string? nested = FindFirstString(property.Value, names);
+                    string? nested = FindFirstString(property.Value, depth + 1, names);
                     if (!string.IsNullOrWhiteSpace(nested)) return nested;
                 }
             }
             return null;
         }
 
-        private static DateTimeOffset? FindFirstDate(JsonElement element, params string[] names)
+        private static DateTimeOffset? FindFirstDate(JsonElement element, int depth, params string[] names)
         {
+            if (depth >= MaxTraversalDepth) return null;
+
             if (element.ValueKind == JsonValueKind.Array)
             {
                 foreach (JsonElement item in element.EnumerateArray())
                 {
-                    DateTimeOffset? nestedItem = FindFirstDate(item, names);
+                    DateTimeOffset? nestedItem = FindFirstDate(item, depth + 1, names);
                     if (nestedItem.HasValue) return nestedItem;
                 }
             }
@@ -126,24 +137,37 @@ namespace MyTransportAppWASM.Utils
             {
                 foreach (JsonProperty property in element.EnumerateObject())
                 {
-                    if ((names.Length == 0 || names.Any(n => string.Equals(n, property.Name, StringComparison.OrdinalIgnoreCase))) &&
+                    if ((names.Length == 0 || MatchesAnyName(property.Name, names)) &&
                         property.Value.ValueKind == JsonValueKind.String &&
                         DateTimeOffset.TryParse(property.Value.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset parsed))
                     {
                         return parsed;
                     }
 
-                    if ((names.Length == 0 || names.Any(n => string.Equals(n, property.Name, StringComparison.OrdinalIgnoreCase))) &&
+                    if ((names.Length == 0 || MatchesAnyName(property.Name, names)) &&
                         property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetInt64(out long epoch))
                     {
                         try { return DateTimeOffset.FromUnixTimeSeconds(epoch); } catch { }
                     }
 
-                    DateTimeOffset? nested = FindFirstDate(property.Value, names);
+                    DateTimeOffset? nested = FindFirstDate(property.Value, depth + 1, names);
                     if (nested.HasValue) return nested;
                 }
             }
             return null;
+        }
+
+        /// <summary>
+        /// Manual loop to match property names — avoids LINQ .Any() delegate allocation on hot path.
+        /// </summary>
+        private static bool MatchesAnyName(string propertyName, string[] names)
+        {
+            for (int i = 0; i < names.Length; i++)
+            {
+                if (string.Equals(names[i], propertyName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
         }
     }
 }

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using MyTransportAppWASM.Models.Weather;
 using MyTransportAppWASM.Services.Interfaces;
@@ -13,9 +14,9 @@ namespace MyTransportAppWASM.Services
     
     private readonly HttpClient _httpClient;
     private readonly WeatherOptions _options;
-    private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache _cache;
+    private readonly IMemoryCache _cache;
 
-    public WeatherPlannerService(HttpClient httpClient, IOptions<WeatherOptions> options, Microsoft.Extensions.Caching.Memory.IMemoryCache cache)
+    public WeatherPlannerService(HttpClient httpClient, IOptions<WeatherOptions> options, IMemoryCache cache)
     {
       _httpClient = httpClient;
       _options = options.Value;

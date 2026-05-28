@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Caching.Memory;
 using MyTransportAppWASM.Utils;
 using MyTransportAppWASM.Services.Interfaces;
 using TransitRealtime;
@@ -7,9 +8,9 @@ namespace MyTransportAppWASM.Services
     public class GtfsService : IGtfsService
     {
         private readonly HttpClient _httpClient;
-        private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache _cache;
+        private readonly IMemoryCache _cache;
 
-        public GtfsService(HttpClient httpClient, Microsoft.Extensions.Caching.Memory.IMemoryCache cache)
+        public GtfsService(HttpClient httpClient, IMemoryCache cache)
         {
             _httpClient = httpClient;
             _cache = cache;

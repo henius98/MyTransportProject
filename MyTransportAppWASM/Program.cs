@@ -21,19 +21,15 @@ namespace MyTransportAppWASM
 
             builder.Services.AddSingleton<IFormFactor, FormFactor>();
             
-            // Shared Resilience Policy
-            var retryPolicy = Polly.Extensions.Http.HttpPolicyExtensions
-                .HandleTransientHttpError()
-                .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
-
+            // Standard resilience handler (replaces deprecated Polly — includes retry, circuit-breaker, timeout)
             builder.Services.AddHttpClient<IGtfsService, GtfsService>()
-                .AddPolicyHandler(retryPolicy);
+                .AddStandardResilienceHandler();
 
             builder.Services.AddHttpClient<IWeatherPlannerService, WeatherPlannerService>()
-                .AddPolicyHandler(retryPolicy);
+                .AddStandardResilienceHandler();
 
             builder.Services.AddHttpClient<IGeocodingService, GeocodingService>()
-                .AddPolicyHandler(retryPolicy);
+                .AddStandardResilienceHandler();
 
             builder.Services.AddScoped<ThemeService>();
             builder.Services.AddScoped<ILocationService, LocationService>();

@@ -6,11 +6,6 @@ using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM.Services
 {
-    public interface IGeocodingService
-    {
-        Task<(double Lat, double Lng, string FormattedAddress)?> GeocodeAsync(string address);
-    }
-
     /// <summary>
     /// Implements geocoding using the Google Places API (New) Search Text endpoint.
     /// This is compatible with the "Places API (New)" setting in Google Cloud Console.

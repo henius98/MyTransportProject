@@ -2,8 +2,8 @@ name: Deploy and Release
 
 on:
   push:
-    branches: [ main ]
-    tags: [ 'v*' ]
+    branches: [main]
+    tags: ["v*"]
 
 permissions:
   contents: write
@@ -33,7 +33,7 @@ jobs:
           # Add .nojekyll to bypass Jekyll
           touch release/wwwroot/.nojekyll
           # Optional: Add script to handle base href dynamically if needed
-          # sed -i 's/<base href="\/" \/>/<base href="\/MyTransportProject\/" \/>/g' release/wwwroot/index.html
+          sed -i 's/<base href="\/" \/>/<base href="\/MyTransportProject\/" \/>/g' release/wwwroot/index.html
 
       - name: Deploy to GitHub Pages
         if: github.ref == 'refs/heads/main'
