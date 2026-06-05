@@ -18,6 +18,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Inject Secrets into appsettings.json
+        run: |
+          sed -i 's/__GOOGLE_CLIENT_ID__/${{ secrets.GOOGLE_CLIENT_ID }}/g' MyTransportAppWASM/wwwroot/appsettings.json
+          sed -i 's/__GOOGLE_MAPS_API_KEY__/${{ secrets.GOOGLE_MAPS_API_KEY }}/g' MyTransportAppWASM/wwwroot/appsettings.json
+          sed -i 's/__METMALAYSIA_API_KEY__/${{ secrets.METMALAYSIA_API_KEY }}/g' MyTransportAppWASM/wwwroot/appsettings.json
+          sed -i 's/__WEATHERBIT_API_KEY__/${{ secrets.WEATHERBIT_API_KEY }}/g' MyTransportAppWASM/wwwroot/appsettings.json
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
