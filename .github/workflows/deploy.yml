@@ -35,6 +35,7 @@ jobs:
 
           # Optional: Add script to handle base href dynamically if needed
           sed -i 's/<base href="\/" \/>/<base href="\/MyTransportProject\/" \/>/g' release/wwwroot/index.html
+          sed -i 's/<base href="\/" \/>/<base href="\/MyTransportProject\/" \/>/g' release/wwwroot/404.html
       - name: Deploy to GitHub Pages
         if: github.ref == 'refs/heads/master'
         uses: JamesIves/github-pages-deploy-action@v4
