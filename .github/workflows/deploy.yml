@@ -32,9 +32,17 @@ jobs:
           cp release/wwwroot/index.html release/wwwroot/404.html
           # Add .nojekyll to bypass Jekyll
           touch release/wwwroot/.nojekyll
+          # Fix for Blazor .NET 8+ framework script hash issue
+          if [ -d "release/wwwroot/_framework" ]; then
+            HASHED_JS=$(find release/wwwroot/_framework -name 'blazor.webassembly.*.js' -exec basename {} \; | head -n 1)
+            if [ ! -z "$HASHED_JS" ]; then
+              sed -i "s/blazor\.webassembly\.js/$HASHED_JS/g" release/wwwroot/index.html
+              sed -i "s/blazor\.webassembly\.js/$HASHED_JS/g" release/wwwroot/404.html
+            fi
+          fi
+
           # Optional: Add script to handle base href dynamically if needed
           sed -i 's/<base href="\/" \/>/<base href="\/MyTransportProject\/" \/>/g' release/wwwroot/index.html
-
       - name: Deploy to GitHub Pages
         if: github.ref == 'refs/heads/master'
         uses: JamesIves/github-pages-deploy-action@v4
