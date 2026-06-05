@@ -5,6 +5,9 @@ on:
     branches: [master]
     tags: ["v*"]
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: write
 
@@ -14,6 +17,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.x
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -36,6 +44,12 @@ jobs:
           # Optional: Add script to handle base href dynamically if needed
           sed -i 's/<base href="\/" \/>/<base href="\/MyTransportProject\/" \/>/g' release/wwwroot/index.html
           sed -i 's/<base href="\/" \/>/<base href="\/MyTransportProject\/" \/>/g' release/wwwroot/404.html
+
+          # Fix SPA 404s by creating physical paths for known routes
+          for path in "map" "weather" "settings" "authentication/login" "authentication/login-callback" "authentication/login-failed" "authentication/logout" "authentication/logout-callback" "authentication/logout-failed" "authentication/logged-out"; do
+            mkdir -p release/wwwroot/$path
+            cp release/wwwroot/index.html release/wwwroot/$path/index.html
+          done
       - name: Deploy to GitHub Pages
         if: github.ref == 'refs/heads/master'
         uses: JamesIves/github-pages-deploy-action@v4
