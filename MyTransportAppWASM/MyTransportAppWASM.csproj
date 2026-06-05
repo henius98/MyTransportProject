@@ -14,9 +14,6 @@
     <WasmEnableExceptionHandling>true</WasmEnableExceptionHandling>
     <BlazorWebAssemblyPreserveCollationData>false</BlazorWebAssemblyPreserveCollationData>
     <InvariantGlobalization>false</InvariantGlobalization>
-    <WasmFingerprintAssets>false</WasmFingerprintAssets>
-    <StaticWebAssetFingerprintingEnabled>false</StaticWebAssetFingerprintingEnabled>
-    <StaticWebAssetsFingerprintContent>false</StaticWebAssetsFingerprintContent>
   </PropertyGroup>
 
   <ItemGroup>
