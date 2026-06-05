@@ -8,7 +8,6 @@
     
     <!-- Performance & Build Optimizations -->
     <PublishTrimmed>true</PublishTrimmed>
-    <TrimMode>link</TrimMode>
     <BlazorEnableCompression>true</BlazorEnableCompression>
     <WasmEnableSIMD>true</WasmEnableSIMD>
     <WasmEnableExceptionHandling>true</WasmEnableExceptionHandling>
