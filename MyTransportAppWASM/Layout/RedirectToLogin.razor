@@ -6,7 +6,7 @@
     {
         if (await JS.InvokeAsync<bool>("appAuth.wasExplicitLogout"))
         {
-            Navigation.NavigateTo("/");
+            Navigation.NavigateTo("");
             return;
         }
 
