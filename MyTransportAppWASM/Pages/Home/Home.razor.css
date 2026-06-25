@@ -1,0 +1,44 @@
+.hero {
+  padding: 4rem 1rem;
+  text-align: center;
+  min-height: calc(100vh - 3.5rem);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hero__content {
+  max-width: 1000px;
+  width: 100%;
+}
+
+.dashboard {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 2.5rem;
+  margin-top: 1rem;
+}
+
+.dashboard__icon {
+  font-size: 3.5rem;
+  margin-bottom: 2rem;
+  transition: transform 0.3s ease;
+}
+
+.card:hover .dashboard__icon {
+  transform: scale(1.1) rotate(5deg);
+}
+
+.card:hover .arrow {
+  transform: translateX(8px);
+}
+
+.dashboard__footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--primary-blue);
+  font-weight: 700;
+  font-size: 1rem;
+}
+

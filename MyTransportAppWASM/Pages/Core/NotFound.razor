@@ -1,0 +1,59 @@
+@page "/not-found"
+@layout MainLayout
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject CountdownTimer _timer
+@implements IDisposable
+
+<div class="modal__backdrop" @onclick="GoHome">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="notfound-title" @onclick:stopPropagation="true">
+        <button type="button" class="modal__close" @onclick="GoHome" aria-label="Close">&times;</button>
+
+        <div class="modal__icon">🔍</div>
+
+        <h2 id="notfound-title" class="section-title" style="font-size: 2.5rem; margin-bottom: 0.5rem;">Page Not Found</h2>
+        <p class="section-subtitle"
+           style="margin-bottom: 1.5rem; font-size: 1.1rem; margin-left: auto; margin-right: auto;">The route you
+            requested could not be found.</p>
+
+            <div style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 2rem; align-items: center;">
+                <div class="chip status--muted"
+                     style="font-family: monospace; font-size: 0.75rem; word-break: break-all; white-space: normal; text-align: left; max-width: 100%;">
+                    <span style="opacity: 0.7; margin-right: 4px;">URI:</span> @Navigation.Uri
+                </div>
+            </div>
+
+            <div class="stats mb-3">
+                <div class="stats__item">
+                    <span class="stats__value">404</span>
+                    <span class="stats__label">Error Code</span>
+                </div>
+                <div class="stats__divider"></div>
+                <div class="stats__item">
+                    <span class="stats__value">@_timer.RemainingSeconds</span>
+                    <span class="stats__label">Seconds Left</span>
+                </div>
+            </div>
+
+            <button class="btn btn btn--primary" style="width: 100%; padding: 1rem;" @onclick="GoHome">
+                <span style="margin-right: 8px;">🏠</span> Return to Home
+            </button>
+        </div>
+    </div>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        _ = _timer.StartAsync(10, StateHasChanged, () => GoHome());
+    }
+
+    private void GoHome()
+    {
+        Navigation.NavigateTo("");
+    }
+
+    public void Dispose()
+    {
+        _timer.Dispose();
+    }
+}

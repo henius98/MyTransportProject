@@ -2,6 +2,9 @@
     <Router AppAssembly="@typeof(App).Assembly">
         <Found Context="routeData">
             <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)">
+                <Authorizing>
+                    <!-- Deliberately left empty to hide the default "Authorizing..." text -->
+                </Authorizing>
                 <NotAuthorized>
                     @if (context.User.Identity?.IsAuthenticated != true)
                     {
@@ -9,25 +12,25 @@
                     }
                     else
                     {
-                        <div class="auth-popup-container" style="position: fixed; z-index: 3000; top: 0; left: 0; width: 100%; height: 100%;">
-                            <div class="auth-modal">
-                                <div class="welcome-icon">🔒</div>
+                        <div class="modal__backdrop" style="position: fixed; z-index: 3000; top: 0; left: 0; width: 100%; height: 100%;">
+                            <div class="modal">
+                                <div class="modal__icon">🔒</div>
                                 <h2 class="fw-bold">Access Denied</h2>
                                 <p>You do not have the necessary permissions to view this page. Please contact your administrator if you believe this is an error.</p>
                                 
-                                <div class="app-stats mb-3">
-                                    <div class="stat-item">
-                                        <span class="stat-value">403</span>
-                                        <span class="stat-label">Forbidden</span>
+                                <div class="stats mb-3">
+                                    <div class="stats__item">
+                                        <span class="stats__value">403</span>
+                                        <span class="stats__label">Forbidden</span>
                                     </div>
-                                    <div class="stat-divider"></div>
-                                    <div class="stat-item">
-                                        <span class="stat-value">Private</span>
-                                        <span class="stat-label">Area</span>
+                                    <div class="stats__divider"></div>
+                                    <div class="stats__item">
+                                        <span class="stats__value">Private</span>
+                                        <span class="stats__label">Area</span>
                                     </div>
                                 </div>
 
-                                <button class="auth-action-btn" onclick="window.location.href=document.baseURI">Return to Safety</button>
+                                <button class="auth-action-btn" onclick="window.location.href=document.baseURI">Return to Home Page</button>
                             </div>
                         </div>
                     }
@@ -37,7 +40,7 @@
         </Found>
         <NotFound>
             <LayoutView Layout="@typeof(MainLayout)">
-                <MyTransportAppWASM.Pages.NotFound />
+                <MyTransportAppWASM.Pages.Core.NotFound />
             </LayoutView>
         </NotFound>
     </Router>

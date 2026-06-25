@@ -1,13 +1,22 @@
 @inherits LayoutComponentBase
+@using MyTransportAppWASM.Services
 @inject ThemeService Theme
+@inject LanguageService Language
 @implements IDisposable
 
-<div class="page @(Theme.IsDarkMode ? "theme-dark" : "theme-light")" style="--sidebar-width: @(isCollapsed ? "70px" : "250px");">
-    <div class="sidebar @(isCollapsed ? "collapsed" : "")" @onclick="ExpandSidebar" @onclick:stopPropagation>
-        <NavMenu IsCollapsed="isCollapsed" />
+<div class="page" style="@SidebarStyle">
+    <!-- Skip link for keyboard users — visually hidden until focused -->
+    <a href="#main-content"
+       style="position:absolute;top:-100%;left:1rem;z-index:9999;padding:0.5rem 1rem;background:var(--primary-blue);color:#fff;border-radius:0 0 8px 8px;font-weight:700;text-decoration:none;"
+       onfocus="this.style.top='0'" onblur="this.style.top='-100%'">
+        Skip to main content
+    </a>
+    <div class="@SidebarClass" @onclick="ExpandSidebar" @onmouseenter="HandleMouseEnter"
+         @onmouseleave="HandleMouseLeave" @onclick:stopPropagation>
+        <NavMenu IsCollapsed="EffectiveIsCollapsed" />
     </div>
 
-    <main @onclick="CollapseSidebar">
+    <main id="main-content" tabindex="-1" @onclick="CollapseSidebar">
         <article class="content px-4">
             <ErrorBoundary>
                 <ChildContent>
@@ -15,8 +24,8 @@
                 </ChildContent>
                 <ErrorContent>
                     <div class="alert alert-danger m-3">
-                        <h4>Oops! Something went wrong.</h4>
-                        <p>We encountered an unexpected error. Please try refreshing the page.</p>
+                        <h4>@Language["ErrorTitle"]</h4>
+                        <p>@Language["ErrorMessage"]</p>
                     </div>
                 </ErrorContent>
             </ErrorBoundary>
@@ -24,27 +33,31 @@
     </main>
 </div>
 
-
 @code {
-    private bool isCollapsed = true;
+    private bool isCollapsed = false;
+    private bool isHovered = false;
+
+    private bool EffectiveIsCollapsed => isCollapsed && !isHovered;
+
+    private string SidebarStyle => $"--sidebar-width: {(EffectiveIsCollapsed ? "70px" : "250px")};";
+    private string SidebarClass => $"sidebar {(EffectiveIsCollapsed ? "collapsed" : "")}".Trim();
 
     protected override async Task OnInitializedAsync()
     {
         await Theme.InitializeAsync();
         Theme.OnThemeChanged += StateHasChanged;
+        Language.OnLanguageChanged += StateHasChanged;
     }
 
     private void ExpandSidebar() => isCollapsed = false;
     private void CollapseSidebar() => isCollapsed = true;
 
+    private void HandleMouseEnter() => isHovered = true;
+    private void HandleMouseLeave() => isHovered = false;
+
     public void Dispose()
     {
         Theme.OnThemeChanged -= StateHasChanged;
+        Language.OnLanguageChanged -= StateHasChanged;
     }
 }
-
-<div id="blazor-error-ui">
-    An unhandled error has occurred.
-    <a href="" class="reload">Reload</a>
-    <a class="dismiss">🗙</a>
-</div>

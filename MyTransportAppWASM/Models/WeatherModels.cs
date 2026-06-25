@@ -1,13 +1,12 @@
-using System;
-using System.Collections.Generic;
 
-namespace MyTransportAppWASM.Models.Weather
+namespace MyTransportAppWASM.Models
 {
   public record WeatherQuery
   {
     public double Latitude { get; set; }
     public double Longitude { get; set; }
     public string? PlaceName { get; set; }
+    public string? LocationId { get; set; }
     public DateTimeOffset? Departure { get; set; }
     public DateTimeOffset? Return { get; set; }
   }
@@ -17,10 +16,14 @@ namespace MyTransportAppWASM.Models.Weather
     public string Label { get; init; } = string.Empty;
     public DateTimeOffset Time { get; init; }
     public double? TemperatureC { get; init; }
+    public double? MinTemperatureC { get; init; }
+    public double? MaxTemperatureC { get; init; }
     public double? PrecipitationMm { get; init; }
     public double? ProbabilityOfRain { get; init; }
     public string? Wind { get; init; }
     public string? Summary { get; init; }
+    public string? Icon { get; init; }
+    public bool IsPlaceholder { get; init; } = false;
   }
 
   public record WeatherProviderResult
@@ -28,7 +31,6 @@ namespace MyTransportAppWASM.Models.Weather
     public string Provider { get; init; } = string.Empty;
     public string Source { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
-    public string? Note { get; init; }
     public DateTimeOffset RetrievedAt { get; init; } = DateTimeOffset.UtcNow;
     public IReadOnlyList<WeatherTimeSlice> Periods { get; init; } = Array.Empty<WeatherTimeSlice>();
     public Uri? Endpoint { get; init; }
@@ -37,8 +39,7 @@ namespace MyTransportAppWASM.Models.Weather
   public record WeatherPlanResult
   {
     public required WeatherQuery Query { get; init; }
-    public required WeatherProviderResult Baseline { get; init; }
-    public required WeatherProviderResult Radar { get; init; }
+    public required IReadOnlyList<WeatherProviderResult> Baselines { get; init; }
     public required IReadOnlyList<WeatherProviderResult> Outlooks { get; init; }
     public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
   }
@@ -47,8 +48,8 @@ namespace MyTransportAppWASM.Models.Weather
   {
     public string Name { get; set; } = string.Empty;
     public string Source { get; set; } = string.Empty;
-    public string? Endpoint { get; set; }
-    public Dictionary<string, string> Suffixes { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public string BaseUrl { get; set; } = string.Empty;
+    public Dictionary<string, string> Endpoints { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string? ApiKey { get; set; }
     public bool Enabled { get; set; }
   }
@@ -56,9 +57,7 @@ namespace MyTransportAppWASM.Models.Weather
   public class WeatherOptions
   {
     public WeatherProviderOptions MetMalaysia { get; set; } = new();
+    public WeatherProviderOptions OpenMeteo { get; set; } = new();
     public WeatherProviderOptions SingaporeNEA { get; set; } = new();
-    public WeatherProviderOptions Radar { get; set; } = new();
-    public List<WeatherProviderOptions> Outlooks { get; set; } = new();
-    public WeatherProviderOptions Weatherbit { get; set; } = new();
   }
 }

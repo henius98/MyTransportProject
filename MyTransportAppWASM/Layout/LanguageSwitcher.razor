@@ -1,0 +1,48 @@
+@using Blazored.LocalStorage
+@using MyTransportAppWASM.Services
+@inject LanguageService Language
+@inject ILocalStorageService LocalStorage
+
+<div class="d-flex align-items-center justify-content-between w-100 p-0 m-0">
+    <div class="d-flex align-items-center">
+        <span class="bi bi-translate me-2" aria-hidden="true"></span>
+        <span style="font-size: 0.85rem;">@CurrentOption.NativeLabel</span>
+    </div>
+
+    <div class="btn-group">
+        <button class="btn btn-sm btn-link text-muted text-decoration-none dropdown-toggle p-0 shadow-none m-0"
+                type="button" data-bs-toggle="dropdown" aria-expanded="false" style="font-size: 0.85rem;">
+            @CurrentOption.ShortName
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+            @foreach (var lang in LanguageService.SupportedLanguages)
+            {
+                <li>
+                    <a class="dropdown-item" href="#" @onclick='() => ChangeLanguage(lang.Code)' @onclick:preventDefault>
+                        @lang.FullName
+                    </a>
+                </li>
+            }
+        </ul>
+    </div>
+</div>
+
+@code {
+    private LanguageOption CurrentOption => LanguageService.SupportedLanguages.FirstOrDefault(l => l.Code ==
+Language.CurrentLanguageName) ?? LanguageService.SupportedLanguages[0];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var savedLang = await LocalStorage.GetItemAsync<string>("user_language");
+        if (!string.IsNullOrEmpty(savedLang) && savedLang != Language.CurrentLanguageName)
+        {
+            await Language.LoadLanguageAsync(savedLang);
+        }
+    }
+
+    private async Task ChangeLanguage(string langCode)
+    {
+        await Language.LoadLanguageAsync(langCode);
+        await LocalStorage.SetItemAsync("user_language", langCode);
+    }
+}

@@ -9,7 +9,7 @@
   width: 100vw;
   height: 100vh;
   z-index: 1000;
-  background: white;
+  background: #000000; /* Theme-aware — prevents white flash in dark mode */
 }
 
 /* Adjust for desktop sidebar */
@@ -17,7 +17,9 @@
   #map-container {
     left: var(--sidebar-width, 250px);
     width: calc(100vw - var(--sidebar-width, 250px));
-    transition: left 0.3s ease, width 0.3s ease;
+    transition:
+      left 0.3s ease,
+      width 0.3s ease;
   }
 }
 
@@ -38,6 +40,7 @@
   border-radius: 20px;
   box-shadow: var(--shadow-lg);
   z-index: 10;
+  overflow: hidden;
   transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -51,6 +54,7 @@
 .overlay-header {
   padding: 12px 16px;
   height: 52px;
+  width: 300px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -60,11 +64,7 @@
   background: rgba(var(--primary-blue-rgb), 0.03);
   border-top-left-radius: 20px;
   border-top-right-radius: 20px;
-}
-
-.map-overlay.collapsed .overlay-header {
-  padding: 0;
-  justify-content: center;
+  /* white-space: nowrap; */
 }
 
 .collapsed-icon {
@@ -78,6 +78,7 @@
 
 .overlay-body {
   padding: 16px;
+  width: 300px;
 }
 
 .map-overlay h2 {
@@ -107,7 +108,6 @@
   color: var(--text-dim);
 }
 
-
 .tracker-status {
   margin-top: 15px;
   padding-top: 15px;
@@ -122,28 +122,21 @@
 .pulse-dot {
   width: 8px;
   height: 8px;
-  background: #34a853; /* Use standard green for success */
+  background: #81c995; /* Light green for dark mode default */
   border-radius: 50%;
   display: inline-block;
-  animation: pulse 2s infinite;
 }
 
-.theme-dark .pulse-dot {
-  background: #81c995;
+.theme-light .pulse-dot {
+  background: #34a853; /* Standard green for light mode */
 }
 
-@keyframes pulse {
-  0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(52, 168, 83, 0.7); }
-  70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(52, 168, 83, 0); }
-  100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(52, 168, 83, 0); }
-}
-
-.bus-info-window {
+::deep .bus-info-window {
   padding: 12px;
   min-width: 180px;
 }
 
-.bus-info-header {
+::deep .bus-info-header {
   font-weight: 800;
   font-size: 1.2rem;
   margin-bottom: 8px;
@@ -152,7 +145,7 @@
   padding-bottom: 8px;
 }
 
-.bus-info-item {
+::deep .bus-info-item {
   font-size: 0.9rem;
   margin-bottom: 6px;
   color: var(--text-color);
@@ -161,40 +154,40 @@
   align-items: center;
 }
 
-.bus-info-item b {
+::deep .bus-info-item b {
   color: var(--text-dim);
   font-weight: 600;
   margin-right: 12px;
 }
 
-.bus-marker {
+::deep .bus-marker {
   cursor: pointer;
   transition: transform 0.2s;
 }
 
-.bus-marker:hover {
+::deep .bus-marker:hover {
   transform: scale(1.2);
 }
 
-/* Style Google Maps InfoWindow to match theme only in dark mode */
-.theme-dark .gm-style .gm-style-iw-c {
+/* Style Google Maps InfoWindow to match theme */
+::deep .gm-style .gm-style-iw-c {
   background-color: var(--card-bg) !important;
   color: var(--text-color) !important;
   border-radius: 12px;
   padding: 0 !important; /* Remove default padding that exposes white background */
 }
 
-.theme-dark .gm-style .gm-style-iw-tc::after {
+::deep .gm-style .gm-style-iw-tc::after {
   background: var(--card-bg) !important;
 }
 
-/* Fix scrollbar and inner background for dark mode */
-.theme-dark .gm-style .gm-style-iw-d {
+/* Fix scrollbar and inner background */
+::deep .gm-style .gm-style-iw-d {
   background-color: transparent !important;
   overflow: hidden !important; /* Hide the scrollbar entirely to prevent white tracks */
 }
 
 /* Hide close button via CSS (fallback if headerDisabled is not supported) */
-.gm-ui-hover-effect {
+::deep .gm-ui-hover-effect {
   display: none !important;
 }

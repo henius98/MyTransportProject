@@ -1,0 +1,67 @@
+/* Buttons */
+.btn {
+  padding: 0.75rem 1.5rem;
+  border-radius: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.btn--primary {
+  background: linear-gradient(
+    135deg,
+    var(--primary-blue) 0%,
+    var(--primary-purple) 100%
+  );
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+}
+
+.btn--primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(99, 102, 241, 0.3);
+  filter: brightness(1.1);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn--secondary {
+  background: rgba(128, 128, 128, 0.1);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+}
+
+.btn--secondary:hover:not(:disabled) {
+  background: rgba(128, 128, 128, 0.2);
+}
+
+.btn--sm {
+  font-size: 0.85rem;
+  padding: 0.5rem 1rem;
+}
+
+/* Links and button defaults */
+a,
+.btn-link {
+  color: #0071c1;
+}
+
+.btn-primary {
+  color: #ffffff;
+  background-color: #1b6ec2;
+  border-color: #1861ac;
+}
+
+/* Hide focus ring only for mouse/pointer users — keyboard users still get :focus-visible */
+h1:focus:not(:focus-visible) {
+  outline: none;
+}
+

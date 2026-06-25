@@ -46,3 +46,4 @@
 - **Dependency Injection**: Services (`IGtfsService`, `IWeatherPlannerService`) are injected via `AddHttpClient`, ensuring proper connection pooling and lifecycle management.
 - **Asynchronous JS Interop**: Heavy use of `Task.WhenAll` to parallelize JS module loading and map initialization without blocking the UI thread.
 - **Graceful Degradation**: Whether it's GPS permission denial, CORS blocked APIs, or failed Protobuf parsing, the application avoids hard crashes by falling back to defaults and informing the user via the UI (`locationStatus`).
+- **UI & Styling Principles**: Implement minimal, simple CSS with a single source of truth (shared styles). Maintain a clear, modern UI aesthetic while strictly avoiding complex, performance-heavy animations.

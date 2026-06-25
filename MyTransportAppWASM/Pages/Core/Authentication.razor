@@ -1,0 +1,104 @@
+@page "/authentication/{action}"
+@layout MainLayout
+@using Microsoft.AspNetCore.Components.WebAssembly.Authentication
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject CountdownTimer _timer
+@implements IDisposable
+
+<div class="modal__backdrop" @onclick="CloseWindow">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="auth-modal-heading" @onclick:stopPropagation="true">
+        <button type="button" class="modal__close" @onclick="CloseWindow" aria-label="Close">&times;</button>
+
+        <RemoteAuthenticatorView Action="@Action" OnLogInSucceeded="HandleSuccess" OnLogOutSucceeded="HandleSuccess">
+            <LoggingIn>
+                <div class="auth-spinner"></div>
+                <h2 class="fw-bold">Signing You In</h2>
+                <p>Please wait while we connect to Google...</p>
+            </LoggingIn>
+            <LogInFailed>
+                <div class="modal__icon">❌</div>
+                <h2 class="fw-bold">Sign-in Failed</h2>
+                <p class="text-muted">@context</p>
+                <button class="btn btn btn--primary mt-2 w-100" @onclick="CloseWindow">Try Again</button>
+            </LogInFailed>
+            <LogOut>
+                <div class="auth-spinner"></div>
+                <h2 class="fw-bold">Logging Out</h2>
+                <p>We're signing you out of your session...</p>
+            </LogOut>
+            <LogOutFailed>
+                <div class="modal__icon">❌</div>
+                <h2 class="fw-bold">Logout Failed</h2>
+                <p class="text-muted">@context</p>
+                <button class="btn btn btn--primary mt-2 w-100" @onclick="CloseWindow">Close</button>
+            </LogOutFailed>
+            <CompletingLogOut>
+                <div class="auth-spinner"></div>
+                <h2 class="fw-bold">Finalizing</h2>
+                <p>Almost done...</p>
+            </CompletingLogOut>
+            <LogOutSucceeded>
+                <div class="modal__icon">✅</div>
+                <h2 class="fw-bold">Logged Out</h2>
+                <p>You have been successfully logged out.</p>
+                <div class="stats mb-3">
+                    <div class="stats__item">
+                        <span class="stats__value">Success</span>
+                        <span class="stats__label">Status</span>
+                    </div>
+                    <div class="stats__divider"></div>
+                    <div class="stats__item">
+                        <span class="stats__value">@(_timer.RemainingSeconds)s</span>
+                        <span class="stats__label">Auto-Close</span>
+                    </div>
+                </div>
+                <button class="btn btn btn--primary w-100" @onclick="CloseWindow">Done</button>
+            </LogOutSucceeded>
+        </RemoteAuthenticatorView>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string? Action { get; set; }
+
+    public void Dispose()
+    {
+        _timer.Dispose();
+    }
+
+    private void CloseWindow()
+    {
+        _timer.Dispose();
+        Navigation.NavigateTo("");
+    }
+
+    private async Task HandleSuccess()
+    {
+        if (Action == "login" || Action == "login-callback")
+        {
+            _ = JS.InvokeVoidAsync("appAuth.clearExplicitLogout");
+        }
+
+        // Run the timer in the background (fire-and-forget) so we don't block the UI
+        _ = _timer.StartAsync(6, StateHasChanged, () =>
+        {
+            // Only navigate if we're still on the authentication page
+            if (Navigation.Uri.Contains("/authentication/"))
+            {
+                Navigation.NavigateTo("");
+            }
+        });
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && Action == "logout")
+        {
+            // Purge all OIDC-related keys from sessionStorage to prevent
+            // the auth library from silently restoring the Google session on refresh.
+            await JS.InvokeVoidAsync("appAuth.noteExplicitLogout");
+            await JS.InvokeVoidAsync("appAuth.purgeOidcState");
+        }
+    }
+}

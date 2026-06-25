@@ -1,0 +1,50 @@
+:root {
+  --bg-color: #000000;
+  --text-color: #f8fafc;
+  --text-dim: #94a3b8;
+  --card-bg: rgba(0, 0, 0, 0.45);
+  --card-border: rgba(255, 255, 255, 0.08);
+  --border-color: rgba(255, 255, 255, 0.1);
+  --sidebar-bg: #4600c7;
+  --primary-blue: #3b82f6;
+  --primary-blue-rgb: 59, 130, 246;
+  --primary-blue-hover: #60a5fa;
+  --primary-blue-transparent: rgba(59, 130, 246, 0.15);
+  --primary-purple: #a855f7;
+  --primary-gradient: linear-gradient(135deg, #3b82f6 0%, #a855f7 100%);
+
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 8px 16px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.15);
+  --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.2);
+
+  /* Navigation Defaults */
+  --nav-link-color: #94a3b8;
+  --nav-link-hover: #f8fafc;
+  --nav-link-active-bg: rgba(255, 255, 255, 0.1);
+
+  /* Scoped Components */
+  --menu-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+  --toggle-bg: rgba(168, 85, 247, 0.15);
+}
+
+.theme-light {
+  --bg-color: #f8fafc;
+  --text-color: #000000;
+  --text-dim: #64748b;
+  --card-bg: rgba(255, 255, 255, 0.65);
+  --card-border: rgba(255, 255, 255, 0.5);
+  --border-color: rgba(0, 0, 0, 0.08);
+  --primary-blue: #2563eb;
+  --primary-blue-rgb: 37, 99, 235;
+  --primary-blue-hover: #1d4ed8;
+  --primary-blue-transparent: rgba(37, 99, 235, 0.1);
+  --primary-purple: #8b5cf6;
+  --primary-gradient: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.02);
+  --shadow-md: 0 8px 16px rgba(0, 0, 0, 0.04), 0 2px 6px rgba(0, 0, 0, 0.02);
+  --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.03);
+
+  --menu-shadow: var(--shadow-lg);
+  --toggle-bg: rgba(0, 0, 0, 0.05);
+}

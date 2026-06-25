@@ -1,0 +1,23 @@
+root = true
+
+# All files
+[*]
+indent_style = space
+indent_size = 2
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+# C# files
+[*.cs]
+indent_style = space
+indent_size = 2
+
+# Razor files
+[*.razor]
+indent_style = space
+indent_size = 2
+# Sometimes turning off insert_final_newline for Razor specifically helps 
+# prevent the SourceText boundary crash in the Language Server.
+insert_final_newline = false

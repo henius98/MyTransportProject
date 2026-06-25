@@ -1,85 +1,236 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-
-<head>
+  <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MyTransportAppWASM</title>
+    <meta
+      name="description"
+      content="Real-time public transit tracking and weather-aware trip planning for Malaysia. Track buses, plan routes, and check weather forecasts."
+    />
     <base href="/" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Outfit:wght@500;700;800&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" />
-    <link rel="stylesheet" href="app.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css"
+      crossorigin="anonymous"
+    />
+    <link rel="stylesheet" href="css/app.css" />
     <link rel="icon" type="image/svg+xml" href="myTransport.svg" />
+    <!-- SVG icon fetched by browser via <link rel="icon"> and splash <img> — no redundant preload needed -->
     <link href="MyTransportAppWASM.styles.css" rel="stylesheet" />
     <link href="manifest.webmanifest" rel="manifest" />
+    <meta
+      name="theme-color"
+      content="#ffffff"
+      media="(prefers-color-scheme: light)"
+    />
+    <meta
+      name="theme-color"
+      content="#000000"
+      media="(prefers-color-scheme: dark)"
+    />
     <link rel="apple-touch-icon" href="myTransport.svg" />
-    <link rel="stylesheet" href="css/auth-modal.css" />
 
-</head>
+    <style>
+      /* Glassmorphism Splash Screen */
+      #app-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 1); /* fallback dark */
+        backdrop-filter: blur(16px);
+        -webkit-backdrop-filter: blur(16px);
+        z-index: 9999;
+      }
+      .splash-logo {
+        width: 120px;
+        height: 120px;
+        animation: pulseLogo 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        filter: drop-shadow(0 0 20px rgba(56, 189, 248, 0.5));
+      }
+      .splash-text {
+        margin-top: 24px;
+        font-family: "Outfit", sans-serif;
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #f8fafc;
+        letter-spacing: 0.05em;
+        animation: fadeText 2s ease-in-out infinite alternate;
+      }
+      @keyframes pulseLogo {
+        0%,
+        100% {
+          opacity: 1;
+          transform: scale(1);
+        }
+        50% {
+          opacity: 0.7;
+          transform: scale(0.95);
+        }
+      }
+      @keyframes fadeText {
+        0% {
+          opacity: 0.5;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+      /* Respect user's motion preference — disable infinite splash animations */
+      @media (prefers-reduced-motion: reduce) {
+        .splash-logo {
+          animation: none;
+        }
+        .splash-text {
+          animation: none;
+          opacity: 1;
+        }
+      }
+    </style>
 
-<body>
+    <!-- Bootstrap JS moved to <body> with defer to prevent render-blocking -->
+  </head>
+
+  <body>
+    <script>
+      // Pre-apply saved theme to avoid flash before Blazor and theme-manager load
+      (function () {
+        var saved = localStorage.getItem("theme-mode-global");
+        var isDark = saved !== "light"; // Default to dark
+        if (isDark) {
+          document.body.classList.remove("theme-light");
+          document.documentElement.setAttribute("data-bs-theme", "dark");
+        } else {
+          document.body.classList.add("theme-light");
+          document.documentElement.setAttribute("data-bs-theme", "light");
+        }
+      })();
+    </script>
     <div id="app">
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background: var(--bg-color);">
-            <div class="standard-spinner"></div>
-            <div class="section-subtitle mt-3">Loading MyTransportApp...</div>
-        </div>
+      <div id="app-splash">
+        <img
+          src="myTransport.svg"
+          alt="MyTransport Logo"
+          class="splash-logo"
+          width="120"
+          height="120"
+          fetchpriority="high"
+        />
+        <div class="splash-text">Loading...</div>
+      </div>
     </div>
 
-    <div id="blazor-error-ui">
-        An unhandled error has occurred.
-        <a href="." class="reload">Reload</a>
-        <span class="dismiss">🗙</span>
+    <div id="blazor-error-ui" role="alert">
+      An unhandled error has occurred.
+      <a href="." class="reload">Reload</a>
+      <button class="dismiss" aria-label="Dismiss error">🗙</button>
     </div>
     <script>
-        window.welcomeManager = {
-            setSeen: function () {
-                localStorage.setItem('hasSeenWelcome', 'true');
-            },
-            hasSeen: function () {
-                return localStorage.getItem('hasSeenWelcome') === 'true';
-            }
-        };
+      window.welcomeManager = {
+        setSeen: function () {
+          localStorage.setItem("hasSeenWelcome", "true");
+        },
+        hasSeen: function () {
+          return localStorage.getItem("hasSeenWelcome") === "true";
+        },
+      };
 
-        // Purge all OIDC session state to prevent silent re-authentication after logout.
-        // The Blazor AuthenticationService.js stores tokens under 'oidc.*' keys in sessionStorage.
-        window.appAuth = {
-            explicitLogoutKey: 'mytransport.explicitLogout',
-            noteExplicitLogout: function () {
-                sessionStorage.setItem(this.explicitLogoutKey, 'true');
-            },
-            clearExplicitLogout: function () {
-                sessionStorage.removeItem(this.explicitLogoutKey);
-            },
-            wasExplicitLogout: function () {
-                return sessionStorage.getItem(this.explicitLogoutKey) === 'true';
-            },
-            purgeOidcState: function () {
-                var keysToRemove = [];
-                for (var i = 0; i < sessionStorage.length; i++) {
-                    var key = sessionStorage.key(i);
-                    if (key && key !== this.explicitLogoutKey && (key.startsWith('oidc.') || key.startsWith('Microsoft.AspNetCore.Components.WebAssembly.Authentication'))) {
-                        keysToRemove.push(key);
-                    }
-                }
-                keysToRemove.forEach(function (k) { sessionStorage.removeItem(k); });
-                console.log('[appAuth] Purged ' + keysToRemove.length + ' OIDC key(s) from sessionStorage');
+      // Purge all OIDC session state to prevent silent re-authentication after logout.
+      // The Blazor AuthenticationService.js stores tokens under 'oidc.*' keys in sessionStorage.
+      window.appAuth = {
+        explicitLogoutKey: "mytransport.explicitLogout",
+        noteExplicitLogout: function () {
+          sessionStorage.setItem(this.explicitLogoutKey, "true");
+        },
+        clearExplicitLogout: function () {
+          sessionStorage.removeItem(this.explicitLogoutKey);
+        },
+        wasExplicitLogout: function () {
+          return sessionStorage.getItem(this.explicitLogoutKey) === "true";
+        },
+        purgeOidcState: function () {
+          var keysToRemove = [];
+          for (var i = 0; i < sessionStorage.length; i++) {
+            var key = sessionStorage.key(i);
+            if (
+              key &&
+              key !== this.explicitLogoutKey &&
+              (key.startsWith("oidc.") ||
+                key.startsWith(
+                  "Microsoft.AspNetCore.Components.WebAssembly.Authentication",
+                ))
+            ) {
+              keysToRemove.push(key);
             }
-        };
+          }
+          keysToRemove.forEach(function (k) {
+            sessionStorage.removeItem(k);
+          });
+          console.log(
+            "[appAuth] Purged " +
+              keysToRemove.length +
+              " OIDC key(s) from sessionStorage",
+          );
+        },
+      };
     </script>
-    <script type="importmap"></script>
+    <!-- Empty importmap removed — no module specifier overrides needed -->
+    <script src="js/theme-manager.js"></script>
     <script src="_content/Microsoft.AspNetCore.Components.WebAssembly.Authentication/AuthenticationService.js"></script>
     <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
     <script src="js/auth.js" type="module"></script>
     <script>
-        // Unregister any previously cached service workers to suppress stale no-op fetch handler warnings
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(function (registrations) {
-                for (let reg of registrations) { reg.unregister(); }
-            });
-        }
+      // Unregister any previously cached service workers to suppress stale no-op fetch handler warnings
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker
+          .getRegistrations()
+          .then(function (registrations) {
+            for (let reg of registrations) {
+              reg.unregister();
+            }
+          });
+      }
     </script>
-</body>
+    <!-- Dialog Helper and Fallback -->
+    <script>
+      window.dialogHelper = {
+        showModal: function (id) {
+          var el = document.getElementById(id);
+          if (el) el.showModal();
+        },
+        close: function (id) {
+          var el = document.getElementById(id);
+          if (el) el.close();
+        },
+      };
 
+      if (!("closedBy" in HTMLDialogElement.prototype)) {
+        document.addEventListener("click", function (event) {
+          var dialog = event.target.closest("dialog");
+          if (dialog && dialog.getAttribute("closedby") === "any") {
+            if (event.target !== dialog) return;
+            var rect = dialog.getBoundingClientRect();
+            var isDialogContent =
+              rect.top <= event.clientY &&
+              event.clientY <= rect.top + rect.height &&
+              rect.left <= event.clientX &&
+              event.clientX <= rect.left + rect.width;
+            if (!isDialogContent) dialog.close();
+          }
+        });
+      }
+    </script>
+    <!-- Bootstrap JS deferred so it doesn't block initial render -->
+    <script src="lib/bootstrap/dist/js/bootstrap.bundle.min.js" defer></script>
+  </body>
 </html>

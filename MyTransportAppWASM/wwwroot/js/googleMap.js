@@ -333,6 +333,9 @@ export async function syncMarkers(locations) {
 		// Remove old markers
 		for (const id in activeMarkers) {
 			if (!currentIds.has(id)) {
+				if (activeMarkers[id]._clickListener) {
+					activeMarkers[id]._clickListener.remove();
+				}
 				activeMarkers[id].map = null;
 				delete activeMarkers[id];
 			}
@@ -370,7 +373,7 @@ export async function syncMarkers(locations) {
 				loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
 				marker.busData = loc;
 
-				marker.addListener("gmp-click", () => {
+				marker._clickListener = marker.addListener("gmp-click", () => {
 					if (infoWindow.get("anchor") === marker) {
 						infoWindow.close();
 						return;
@@ -398,4 +401,68 @@ export async function syncMarkers(locations) {
 	} catch (err) {
 		console.error("syncMarkers internal error:", err);
 	}
+}
+export async function showLocationPickerMap(containerId, locations, dotnetHelper, apiKey) {
+    await loadGoogleMaps(apiKey);
+    const { Map } = await google.maps.importLibrary("maps");
+    const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // Center map around Malaysia
+    const map = new Map(container, {
+        center: { lat: 4.2105, lng: 101.9758 },
+        zoom: 6,
+        mapId: "LOCATION_PICKER_MAP",
+        disableDefaultUI: false
+    });
+
+    locations.forEach(loc => {
+        const marker = new AdvancedMarkerElement({
+            position: { lat: loc.latitude, lng: loc.longitude },
+            map: map,
+            title: loc.location_name
+        });
+
+        marker.addListener("gmp-click", () => {
+            dotnetHelper.invokeMethodAsync('OnLocationSelectedFromMap', loc.latitude, loc.longitude, `MET ID: ${loc.location_id}`, loc.location_name);
+        });
+    });
+}
+
+export function showDialog(dialog) {
+    if (dialog && typeof dialog.showModal === 'function') {
+        dialog.showModal();
+    }
+}
+
+export function closeDialog(dialog) {
+    if (dialog && typeof dialog.close === 'function') {
+        dialog.close();
+    }
+}
+
+export function cleanupMap() {
+	for (const id in activeMarkers) {
+		if (activeMarkers[id]._clickListener) {
+			activeMarkers[id]._clickListener.remove();
+		}
+		activeMarkers[id].map = null;
+		delete activeMarkers[id];
+	}
+	routePolylines.forEach(p => p.setMap(null));
+	routePolylines = [];
+	routeMarkers.forEach(m => (m.map = null));
+	routeMarkers = [];
+	
+	if (infoWindow) {
+		infoWindow.close();
+		infoWindow = null;
+	}
+	if (userMarker) {
+		userMarker.map = null;
+		userMarker = null;
+	}
+	map = null;
 }

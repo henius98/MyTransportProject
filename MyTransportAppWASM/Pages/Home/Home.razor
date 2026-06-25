@@ -1,0 +1,98 @@
+@page "/"
+@page "/index.html"
+@using MyTransportAppWASM.Services
+@using MyTransportAppWASM.Services.Interfaces
+@inject IFormFactor FormFactor
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+
+<PageTitle>Home - MyTransportApp</PageTitle>
+
+<div class="hero">
+    <div class="hero__content">
+        <h1 class="section-title">Ready for your next journey?</h1>
+        <p class="section-subtitle">Track real-time bus locations and plan your trips with live weather insights across
+            Malaysia.</p>
+
+            <div class="dashboard">
+                <div class="card card-map" role="button" tabindex="0"
+                     @onclick='() => Navigation.NavigateTo("map")'
+                     @onkeydown='(e) => { if (e.Key == "Enter" || e.Key == " ") Navigation.NavigateTo("map"); }'>
+                    <div class="dashboard__icon">📍</div>
+                    <h3>Live Bus Map</h3>
+                    <p>Track rapid bus positions in real-time on our interactive map.</p>
+                    <div class="dashboard__footer">
+                        <span class="dash-link">Open Map</span>
+                        <span class="arrow">&rarr;</span>
+                    </div>
+                </div>
+
+                <div class="card card-weather" role="button" tabindex="0"
+                     @onclick='() => Navigation.NavigateTo("weather")'
+                     @onkeydown='(e) => { if (e.Key == "Enter" || e.Key == " ") Navigation.NavigateTo("weather"); }'>
+                    <div class="dashboard__icon">🌦️</div>
+                    <h3>Weather Planner</h3>
+                    <p>Get precise weather forecasts for your departure and return.</p>
+                    <div class="dashboard__footer">
+                        <span class="dash-link">Plan Trip</span>
+                        <span class="arrow">&rarr;</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (showWelcome)
+    {
+        <div class="modal__backdrop" @onclick="CloseWelcome">
+            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title" @onclick:stopPropagation="true">
+                <button type="button" class="modal__close" @onclick="CloseWelcome">&times;</button>
+                <div class="modal__icon">👋</div>
+                <h2 id="welcome-title" class="fw-bold">Welcome to MyTransportApp!</h2>
+                <p>Your ultimate companion for navigating public transport in Malaysia, Singapore. We've combined real-time GTFS
+                    data with precise weather modeling.</p>
+
+                    <div class="stats mb-3">
+                        <div class="stats__item">
+                            <span class="stats__value">@factor</span>
+                            <span class="stats__label">Form Factor</span>
+                        </div>
+                        <div class="stats__divider"></div>
+                        <div class="stats__item">
+                            <span class="stats__value">@platform</span>
+                            <span class="stats__label">Platform</span>
+                        </div>
+                    </div>
+
+                    <button class="btn btn btn--primary w-100" @onclick="CloseWelcome">Let's Get Started!</button>
+                </div>
+            </div>
+        }
+
+
+
+@code {
+    private string factor => FormFactor.GetFormFactor();
+    private string platform => FormFactor.GetPlatform();
+
+    private bool showWelcome;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var hasSeen = await JS.InvokeAsync<bool>("welcomeManager.hasSeen");
+            if (!hasSeen)
+            {
+                showWelcome = true;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private async Task CloseWelcome()
+    {
+        showWelcome = false;
+        await JS.InvokeVoidAsync("welcomeManager.setSeen");
+    }
+}

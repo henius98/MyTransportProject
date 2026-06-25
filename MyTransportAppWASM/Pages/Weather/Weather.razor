@@ -1,0 +1,259 @@
+@page "/weather"
+@using MyTransportAppWASM.Models
+@using MyTransportAppWASM.Services.Interfaces
+@using MyTransportAppWASM.Services
+@using MyTransportAppWASM.Pages.Weather.Components
+@inject IGeocodingService GeocodingService
+@inject ILocationService LocationService
+@inject IConfiguration Config
+@inject IJSRuntime JS
+@inject LanguageService Language
+@implements IDisposable
+
+<PageTitle>Trip Weather Planner</PageTitle>
+
+<div class="d-flex align-items-center flex-wrap gap-3 mb-4">
+  <div class="d-flex align-items-center">
+    <h1 class="section-title mb-0">Trip Weather Planner</h1>
+    <button class="btn btn-link p-0 ms-3" @onclick="ShowHelpDialog" aria-label="How this works" title="How this works"
+            style="opacity: 0.8; transition: opacity 0.2s;">
+      <i class="bi bi-question-circle" style="font-size: 1.8rem;" aria-hidden="true"></i>
+    </button>
+  </div>
+  <p class="section-subtitle m-0 text-dim w-100">
+    Get an at-a-glance plan that blends live forecasts and outlooks based on your location.
+  </p>
+</div>
+<dialog id="helpDialog" closedby="any" aria-labelledby="help-title"
+        style="padding: 0; border: none; background: transparent; max-width: 90vw; outline: none;">
+  <form method="dialog" class="modal">
+    <button type="submit" class="modal__close" aria-label="Close help">&times;</button>
+    <div class="modal__icon" aria-hidden="true">💡</div>
+    <h2 id="help-title" class="fw-bold">How this works</h2>
+    <p class="text-start">Plan your trip with precision using our multi-source weather engine:</p>
+    <ul class="text-start mb-3 list-unstyled">
+      <li class="mb-2"><span aria-hidden="true">📍</span> <strong>Search:</strong> Type any place name and click 🔍 to
+        update coordinates.</li>
+        <li class="mb-2"><span aria-hidden="true">🌦️</span> <strong>Baseline:</strong> Real-time forecasts from
+          high-availability providers.</li>
+          <li class="mb-2"><span aria-hidden="true">📅</span> <strong>Outlooks:</strong> Multi-day weather trends for your
+            return trip.</li>
+          </ul>
+          <button type="submit" class="btn btn--primary w-100">Got it!</button>
+        </form>
+      </dialog>
+
+      <div class="row g-4 mt-2">
+        <div class="col-lg-4 col-xl-3">
+          <div class="position-sticky" style="top: 1rem; z-index: 10; max-height: calc(100vh - 4rem); overflow-y: auto;">
+            <div class="card">
+              <h2 class="mb-3 h3">Location</h2>
+              @if (!string.IsNullOrEmpty(errorMessage))
+              {
+                <div class="alert alert-warning py-2 px-3 mb-3" role="alert" style="font-size: 0.9rem; border-radius: 8px;">
+                  @errorMessage
+                </div>
+              }
+              <div class="mb-3">
+                <label class="form-label" for="placeSearch">Search by Place Name</label>
+                <search class="search-container d-flex gap-2">
+                  <LocationSearchAutocomplete id="placeSearch" Value="@query.PlaceName"
+                                              OnSuggestionSelected="HandleSuggestionSelected" />
+                  <button class="btn btn--secondary px-3" @onclick="ResetToLocalLocation" disabled="@isLoading"
+                          aria-label="Use My Location" title="My Location">
+                    <span aria-hidden="true">📍</span>
+                  </button>
+                </search>
+              </div>
+              <div class="row g-3">
+                <div class="col-6">
+                  <label class="form-label" for="latInput">Latitude</label>
+                  <InputNumber id="latInput" TValue="double" @bind-Value="query.Latitude" class="form-input" Step="0.001" />
+                </div>
+                <div class="col-6">
+                  <label class="form-label" for="lngInput">Longitude</label>
+                  <InputNumber id="lngInput" TValue="double" @bind-Value="query.Longitude" class="form-input" Step="0.001" />
+                </div>
+                <div class="col-6">
+                  <label class="form-label" for="departInput">Depart</label>
+                  <InputDate id="departInput" TValue="DateTime?" @bind-Value="departureDate" class="form-input" />
+                </div>
+                <div class="col-6">
+                  <label class="form-label" for="returnInput">Return</label>
+                  <InputDate id="returnInput" TValue="DateTime?" @bind-Value="returnDate" class="form-input" />
+                </div>
+              </div>
+              <button class="btn btn--primary w-100 py-3 mt-4 fw-bold shadow-sm"
+                      style="font-size: 1.1rem; border-radius: 12px; transition: transform 0.2s;" @onclick="LoadPlanAsync"
+                      disabled="@isLoading">
+                @(isLoading ? "Loading..." : "Get Forecast")
+              </button>
+              @if (isFetched)
+              {
+                <div class="mt-4 d-flex flex-wrap gap-2 mb-0">
+                  <span class="chip">📍 @DisplayLocation(query)</span>
+                  @if (query.Departure.HasValue || query.Return.HasValue)
+                  {
+                    <span class="chip">📅 @DisplayDateRange(query.Departure, query.Return)</span>
+                  }
+                </div>
+              }
+            </div>
+            @if (isFetched)
+            {
+              <div class="mt-4">
+                <h2 class="mb-3 fw-semibold text-primary h4" style="letter-spacing: -0.01em;">Real-Time Forecast</h2>
+                <div class="planner mb-4">
+                  @if (_options.MetMalaysia.Enabled)
+                  {
+                    <MetMalaysiaWeatherCard @key="@(queryKey + "-met-baseline")" Options="_options.MetMalaysia" Query="query"
+                                            Label="Baseline" FetchOutlook="false" />
+                  }
+                  @if (_options.OpenMeteo.Enabled)
+                  {
+                    <OpenMeteoWeatherCard @key="@(queryKey + "-open-baseline")" Options="_options.OpenMeteo" Query="query"
+                                          Label="Baseline" FetchOutlook="false" />
+                  }
+                  @if (_options.SingaporeNEA.Enabled && IsNearSingapore(query.Latitude, query.Longitude))
+                  {
+                    <SingaporeNeaWeatherCard @key="@(queryKey + "-nea-baseline")" Options="_options.SingaporeNEA" Query="query"
+                                             Label="Baseline" FetchOutlook="false" />
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+
+        <div class="col-lg-8 col-xl-9">
+          @if (isFetched && query.Return.HasValue)
+          {
+            <h2 class="mb-3 fw-semibold text-primary h4" style="letter-spacing: -0.01em;">Multi-Day Outlook</h2>
+            <div class="planner">
+              @if (_options.MetMalaysia.Enabled)
+              {
+                <MetMalaysiaWeatherCard @key="@(queryKey + "-met-outlook")" Options="_options.MetMalaysia" Query="query"
+                                        Label="Outlook" FetchOutlook="true" />
+              }
+              @if (_options.OpenMeteo.Enabled)
+              {
+                <OpenMeteoWeatherCard @key="@(queryKey + "-open-outlook")" Options="_options.OpenMeteo" Query="query"
+                                      Label="Outlook" FetchOutlook="true" />
+              }
+              @if (_options.SingaporeNEA.Enabled && IsNearSingapore(query.Latitude, query.Longitude))
+              {
+                <SingaporeNeaWeatherCard @key="@(queryKey + "-nea-outlook")" Options="_options.SingaporeNEA" Query="query"
+                                         Label="Outlook" FetchOutlook="true" />
+              }
+            </div>
+          }
+        </div>
+      </div>
+
+@code {
+  private WeatherQuery query = new();
+  private WeatherOptions _options = new();
+  private DateTime? departureDate = DateTime.Today;
+  private DateTime? returnDate = DateTime.Today.AddDays(3);
+  private bool isLoading, isFetched;
+  private string queryKey = Guid.NewGuid().ToString();
+  private string? errorMessage;
+
+  private async Task ShowHelpDialog()
+  {
+    await JS.InvokeVoidAsync("dialogHelper.showModal", "helpDialog");
+  }
+
+  public void Dispose()
+  {
+    Language.OnLanguageChanged -= StateHasChanged;
+  }
+
+  protected override async Task OnInitializedAsync()
+  {
+    Language.OnLanguageChanged += StateHasChanged;
+    _options = Config.GetSection("WeatherProviders").Get<WeatherOptions>() ?? new();
+  }
+
+  private async Task HandleSuggestionSelected((double Lat, double Lng, string FormattedAddress, string Name) suggestion)
+  {
+    errorMessage = null;
+    query.PlaceName = suggestion.Name;
+    query.Latitude = suggestion.Lat;
+    query.Longitude = suggestion.Lng;
+    if (suggestion.FormattedAddress != null && suggestion.FormattedAddress.StartsWith("MET ID: "))
+    {
+      query.LocationId = suggestion.FormattedAddress.Substring(8).Trim();
+    }
+    else
+    {
+      query.LocationId = null;
+    }
+    await LoadPlanAsync();
+  }
+
+  private async Task LoadPlanAsync()
+  {
+    if (isLoading) return;
+
+    isLoading = true;
+    StateHasChanged();
+
+    try
+    {
+      query.Departure = departureDate.HasValue ? new DateTimeOffset(departureDate.Value) : null;
+      query.Return = returnDate.HasValue ? new DateTimeOffset(returnDate.Value) : null;
+
+      // Update key to force re-render of components
+      queryKey = Guid.NewGuid().ToString();
+      isFetched = true;
+
+      // Small delay to allow UI to render skeletons/spinners
+      await Task.Delay(50);
+    }
+    catch (Exception ex)
+    {
+      Console.Error.WriteLine(ex);
+    }
+    finally
+    {
+      isLoading = false;
+      StateHasChanged();
+    }
+  }
+
+  private async Task ResetToLocalLocation()
+  {
+    errorMessage = null;
+    var pos = await LocationService.GetCurrentLocationAsync(forceRefresh: true);
+    if (pos != null)
+    {
+      query.Latitude = pos.Latitude;
+      query.Longitude = pos.Longitude;
+      var address = await GeocodingService.ReverseGeocodeAsync(pos.Latitude, pos.Longitude);
+      query.PlaceName = string.IsNullOrWhiteSpace(address) ? "Current Location" : address;
+    }
+    else
+    {
+      errorMessage = "Could not determine your current location. Please check your browser permissions.";
+      return;
+    }
+    await LoadPlanAsync();
+  }
+
+  private static string DisplayLocation(WeatherQuery value)
+  {
+    string location = string.IsNullOrWhiteSpace(value.PlaceName) ? "Custom location" : value.PlaceName;
+    return $"{location} ({value.Latitude:F3}, {value.Longitude:F3})";
+  }
+
+  private static string DisplayDateRange(DateTimeOffset? start, DateTimeOffset? end)
+  {
+    string startText = start.HasValue ? start.Value.ToString("dd MMM") : "?";
+    string endText = end.HasValue ? end.Value.ToString("dd MMM") : "?";
+    return (startText == "?" && endText == "?") ? string.Empty : $"{startText} → {endText}";
+  }
+
+  private static bool IsNearSingapore(double lat, double lon) => lat >= 1.15 && lat <= 1.50 && lon >= 103.55 && lon <=
+104.15;
+}

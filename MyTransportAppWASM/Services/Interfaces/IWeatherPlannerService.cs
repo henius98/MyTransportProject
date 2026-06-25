@@ -1,9 +1,8 @@
-using MyTransportAppWASM.Models.Weather;
 
 namespace MyTransportAppWASM.Services.Interfaces
 {
   public interface IWeatherPlannerService
   {
-    Task<WeatherPlanResult> GetWeatherPlanAsync(WeatherQuery query, CancellationToken cancellationToken = default);
+    Task<WeatherProviderResult> FetchProviderDataAsync(WeatherProviderOptions provider, Uri endpoint, string label, CancellationToken cancellationToken = default);
   }
 }

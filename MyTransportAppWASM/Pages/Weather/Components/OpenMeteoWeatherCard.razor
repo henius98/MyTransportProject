@@ -1,0 +1,197 @@
+@using MyTransportAppWASM.Models
+@using MyTransportAppWASM.Services.Interfaces
+@using System.Globalization
+@inject MyTransportAppWASM.Services.LanguageService Language
+@inject IWeatherPlannerService WeatherPlannerService
+
+<div class="card h-100">
+    <div class="d-flex align-items-center justify-content-between mb-3 border-bottom border-secondary border-opacity-10 pb-3">
+        <div>
+            <h3 class="m-0 fw-semibold" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(Options.Name ?? "Open-Meteo")</h3>
+            <div class="text-dim mt-1" style="font-size: 0.75rem;">
+                <i class="bi bi-box-arrow-up-right me-1"></i>@(Options.Source ?? "open-meteo.com")
+            </div>
+        </div>
+        <span class="badge @MyTransportAppWASM.Utils.WeatherUIHelper.GetStatusClass(Provider?.Status ?? "Loading")">@(Provider?.Status ?? "Loading")</span>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="d-flex justify-content-center p-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+        </div>
+    }
+    else if (Provider?.Periods != null && Provider.Periods.Count > 1)
+    {
+        <div class="table-responsive mt-2 bg-secondary bg-opacity-10 rounded p-2">
+            <table class="table table-sm table-borderless align-middle mb-0" style="font-size: 0.95rem;">
+                <thead class="text-dim border-bottom border-secondary border-opacity-25" style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;">
+                    <tr>
+                        <th class="fw-semibold pb-2 ps-2">Date</th>
+                        <th class="fw-semibold pb-2 text-center"><i class="bi bi-thermometer-half me-1"></i>Temp</th>
+                        <th class="fw-semibold pb-2 text-center"><i class="bi bi-cloud-rain me-1"></i>Rain %</th>
+                        <th class="fw-semibold pb-2 text-end pe-2"><i class="bi bi-droplet me-1"></i>Precip</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var slice in Provider.Periods)
+                    {
+                        <tr class="border-bottom border-secondary border-opacity-10">
+                            <td class="py-2 ps-2">
+                                <div class="fw-semibold text-nowrap">
+                                    <i class="@slice.Icon me-1"></i>@(Language[slice.Summary ?? "N/A"])
+                                </div>
+                                <div class="text-dim" style="font-size: 0.75rem;">@slice.Time.ToLocalTime().ToString("ddd, dd MMM")</div>
+                            </td>
+                            <td class="py-2 text-center fw-medium text-danger">
+                                @(slice.TemperatureC.HasValue ? $"{slice.TemperatureC:0.#}°C" : "-")
+                            </td>
+                            <td class="py-2 text-center fw-medium">
+                                @if (slice.ProbabilityOfRain.HasValue)
+                                {
+                                    <span class="@(slice.ProbabilityOfRain > 0.4 ? "text-primary fw-bold" : "")">
+                                        @($"{slice.ProbabilityOfRain * 100:0}%")
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">-</span>
+                                }
+                            </td>
+                            <td class="py-2 text-end fw-medium text-info pe-2">
+                                @(slice.PrecipitationMm.HasValue ? $"{slice.PrecipitationMm:0.#} mm" : "-")
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (Provider?.Periods != null && Provider.Periods.Count == 1)
+    {
+        var slice = Provider.Periods[0];
+        <div class="d-flex align-items-center p-3 rounded mb-2 mt-2 shadow-sm" style="background: var(--bs-body-bg); border: 1px solid var(--bs-border-color-translucent);">
+            <div class="me-4 fs-1">
+                <i class="@slice.Icon"></i>
+            </div>
+            <div class="flex-grow-1">
+                <div class="d-flex justify-content-end align-items-center mb-1">
+                    <span class="text-dim" style="font-size: 0.85rem;">@slice.Time.ToLocalTime().ToString("ddd, dd MMM HH:mm")</span>
+                </div>
+                
+                <div class="fw-medium mb-2 fs-5" style="letter-spacing: -0.01em;">@(Language[slice.Summary ?? "N/A"])</div>
+                
+                <div class="d-flex flex-wrap gap-3 text-dim fw-medium" style="font-size: 0.9rem;">
+                    @if (slice.TemperatureC.HasValue)
+                    {
+                        <span class="text-danger"><i class="bi bi-thermometer-half me-1"></i>@($"{slice.TemperatureC:0.#}°C")</span>
+                    }
+                    @if (slice.ProbabilityOfRain.HasValue)
+                    {
+                        <span class="@(slice.ProbabilityOfRain > 0.4 ? "text-primary fw-bold" : "")">
+                            <i class="bi bi-cloud-rain me-1"></i>@($"{slice.ProbabilityOfRain * 100:0}%")
+                        </span>
+                    }
+                    @if (slice.PrecipitationMm.HasValue)
+                    {
+                        <span class="text-info"><i class="bi bi-droplet me-1"></i>@($"{slice.PrecipitationMm:0.#} mm")</span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(slice.Wind))
+                    {
+                        <span><i class="bi bi-wind me-1"></i>@slice.Wind</span>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public required WeatherProviderOptions Options { get; set; }
+
+    [Parameter, EditorRequired]
+    public required WeatherQuery Query { get; set; }
+
+    [Parameter]
+    public string Label { get; set; } = "Baseline";
+
+    [Parameter]
+    public bool FetchOutlook { get; set; } = false;
+
+    private WeatherProviderResult? Provider;
+    private bool isLoading = true;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isLoading = true;
+        try
+        {
+            if (Options.Enabled && !string.IsNullOrWhiteSpace(Options.BaseUrl))
+            {
+                string endpointPath = string.Empty;
+                if (FetchOutlook && Options.Endpoints.TryGetValue("Outlook", out string? outlookPath))
+                {
+                    endpointPath = outlookPath;
+                }
+                else if (Options.Endpoints.TryGetValue("Baseline", out string? baselinePath))
+                {
+                    endpointPath = baselinePath;
+                }
+
+                string fullUrl = Options.BaseUrl + endpointPath;
+                Uri uri = BuildUri(fullUrl, Query);
+                Provider = await WeatherPlannerService.FetchProviderDataAsync(Options, uri, Label);
+
+                // Filter logic
+                if (!FetchOutlook && Provider.Periods.Count > 1)
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    var closest = Provider.Periods.OrderBy(p => Math.Abs((p.Time - now).Ticks)).FirstOrDefault();
+                    if (closest != null)
+                        Provider = Provider with { Periods = new List<WeatherTimeSlice> { closest } };
+                }
+                else if (FetchOutlook && Provider.Periods.Count > 0)
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    var sortedPeriods = Provider.Periods.Where(p => p.Time.Date >= now.Date).OrderBy(p => p.Time).Take(14).ToList();
+                    Provider = Provider with { Periods = sortedPeriods };
+                }
+            }
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private Uri BuildUri(string template, WeatherQuery query)
+    {
+        var formatted = template
+            .Replace("{lat}", query.Latitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
+            .Replace("{lon}", query.Longitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
+
+        if (formatted.Contains("{forecast_hours}", StringComparison.OrdinalIgnoreCase))
+        {
+            formatted = formatted.Replace("{forecast_hours}", "1", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (formatted.Contains("{forecast_days}", StringComparison.OrdinalIgnoreCase))
+        {
+            int days = 7;
+            if (query.Return.HasValue)
+            {
+                var timeSpan = query.Return.Value.Date - DateTimeOffset.UtcNow.Date;
+                days = Math.Max(1, Math.Min(16, timeSpan.Days + 2));
+            }
+            formatted = formatted.Replace("{forecast_days}", days.ToString(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (!string.IsNullOrWhiteSpace(Options.ApiKey))
+            formatted = formatted.Replace("{key}", Options.ApiKey, StringComparison.OrdinalIgnoreCase).Replace("{apiKey}", Options.ApiKey, StringComparison.OrdinalIgnoreCase);
+
+        return new Uri(formatted, UriKind.Absolute);
+    }
+}
