@@ -54,11 +54,6 @@ jobs:
           sed -i 's/<base href="\/" \/>/<base href="\/MyTransportProject\/" \/>/g' release/wwwroot/index.html
           sed -i 's/<base href="\/" \/>/<base href="\/MyTransportProject\/" \/>/g' release/wwwroot/404.html
 
-          # Fix SPA 404s by creating physical paths for known routes
-          for path in "map" "weather" "settings" "authentication/login" "authentication/login-callback" "authentication/login-failed" "authentication/logout" "authentication/logout-callback" "authentication/logout-failed" "authentication/logged-out"; do
-            mkdir -p release/wwwroot/$path
-            cp release/wwwroot/index.html release/wwwroot/$path/index.html
-          done
       - name: Deploy to GitHub Pages
         if: github.ref == 'refs/heads/master'
         uses: JamesIves/github-pages-deploy-action@v4
