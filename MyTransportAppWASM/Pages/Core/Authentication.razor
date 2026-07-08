@@ -38,6 +38,11 @@
                 <h2 class="fw-bold">Finalizing</h2>
                 <p>Almost done...</p>
             </CompletingLogOut>
+            <CompletingLoggingIn>
+                <div class="auth-spinner"></div>
+                <h2 class="fw-bold">Login Successful</h2>
+                <p>Redirecting you back to the application...</p>
+            </CompletingLoggingIn>
             <LogOutSucceeded>
                 <div class="modal__icon">✅</div>
                 <h2 class="fw-bold">Logged Out</h2>
@@ -78,6 +83,8 @@
         if (Action == "login" || Action == "login-callback")
         {
             _ = JS.InvokeVoidAsync("appAuth.clearExplicitLogout");
+            Navigation.NavigateTo("");
+            return;
         }
 
         // Run the timer in the background (fire-and-forget) so we don't block the UI

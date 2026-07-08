@@ -71,6 +71,8 @@ public partial class Map : IAsyncDisposable
       _ = InitializeAutocompleteAsync();
       await InitializeMapOptimisticallyAsync();
 
+      if (_isDisposed) return;
+
       // Start periodic bus refresh using PeriodicTimer (WASM-friendly, no SynchronizationContext issues)
       _ = RunBusPollingLoopAsync(_cts.Token);
     }
@@ -237,6 +239,7 @@ public partial class Map : IAsyncDisposable
         return;
       }
 
+      if (_isDisposed) return;
       var cancellationToken = _cts.Token;
 
       var tasks = nearbyProviders.Select(async provider =>
@@ -354,14 +357,16 @@ public partial class Map : IAsyncDisposable
 
     objRef?.Dispose();
 
-    if (mapModule is not null)
+    if (mapModule != null)
     {
       try
       {
+        await mapModule.InvokeVoidAsync("disposeAutocomplete", "origin-input");
+        await mapModule.InvokeVoidAsync("disposeAutocomplete", "destination-input");
         await mapModule.InvokeVoidAsync("cleanupMap");
         await mapModule.DisposeAsync();
       }
-      catch (JSDisconnectedException) { /* Ignore during disposal */ }
+      catch (JSDisconnectedException) { }
     }
   }
 }

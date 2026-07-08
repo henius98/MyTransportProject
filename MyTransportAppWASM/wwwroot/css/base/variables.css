@@ -1,50 +1,61 @@
 :root {
-  --bg-color: #000000;
-  --text-color: #f8fafc;
+  /* Premium Dark Mode (Default) */
+  --bg-color: #0b0c10;
+  --bg-gradient: radial-gradient(circle at 15% 50%, rgba(20, 22, 30, 1), #050505);
+  --text-color: #f1f5f9;
   --text-dim: #94a3b8;
-  --card-bg: rgba(0, 0, 0, 0.45);
-  --card-border: rgba(255, 255, 255, 0.08);
-  --border-color: rgba(255, 255, 255, 0.1);
-  --sidebar-bg: #4600c7;
-  --primary-blue: #3b82f6;
-  --primary-blue-rgb: 59, 130, 246;
-  --primary-blue-hover: #60a5fa;
-  --primary-blue-transparent: rgba(59, 130, 246, 0.15);
-  --primary-purple: #a855f7;
-  --primary-gradient: linear-gradient(135deg, #3b82f6 0%, #a855f7 100%);
+  
+  /* Glassmorphism Card System */
+  --card-bg: rgba(18, 20, 26, 0.6);
+  --card-border: rgba(255, 255, 255, 0.04);
+  --border-color: rgba(255, 255, 255, 0.08);
+  --sidebar-bg: rgba(11, 12, 16, 0.85);
+  
+  /* Primary Vibrant Colors */
+  --primary-blue: #38bdf8;
+  --primary-blue-rgb: 56, 189, 248;
+  --primary-blue-hover: #7dd3fc;
+  --primary-blue-transparent: rgba(56, 189, 248, 0.15);
+  --primary-purple: #c084fc;
+  --primary-gradient: linear-gradient(135deg, #38bdf8 0%, #c084fc 100%);
 
-  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 8px 16px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.15);
-  --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.2);
+  /* Premium Shadows */
+  --shadow-sm: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
 
   /* Navigation Defaults */
   --nav-link-color: #94a3b8;
-  --nav-link-hover: #f8fafc;
-  --nav-link-active-bg: rgba(255, 255, 255, 0.1);
+  --nav-link-hover: #ffffff;
+  --nav-link-active-bg: rgba(255, 255, 255, 0.08);
 
   /* Scoped Components */
-  --menu-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-  --toggle-bg: rgba(168, 85, 247, 0.15);
+  --menu-shadow: var(--shadow-lg);
+  --toggle-bg: rgba(192, 132, 252, 0.15);
 }
 
 .theme-light {
+  /* Premium Light Mode */
   --bg-color: #f8fafc;
-  --text-color: #000000;
+  --bg-gradient: radial-gradient(circle at top left, #ffffff, #f1f5f9);
+  --text-color: #0f172a;
   --text-dim: #64748b;
-  --card-bg: rgba(255, 255, 255, 0.65);
-  --card-border: rgba(255, 255, 255, 0.5);
-  --border-color: rgba(0, 0, 0, 0.08);
-  --primary-blue: #2563eb;
-  --primary-blue-rgb: 37, 99, 235;
-  --primary-blue-hover: #1d4ed8;
-  --primary-blue-transparent: rgba(37, 99, 235, 0.1);
-  --primary-purple: #8b5cf6;
-  --primary-gradient: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  
+  --card-bg: rgba(255, 255, 255, 0.7);
+  --card-border: rgba(255, 255, 255, 0.8);
+  --border-color: rgba(15, 23, 42, 0.08);
+  
+  --primary-blue: #0284c7;
+  --primary-blue-rgb: 2, 132, 199;
+  --primary-blue-hover: #0369a1;
+  --primary-blue-transparent: rgba(2, 132, 199, 0.1);
+  --primary-purple: #9333ea;
+  --primary-gradient: linear-gradient(135deg, #0284c7 0%, #9333ea 100%);
 
-  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.02);
-  --shadow-md: 0 8px 16px rgba(0, 0, 0, 0.04), 0 2px 6px rgba(0, 0, 0, 0.02);
-  --shadow-lg: 0 16px 32px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.03);
+  --shadow-sm: 0 4px 6px -1px rgba(15, 23, 42, 0.05), 0 2px 4px -1px rgba(15, 23, 42, 0.03);
+  --shadow-md: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -2px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 20px 25px -5px rgba(15, 23, 42, 0.1), 0 10px 10px -5px rgba(15, 23, 42, 0.04);
 
   --menu-shadow: var(--shadow-lg);
-  --toggle-bg: rgba(0, 0, 0, 0.05);
+  --toggle-bg: rgba(147, 51, 234, 0.08);
 }

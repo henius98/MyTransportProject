@@ -9,18 +9,19 @@
         <span style="font-size: 0.85rem;">@CurrentOption.NativeLabel</span>
     </div>
 
-    <div class="btn-group">
+    <div class="btn-group" @onfocusout="OnFocusOut">
         <button class="btn btn-sm btn-link text-muted text-decoration-none dropdown-toggle p-0 shadow-none m-0"
-                type="button" data-bs-toggle="dropdown" aria-expanded="false" style="font-size: 0.85rem;">
+                type="button" aria-expanded="@(_isOpen.ToString().ToLower())" aria-haspopup="menu" aria-label="Select language" 
+                style="font-size: 0.85rem;" @onclick="ToggleDropdown">
             @CurrentOption.ShortName
         </button>
-        <ul class="dropdown-menu dropdown-menu-end shadow-sm">
+        <ul class="dropdown-menu dropdown-menu-end shadow-sm @(_isOpen ? "show" : "")" style="position: absolute; right: 0; top: 100%;" role="menu">
             @foreach (var lang in LanguageService.SupportedLanguages)
             {
-                <li>
-                    <a class="dropdown-item" href="#" @onclick='() => ChangeLanguage(lang.Code)' @onclick:preventDefault>
+                <li role="presentation">
+                    <button class="dropdown-item" type="button" role="menuitem" @onclick='() => ChangeLanguage(lang.Code)'>
                         @lang.FullName
-                    </a>
+                    </button>
                 </li>
             }
         </ul>
@@ -28,6 +29,8 @@
 </div>
 
 @code {
+    private bool _isOpen;
+
     private LanguageOption CurrentOption => LanguageService.SupportedLanguages.FirstOrDefault(l => l.Code ==
 Language.CurrentLanguageName) ?? LanguageService.SupportedLanguages[0];
 
@@ -40,9 +43,23 @@ Language.CurrentLanguageName) ?? LanguageService.SupportedLanguages[0];
         }
     }
 
+    private void ToggleDropdown()
+    {
+        _isOpen = !_isOpen;
+    }
+
+    private async Task OnFocusOut(FocusEventArgs e)
+    {
+        // Delay to allow click event to register before closing
+        await Task.Delay(150);
+        _isOpen = false;
+        StateHasChanged();
+    }
+
     private async Task ChangeLanguage(string langCode)
     {
         await Language.LoadLanguageAsync(langCode);
         await LocalStorage.SetItemAsync("user_language", langCode);
+        _isOpen = false;
     }
 }

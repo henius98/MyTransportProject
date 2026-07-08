@@ -465,4 +465,25 @@ export function cleanupMap() {
 		userMarker = null;
 	}
 	map = null;
+
+	// Fallback clear all autocompletes
+	for (const id in autocompletes) {
+		disposeAutocomplete(id);
+	}
+}
+
+/**
+ * Properly disposes of an autocomplete widget and its event listeners
+ * to prevent detached DOM memory leaks.
+ */
+export function disposeAutocomplete(elementId) {
+	if (autocompletes[elementId]) {
+		const widget = autocompletes[elementId];
+		// By removing the widget from the DOM and deleting the reference,
+		// the browser GC will clean it up along with any attached 'gmp-select' listeners.
+		if (widget && widget.parentNode) {
+			widget.parentNode.removeChild(widget);
+		}
+		delete autocompletes[elementId];
+	}
 }

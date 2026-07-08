@@ -3,7 +3,7 @@
   position: relative;
 }
 
-.dropdown {
+.user-menu-dropdown {
   position: absolute;
   top: 100%;
   left: 0;
@@ -108,11 +108,11 @@
   padding: 0;
 }
 
-.dropdown .text-muted {
+.user-menu-dropdown .text-muted {
   color: var(--text-dim) !important;
 }
 
-.dropdown .nav-link {
+.user-menu-dropdown .nav-link {
   color: var(--text-color) !important;
   font-size: 0.9rem;
   padding: 0.5rem 0.75rem;
@@ -123,12 +123,12 @@
   width: 100%;
 }
 
-.dropdown .nav-link .bi {
+.user-menu-dropdown .nav-link .bi {
   top: 0;
   margin-right: 0.75rem;
 }
 
-.dropdown .nav-link:hover {
+.user-menu-dropdown .nav-link:hover {
   background-color: var(--primary-blue-transparent);
   color: var(--primary-blue) !important;
   text-decoration: none;

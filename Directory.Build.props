@@ -1,0 +1,9 @@
+<Project>
+  <!-- Workaround for dotnet/sdk#54309: dotnet watch fails on Linux/macOS because
+       IntermediateOutputPath evaluates with a backslash (obj\Debug/net10.0/).
+       Force Configuration to 'Debug' when unset, then normalize the path. -->
+  <PropertyGroup>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <IntermediateOutputPath>obj/$(Configuration)/$(TargetFramework)/</IntermediateOutputPath>
+  </PropertyGroup>
+</Project>

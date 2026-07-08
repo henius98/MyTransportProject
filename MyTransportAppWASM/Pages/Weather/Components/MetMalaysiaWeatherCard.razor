@@ -99,26 +99,33 @@
 
     private WeatherProviderResult? Provider;
     private bool isLoading = true;
+    private string? lastUrl;
 
     protected override async Task OnParametersSetAsync()
     {
-        isLoading = true;
         try
         {
             if (Options.Enabled && !string.IsNullOrWhiteSpace(Options.BaseUrl))
             {
                 string endpointPath = string.Empty;
-                if (FetchOutlook && Options.Endpoints.TryGetValue("Outlook", out string? outlookPath))
+                if (FetchOutlook && Options.Endpoints != null && Options.Endpoints.TryGetValue("Outlook", out string? outlookPath))
                 {
                     endpointPath = outlookPath;
                 }
-                else if (Options.Endpoints.TryGetValue("Baseline", out string? baselinePath))
+                else if (Options.Endpoints != null && Options.Endpoints.TryGetValue("Baseline", out string? baselinePath))
                 {
                     endpointPath = baselinePath;
                 }
 
                 string fullUrl = Options.BaseUrl + endpointPath;
                 Uri uri = BuildUri(fullUrl, Query);
+                
+                if (lastUrl == uri.AbsoluteUri)
+                    return; // Prevent duplicate fetches on parent re-render
+                
+                lastUrl = uri.AbsoluteUri;
+                isLoading = true;
+
                 Provider = await WeatherPlannerService.FetchProviderDataAsync(Options, uri, Label);
 
                 // If fetching baseline, just grab the closest time
