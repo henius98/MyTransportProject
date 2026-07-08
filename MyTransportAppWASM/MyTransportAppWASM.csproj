@@ -13,7 +13,6 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <DebuggerSupport>true</DebuggerSupport>
     <EventSourceSupport>true</EventSourceSupport>
-    <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
