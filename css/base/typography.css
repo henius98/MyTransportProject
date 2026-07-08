@@ -1,0 +1,57 @@
+/* Google Fonts loaded via <link> in index.html — @import here was a duplicate that caused a cascading request waterfall */
+
+html,
+body {
+  font-family:
+    "Inter",
+    system-ui,
+    -apple-system,
+    sans-serif;
+  background-color: var(--bg-color);
+  background-image: var(--bg-gradient);
+  background-attachment: fixed;
+  color: var(--text-color);
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Typography */
+.section-title {
+  font-family: "Outfit", sans-serif;
+  font-size: clamp(2.5rem, 6vw, 4rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin-bottom: 0.75rem;
+  background: linear-gradient(
+    135deg,
+    var(--primary-blue) 0%,
+    var(--primary-purple) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1.05;
+}
+
+.section-subtitle {
+  color: var(--text-dim);
+  font-size: 1.25rem;
+  font-weight: 500;
+  margin: 0 auto 2.5rem auto;
+  line-height: 1.6;
+  max-width: 800px;
+}
+
+/* Content spacing */
+.content {
+  padding-top: 1.1rem;
+}
+
+/* Code styling */
+code {
+  color: #c02d76;
+}
+

@@ -6,5 +6,5 @@ if (window.name === 'auth_popup' && !window.location.pathname.includes('/authent
             window.opener.location.reload();
         }
         window.close();
-    }, 1000);
+    }, 90);
 }
