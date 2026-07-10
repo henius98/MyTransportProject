@@ -67,6 +67,40 @@
                     <span class="pulse-dot"></span>
                     <span>@(string.IsNullOrEmpty(locationStatus) ? "Ready" : locationStatus)</span>
                 </div>
+
+                @if (_routeOptions != null && _routeOptions.Any())
+                {
+                    <div class="route-options mt-3" style="max-height: 300px; overflow-y: auto;">
+                        <h3 class="fs-6 mb-2">Live Route Options</h3>
+                        @foreach (var route in _routeOptions)
+                        {
+                            <div class="card mb-2 p-2 shadow-sm @(route.HasLiveBus ? "border-success" : "") @(route.OriginalRoute.RouteId == _activeRouteId ? "border-primary border-2 shadow" : "")" style="background: var(--surface-color); border: 1px solid var(--border-color); cursor: pointer;" @onclick="() => SelectRoute(route)">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <strong style="color: var(--text-color);">Option @(route.OriginalRoute.RouteId + 1)</strong>
+                                    <span class="badge @(route.HasLiveBus ? "bg-success" : "bg-secondary")">
+                                        @(route.HasLiveBus ? "Live" : "Scheduled")
+                                    </span>
+                                </div>
+                                <div class="small mt-1" style="color: var(--text-muted);">
+                                    <div>Base ETA: @(route.OriginalRoute.DurationSeconds / 60) mins</div>
+                                    @if (route.HasLiveBus)
+                                    {
+                                        <div class="text-success fw-bold">Live ETA: @(route.LiveTotalDurationSeconds / 60) mins</div>
+                                    }
+                                </div>
+                                @if (route.NearestBuses.Any())
+                                {
+                                    <div class="small mt-1" style="color: var(--text-muted);">
+                                        @foreach (var bus in route.NearestBuses)
+                                        {
+                                            <div>Bus <strong>@bus.RouteId</strong> is @((int)bus.DistanceToStopMeters)m away</div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
             </div>
     </div>
 </div>

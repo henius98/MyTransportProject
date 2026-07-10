@@ -46,6 +46,7 @@ namespace MyTransportAppWASM
       builder.Services.AddScoped<ThemeService>();
       builder.Services.AddScoped<LanguageService>();
       builder.Services.AddScoped<ILocationService, LocationService>();
+      builder.Services.AddScoped<MyTransportAppWASM.Services.Interfaces.ILiveRoutingService, LiveRoutingService>();
       builder.Services.AddTransient<CountdownTimer>();
 
       builder.Services.AddOidcAuthentication(options =>

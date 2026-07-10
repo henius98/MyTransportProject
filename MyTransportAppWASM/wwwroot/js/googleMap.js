@@ -7,6 +7,8 @@ const autocompletes = Object.create(null);
 // Route rendering state (replaces legacy DirectionsRenderer)
 let routePolylines = [];
 let routeMarkers = [];
+let routeOptionsMap = new Map();
+let currentActiveRouteId = -1;
 
 
 
@@ -188,6 +190,8 @@ export function clearRoute() {
 	routePolylines = [];
 	routeMarkers.forEach(m => (m.map = null));
 	routeMarkers = [];
+	routeOptionsMap.clear();
+	currentActiveRouteId = -1;
 }
 
 /**
@@ -282,6 +286,134 @@ export async function showRouteByName(originName, destinationName, travelMode = 
 		throw err;
 	}
 }
+
+export async function getTransitRoutes(originName, destinationName) {
+	await loadGoogleMaps();
+	try {
+		const [originLoc, destinationLoc] = await Promise.all([
+			geocodePlaceName(originName),
+			geocodePlaceName(destinationName)
+		]);
+
+		const { Route } = await google.maps.importLibrary("routes");
+		const { GeometryLibrary } = await google.maps.importLibrary("geometry");
+
+		const request = {
+			origin: originLoc,
+			destination: destinationLoc,
+			travelMode: "TRANSIT",
+			computeAlternativeRoutes: true,
+			fields: ["*"],
+		};
+
+		const { routes } = await Route.computeRoutes(request);
+
+		if (!routes || routes.length === 0) {
+			return [];
+		}
+
+		return routes.map((r, index) => {
+			const steps = [];
+			if (r.legs && r.legs.length > 0) {
+				r.legs.forEach(leg => {
+					if (leg.steps) {
+						leg.steps.forEach(step => {
+							if (step.transitDetails) {
+								const td = step.transitDetails;
+								steps.push({
+									lineShortName: td.transitLine?.shortName || td.transitLine?.nameShort || "",
+									lineName: td.transitLine?.name || "",
+									departureLat: typeof td.departureStop?.location?.lat === 'function' ? td.departureStop.location.lat() : (td.departureStop?.location?.lat || 0),
+									departureLng: typeof td.departureStop?.location?.lng === 'function' ? td.departureStop.location.lng() : (td.departureStop?.location?.lng || 0),
+									departureStopName: td.departureStop?.name || ""
+								});
+							}
+						});
+					}
+				});
+			}
+
+			let encodedPolyline = "";
+			if (r.path && google.maps.geometry?.encoding) {
+				encodedPolyline = google.maps.geometry.encoding.encodePath(r.path);
+			}
+
+			return {
+				routeId: index,
+				encodedPolyline: encodedPolyline,
+				durationSeconds: r.durationMillis ? Math.round(r.durationMillis / 1000) : 0,
+				distanceMeters: r.distanceMeters || 0,
+				transitSteps: steps
+			};
+		});
+
+	} catch (err) {
+		console.error("getTransitRoutes failed:", err);
+		throw err;
+	}
+}
+
+export async function drawMultipleRoutes(routesData, activeRouteId, dotNetRef) {
+	await loadGoogleMaps();
+	if (!map) throw new Error("Map not initialized.");
+	
+	const { GeometryLibrary } = await google.maps.importLibrary("geometry");
+
+	clearRoute();
+	currentActiveRouteId = activeRouteId;
+
+	const bounds = new google.maps.LatLngBounds();
+
+	routesData.forEach(routeData => {
+		if (!routeData.path) return;
+		
+		const path = google.maps.geometry.encoding.decodePath(routeData.path);
+		
+		const polyline = new google.maps.Polyline({
+			path: path,
+			strokeColor: "#808080",
+			strokeWeight: 3,
+			zIndex: 1,
+			clickable: true
+		});
+
+		polyline.addListener("click", () => {
+			if (currentActiveRouteId !== routeData.id) {
+				setActiveRoute(routeData.id);
+				dotNetRef.invokeMethodAsync('OnRouteSelected', routeData.id);
+			}
+		});
+
+		polyline.setMap(map);
+		routePolylines.push(polyline);
+		routeOptionsMap.set(routeData.id, { polyline, hasLiveBus: routeData.hasLiveBus });
+		
+		path.forEach(latLng => bounds.extend(latLng));
+	});
+
+	if (routesData.length > 0) {
+		map.fitBounds(bounds);
+		setActiveRoute(activeRouteId);
+	}
+}
+
+export function setActiveRoute(routeId) {
+	currentActiveRouteId = routeId;
+	
+	routeOptionsMap.forEach((data, id) => {
+		const isActive = (id === routeId);
+		const color = isActive ? (data.hasLiveBus ? "#0F9D58" : "#4285F4") : "#808080";
+		const weight = isActive ? 6 : 3;
+		const zIndex = isActive ? 100 : 1;
+
+		data.polyline.setOptions({
+			strokeColor: color,
+			strokeWeight: weight,
+			zIndex: zIndex
+		});
+	});
+}
+
 
 export async function geocodePlaceName(name) {
 	await loadGoogleMaps();

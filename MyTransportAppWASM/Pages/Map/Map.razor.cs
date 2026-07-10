@@ -10,6 +10,7 @@ public partial class Map : IAsyncDisposable
   [Inject] private IConfiguration Config { get; set; } = default!;
   [Inject] private ThemeService Theme { get; set; } = default!;
   [Inject] private ILocationService LocationService { get; set; } = default!;
+  [Inject] private MyTransportAppWASM.Services.Interfaces.ILiveRoutingService LiveRouting { get; set; } = default!;
 
   private double Latitude;
   private double Longitude;
@@ -24,7 +25,9 @@ public partial class Map : IAsyncDisposable
   private bool _isDisposed = false;
   private string locationStatus = "Initializing...";
   private bool isCollapsed = false;
-  private ConcurrentDictionary<string, List<object>> _providerVehicleCache = new();
+  private ConcurrentDictionary<string, List<MyTransportAppWASM.Models.BusLocation>> _providerVehicleCache = new();
+  private List<MyTransportAppWASM.Models.EnrichedRoute> _routeOptions = new();
+  private int _activeRouteId = -1;
 
   private string MapContainerClass => Theme.IsDarkMode ? "theme-dark" : "theme-light";
   private string MapOverlayClass => $"map-overlay {(isCollapsed ? "collapsed" : "")}".Trim();
@@ -180,6 +183,14 @@ public partial class Map : IAsyncDisposable
     StateHasChanged();
   }
 
+  [JSInvokable]
+  public void OnRouteSelected(int routeId)
+  {
+    if (_activeRouteId == routeId) return;
+    _activeRouteId = routeId;
+    StateHasChanged();
+  }
+
   private async Task InitializeAutocompleteAsync()
   {
     if (mapModule is null || _isDisposed || objRef is null) return;
@@ -249,16 +260,16 @@ public partial class Map : IAsyncDisposable
 
         _providerVehicleCache[provider.Endpoint] = feed.Entity
                   .Where(e => e.Vehicle?.Position != null)
-                  .Select(e => (object)new
+                  .Select(e => new MyTransportAppWASM.Models.BusLocation
                   {
-                    tripId = e.Vehicle.Trip?.TripId,
-                    routeId = e.Vehicle.Trip?.RouteId,
-                    vehicleId = e.Vehicle.Vehicle.Id,
-                    lat = e.Vehicle.Position.Latitude,
-                    lng = e.Vehicle.Position.Longitude,
-                    bearing = e.Vehicle.Position.Bearing,
-                    speed = e.Vehicle.Position.Speed,
-                    timestamp = e.Vehicle.Timestamp
+                    TripId = e.Vehicle.Trip?.TripId,
+                    RouteId = e.Vehicle.Trip?.RouteId,
+                    VehicleId = e.Vehicle.Vehicle.Id,
+                    Lat = e.Vehicle.Position.Latitude,
+                    Lng = e.Vehicle.Position.Longitude,
+                    Bearing = e.Vehicle.Position.Bearing,
+                    Speed = e.Vehicle.Position.Speed,
+                    Timestamp = e.Vehicle.Timestamp
                   }).ToList();
       });
 
@@ -313,18 +324,61 @@ public partial class Map : IAsyncDisposable
 
     try
     {
-      locationStatus = "Calculating route...";
+      locationStatus = "Calculating live routes...";
+      _routeOptions.Clear();
       StateHasChanged();
-      await mapModule.InvokeVoidAsync("showRouteByName", origin, destination, mode);
-      locationStatus = "Route displayed.";
+
+      var googleRoutes = await mapModule.InvokeAsync<List<MyTransportAppWASM.Models.GoogleRoute>>("getTransitRoutes", origin, destination);
+      
+      if (googleRoutes == null || googleRoutes.Count == 0)
+      {
+        locationStatus = "No transit routes found.";
+        StateHasChanged();
+        return;
+      }
+
+      var allVehicles = _providerVehicleCache.Values.SelectMany(x => x).ToList();
+      _routeOptions = await LiveRouting.EnrichRoutesAsync(googleRoutes, allVehicles);
+
+      var top3 = _routeOptions.Take(3).ToList();
+      if (top3.Any())
+      {
+          _activeRouteId = top3.First().OriginalRoute.RouteId;
+          
+          var routeData = top3.Select(r => new {
+              id = r.OriginalRoute.RouteId,
+              path = r.OriginalRoute.EncodedPolyline,
+              hasLiveBus = r.HasLiveBus
+          }).ToList();
+
+          await mapModule.InvokeVoidAsync("drawMultipleRoutes", routeData, _activeRouteId, objRef);
+      }
+
+      locationStatus = $"Found {_routeOptions.Count} routes.";
       StateHasChanged();
     }
     catch (Exception ex)
     {
       if (_isDisposed) return;
-      locationStatus = "Route failed.";
+      locationStatus = "Route calculation failed.";
       Console.Error.WriteLine($"Route display failed: {ex.Message}");
       StateHasChanged();
+    }
+  }
+
+  private async Task SelectRoute(MyTransportAppWASM.Models.EnrichedRoute route)
+  {
+    if (mapModule == null || _isDisposed) return;
+    _activeRouteId = route.OriginalRoute.RouteId;
+    try
+    {
+      await mapModule.InvokeVoidAsync("setActiveRoute", _activeRouteId);
+      locationStatus = $"Showing Route {route.OriginalRoute.RouteId + 1}";
+      StateHasChanged();
+    }
+    catch (Exception ex)
+    {
+      Console.Error.WriteLine($"SelectRoute failed: {ex.Message}");
     }
   }
 
