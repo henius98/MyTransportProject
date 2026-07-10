@@ -6,7 +6,7 @@
 @implements IDisposable
 @implements IAsyncDisposable
 
-<div class="d-flex gap-2 align-items-start w-100">
+<div class="d-flex gap-2 align-items-center w-100">
     <div class="position-relative flex-grow-1">
     <input class="form-input w-100" 
            id="@Id"
@@ -60,7 +60,7 @@
     }
     </div>
     
-    <button type="button" class="btn btn-outline-primary" @onclick="OpenMapModal" title="Select on Map" aria-label="Select on Map">
+    <button type="button" class="btn btn--secondary btn--icon" @onclick="OpenMapModal" title="Select on Map" aria-label="Select on Map">
         <i class="bi bi-map" aria-hidden="true"></i>
     </button>
 </div>

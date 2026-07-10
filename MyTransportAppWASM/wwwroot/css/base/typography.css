@@ -36,6 +36,17 @@ body {
   line-height: 1.05;
 }
 
+/* 
+  Remove focus outline from the h1. FocusOnNavigate component programmatically
+  focuses the h1 element on page change for screen readers. The outline is unnecessary 
+  visually. 
+*/
+h1:focus, 
+h1:focus-visible, 
+.section-title:focus {
+  outline: none !important;
+}
+
 .section-subtitle {
   color: var(--text-dim);
   font-size: 1.25rem;
