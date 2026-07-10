@@ -1,0 +1,98 @@
+@page "/fortune"
+@using MyTransportAppWASM.Models.BaziFlow
+@inject MyTransportAppWASM.Services.Interfaces.IBaziFlowService BaziFlowService
+@inject MyTransportAppWASM.Services.LanguageService Language
+
+<div class="fortune-page container mt-4">
+    <div class="row justify-content-center">
+        <div class="col-12 col-md-8 col-lg-6">
+            @if (isLoading)
+            {
+                <div class="text-center mt-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            }
+            else if (!hasApiKey || profile == null)
+            {
+                <div class="fortune-card setup-card p-4">
+                    <h3 class="mb-3">@Language["Bazi Fortune Setup"]</h3>
+                    <p class="text-muted mb-4">@Language["Please configure your profile and API key to receive your daily fortune."]</p>
+                    
+                    <EditForm Model="setupModel" OnValidSubmit="HandleSetupSubmit">
+                        <DataAnnotationsValidator />
+                        <div class="mb-3">
+                            <label class="form-label">@Language["API Key"]</label>
+                            <InputText @bind-Value="setupModel.ApiKey" class="form-control" placeholder="Enter BaziFlow API Key" required />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">@Language["Gender"]</label>
+                            <InputSelect @bind-Value="setupModel.Gender" class="form-select">
+                                <option value="1">Male</option>
+                                <option value="0">Female</option>
+                            </InputSelect>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">@Language["Birth Date"]</label>
+                            <InputText type="date" @bind-Value="setupModel.BirthDate" class="form-control" required />
+                        </div>
+                        <div class="row">
+                            <div class="col-6 mb-3">
+                                <label class="form-label">@Language["Birth Hour"]</label>
+                                <InputNumber @bind-Value="setupModel.BirthHour" class="form-control" min="0" max="23" required />
+                            </div>
+                            <div class="col-6 mb-3">
+                                <label class="form-label">@Language["Birth Minute"]</label>
+                                <InputNumber @bind-Value="setupModel.BirthMinute" class="form-control" min="0" max="59" required />
+                            </div>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100" disabled="@isSaving">
+                            @if (isSaving)
+                            {
+                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                            }
+                            else
+                            {
+                                @Language["Save & View Fortune"]
+                            }
+                        </button>
+                    </EditForm>
+                </div>
+            }
+            else
+            {
+                <div class="fortune-card p-4 mb-4">
+                    <div class="fortune-header mb-4 text-center">
+                        <h2 class="fortune-title">@Language["Daily Fortune"]</h2>
+                        <div class="fortune-date">@DateTime.Now.ToString("dddd, MMMM dd, yyyy")</div>
+                    </div>
+                    
+                    @if (fortune == null)
+                    {
+                        <div class="alert alert-warning">
+                            @Language["Could not retrieve daily fortune. Please try again later."]
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="fortune-content">
+                            <div class="almanac-section mb-4">
+                                <h4>@Language["Almanac"]</h4>
+                                <p>@fortune.Almanac</p>
+                            </div>
+                            <div class="analysis-section">
+                                <h4>@Language["Analysis"]</h4>
+                                <p>@fortune.Analysis</p>
+                            </div>
+                        </div>
+                    }
+                    
+                    <div class="mt-4 pt-3 border-top text-center text-muted small">
+                        @Language["Bazi Profile"]: @profile.SolarDate • @(profile.Gender == "Male" ? "Male" : "Female")
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>

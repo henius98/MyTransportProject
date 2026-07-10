@@ -1,0 +1,73 @@
+.fortune-page {
+    min-height: 80vh;
+}
+
+.fortune-card {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+    color: var(--text-primary, inherit);
+    position: relative;
+    overflow: hidden;
+}
+
+/* Add a subtle ethereal glow behind the card content */
+.fortune-card::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle at center, rgba(138, 43, 226, 0.15) 0%, rgba(0, 0, 0, 0) 60%);
+    z-index: 0;
+    pointer-events: none;
+}
+
+.fortune-card > * {
+    position: relative;
+    z-index: 1;
+}
+
+.setup-card {
+    max-width: 500px;
+    margin: 0 auto;
+}
+
+.fortune-header {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-bottom: 1.5rem;
+}
+
+.fortune-title {
+    font-weight: 700;
+    letter-spacing: 1px;
+    background: linear-gradient(90deg, #9b59b6, #e74c3c);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    text-fill-color: transparent;
+}
+
+.fortune-date {
+    font-size: 0.9rem;
+    opacity: 0.8;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.almanac-section h4, .analysis-section h4 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary, inherit);
+    opacity: 0.9;
+}
+
+.almanac-section p, .analysis-section p {
+    line-height: 1.6;
+    font-size: 1rem;
+}
