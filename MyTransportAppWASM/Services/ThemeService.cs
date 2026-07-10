@@ -1,20 +1,20 @@
-using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.JSInterop;
+using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM.Services;
 
 public class ThemeService
 {
   private readonly IJSRuntime _js;
-  private readonly AuthenticationStateProvider _authStateProvider;
+  private readonly IUserSettingsService _userSettingsService;
   private bool _isDarkMode = true;
-  private string? _userKey = null;
 
   public event Action? OnThemeChanged;
 
-  public ThemeService(IJSRuntime js, AuthenticationStateProvider authStateProvider)
+  public ThemeService(IJSRuntime js, IUserSettingsService userSettingsService)
   {
     _js = js;
-    _authStateProvider = authStateProvider;
+    _userSettingsService = userSettingsService;
   }
 
   public bool IsDarkMode
@@ -32,21 +32,15 @@ public class ThemeService
 
   public async Task InitializeAsync()
   {
-    var authState = await _authStateProvider.GetAuthenticationStateAsync();
-    var user = authState.User;
-
-    // Use the 'sub' claim (unique Google ID) as a key suffix
-    _userKey = user.Identity?.IsAuthenticated == true
-        ? user.FindFirst("sub")?.Value
-        : "guest";
-
-    IsDarkMode = await _js.InvokeAsync<bool>("themeManager.initialize", _userKey);
+      var settings = await _userSettingsService.GetSettingsAsync();
+      IsDarkMode = settings.Theme != "light";
+      await _js.InvokeVoidAsync("themeManager.setTheme", IsDarkMode, "global");
   }
 
   public async Task ToggleThemeAsync()
   {
     IsDarkMode = !IsDarkMode;
-    var key = _userKey ?? "guest";
-    await _js.InvokeVoidAsync("themeManager.setTheme", IsDarkMode, key);
+    await _js.InvokeVoidAsync("themeManager.setTheme", IsDarkMode, "global");
+    await _userSettingsService.UpdateThemeAsync(IsDarkMode ? "dark" : "light");
   }
 }

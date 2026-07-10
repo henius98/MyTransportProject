@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Blazored.LocalStorage;
 using System.Reflection;
 using System.Globalization;
+using Microsoft.AspNetCore.Components.Authorization;
+using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM
 {
@@ -43,19 +45,21 @@ namespace MyTransportAppWASM
       })
           .AddStandardResilienceHandler(failFastResilience);
 
+      builder.Services.AddHttpClient<IBaziFlowService, BaziFlowService>(client =>
+      {
+          client.BaseAddress = new Uri(builder.Configuration["BaziFlow:BaseUrl"] ?? "http://localhost:3000");
+      }).AddStandardResilienceHandler(failFastResilience);
+
       builder.Services.AddScoped<ThemeService>();
       builder.Services.AddScoped<LanguageService>();
       builder.Services.AddScoped<ILocationService, LocationService>();
       builder.Services.AddScoped<MyTransportAppWASM.Services.Interfaces.ILiveRoutingService, LiveRoutingService>();
       builder.Services.AddTransient<CountdownTimer>();
 
-      builder.Services.AddOidcAuthentication(options =>
-      {
-        builder.Configuration.Bind("Authentication:Google", options.ProviderOptions);
-        options.ProviderOptions.DefaultScopes.Add("openid");
-        options.ProviderOptions.DefaultScopes.Add("profile");
-        options.ProviderOptions.DefaultScopes.Add("email");
-      });
+      builder.Services.AddAuthorizationCore();
+      builder.Services.AddScoped<AuthenticationStateProvider, FirebaseAuthenticationStateProvider>();
+      builder.Services.AddScoped<IUserSettingsService, UserSettingsService>();
+      builder.Services.AddScoped<AppStateService>();
 
       builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
 
