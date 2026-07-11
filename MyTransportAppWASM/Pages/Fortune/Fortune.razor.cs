@@ -8,6 +8,7 @@ namespace MyTransportAppWASM.Pages.Fortune
         private bool isLoading = true;
         private bool isSaving = false;
         private bool hasApiKey = false;
+        private string? errorMessage = null;
         
         private ProfileDetail? profile;
         private FortuneData? fortune;
@@ -42,9 +43,10 @@ namespace MyTransportAppWASM.Pages.Fortune
             isLoading = false;
         }
 
-        private async Task HandleSetupSubmit()
-        {
-            isSaving = true;
+            private async Task HandleSetupSubmit()
+            {
+                errorMessage = null;
+                isSaving = true;
             
             await BaziFlowService.SaveApiKeyAsync(setupModel.ApiKey);
             
@@ -57,18 +59,19 @@ namespace MyTransportAppWASM.Pages.Fortune
                 Location = "Malaysia" // Default location for transport app
             };
             
-            var success = await BaziFlowService.CreateProfileAsync(request);
-            if (success)
-            {
-                await LoadDataAsync();
-            }
-            else
-            {
-                // In a real app we'd show an error toast here
-                hasApiKey = false;
-            }
-            
-            isSaving = false;
+                var success = await BaziFlowService.CreateProfileAsync(request);
+                if (success)
+                {
+                    await LoadDataAsync();
+                }
+                else
+                {
+                    errorMessage = "Failed to create profile. Your API key may be invalid or the service is down.";
+                    hasApiKey = false;
+                    await BaziFlowService.SaveApiKeyAsync(string.Empty); // Clear invalid key
+                }
+                
+                isSaving = false;
         }
 
         public class SetupModel

@@ -20,6 +20,13 @@
                     <h3 class="mb-3">@Language["Bazi Fortune Setup"]</h3>
                     <p class="text-muted mb-4">@Language["Please configure your profile and API key to receive your daily fortune."]</p>
                     
+                    @if (!string.IsNullOrEmpty(errorMessage))
+                    {
+                        <div class="alert alert-danger" role="alert">
+                            @errorMessage
+                        </div>
+                    }
+                    
                     <EditForm Model="setupModel" OnValidSubmit="HandleSetupSubmit">
                         <DataAnnotationsValidator />
                         <div class="mb-3">
