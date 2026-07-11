@@ -1,18 +1,18 @@
 namespace MyTransportAppWASM.Models.BaziFlow
 {
-    public class ApiResponse<T>
+    public record ApiResponse<T>
     {
         public string Status { get; set; } = string.Empty;
         public T? Data { get; set; }
     }
 
-    public class ApiError
+    public record ApiError
     {
         public string Status { get; set; } = string.Empty;
         public string Message { get; set; } = string.Empty;
     }
 
-    public class CreateProfileRequest
+    public record CreateProfileRequest
     {
         public int Gender { get; set; }
         public string BirthDate { get; set; } = string.Empty;
@@ -21,17 +21,17 @@ namespace MyTransportAppWASM.Models.BaziFlow
         public string? Location { get; set; }
     }
 
-    public class DateFortuneRequest
+    public record DateFortuneRequest
     {
         public string Date { get; set; } = string.Empty;
     }
 
-    public class ProfileData
+    public record ProfileData
     {
         public ProfileDetail? Profile { get; set; }
     }
 
-    public class ProfileDetail
+    public record ProfileDetail
     {
         public string? Gender { get; set; }
         public string? SolarDate { get; set; }
@@ -40,9 +40,11 @@ namespace MyTransportAppWASM.Models.BaziFlow
         public string? BaziSummary { get; set; }
     }
 
-    public class FortuneData
+    public record FortuneData
     {
         public string Almanac { get; set; } = string.Empty;
         public string Analysis { get; set; } = string.Empty;
+        public List<string> FavorableDirections { get; set; } = new();
+        public List<int> LuckyHours { get; set; } = new();
     }
 }
