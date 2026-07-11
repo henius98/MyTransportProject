@@ -3,7 +3,7 @@ namespace MyTransportAppWASM.Models
   public record TransportProvider(string Name, string Endpoint, double CenterLat, double CenterLng, double RadiusKm);
 
   // Models for Live Routing Service
-  public class GoogleRoute
+  public record GoogleRoute
   {
     public int RouteId { get; set; }
     public string EncodedPolyline { get; set; } = "";
@@ -12,7 +12,7 @@ namespace MyTransportAppWASM.Models
     public List<TransitStep> TransitSteps { get; set; } = new();
   }
 
-  public class TransitStep
+  public record TransitStep
   {
     public string LineShortName { get; set; } = "";
     public string LineName { get; set; } = "";
@@ -21,7 +21,7 @@ namespace MyTransportAppWASM.Models
     public string DepartureStopName { get; set; } = "";
   }
 
-  public class BusLocation
+  public record BusLocation
   {
     [System.Text.Json.Serialization.JsonPropertyName("tripId")]
     public string? TripId { get; set; }
@@ -41,7 +41,7 @@ namespace MyTransportAppWASM.Models
     public ulong Timestamp { get; set; }
   }
 
-  public class LiveBusInfo
+  public record LiveBusInfo
   {
     public string VehicleId { get; set; } = "";
     public string RouteId { get; set; } = "";
@@ -51,11 +51,12 @@ namespace MyTransportAppWASM.Models
     public int EstimatedArrivalSeconds { get; set; }
   }
 
-  public class EnrichedRoute
-  {
-    public GoogleRoute OriginalRoute { get; set; } = new();
-    public int LiveTotalDurationSeconds { get; set; }
-    public List<LiveBusInfo> NearestBuses { get; set; } = new();
-    public bool HasLiveBus { get; set; }
-  }
+    public record EnrichedRoute
+    {
+        public GoogleRoute OriginalRoute { get; set; } = new();
+        public int LiveTotalDurationSeconds { get; set; }
+        public List<LiveBusInfo> NearestBuses { get; set; } = new();
+        public bool HasLiveBus { get; set; }
+        public bool IsAuspicious { get; set; }
+    }
 }

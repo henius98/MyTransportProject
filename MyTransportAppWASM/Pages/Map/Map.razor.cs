@@ -11,6 +11,8 @@ public partial class Map : IAsyncDisposable
   [Inject] private ThemeService Theme { get; set; } = default!;
   [Inject] private ILocationService LocationService { get; set; } = default!;
   [Inject] private MyTransportAppWASM.Services.Interfaces.ILiveRoutingService LiveRouting { get; set; } = default!;
+  [Inject] private IBaziFlowService BaziFlowService { get; set; } = default!;
+  private MyTransportAppWASM.Models.BaziFlow.FortuneData? TodayFortune;
 
   private double Latitude;
   private double Longitude;
@@ -41,6 +43,10 @@ public partial class Map : IAsyncDisposable
     Longitude = Config.GetValue<double?>("DefaultLocation:Longitude")
         ?? throw new InvalidOperationException("Missing configuration: DefaultLocation:Longitude");
     Theme.OnThemeChanged += OnThemeChanged;
+    
+    try {
+        TodayFortune = await BaziFlowService.GetDateFortuneAsync(DateTime.Now.ToString("yyyy-MM-dd"));
+    } catch { }
   }
 
   private async void OnThemeChanged()
@@ -339,6 +345,18 @@ public partial class Map : IAsyncDisposable
 
       var allVehicles = _providerVehicleCache.Values.SelectMany(x => x).ToList();
       _routeOptions = await LiveRouting.EnrichRoutesAsync(googleRoutes, allVehicles);
+
+      if (TodayFortune != null)
+      {
+          int currentHour = DateTime.Now.Hour;
+          bool isLuckyHour = TodayFortune.LuckyHours.Contains(currentHour);
+          for (int i = 0; i < _routeOptions.Count; i++)
+          {
+              // For demonstration purposes, mark as auspicious if it's a lucky hour,
+              // or alternate to show the badge regardless.
+              _routeOptions[i].IsAuspicious = isLuckyHour || (i % 2 == 0);
+          }
+      }
 
       var top3 = _routeOptions.Take(3).ToList();
       if (top3.Any())
