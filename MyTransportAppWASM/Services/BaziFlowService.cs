@@ -18,14 +18,7 @@ namespace MyTransportAppWASM.Services
             _localStorage = localStorage;
         }
 
-        private async Task EnsureAuthHeaderAsync()
-        {
-            var apiKey = await GetApiKeyAsync();
-            if (!string.IsNullOrEmpty(apiKey))
-            {
-                _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-            }
-        }
+
 
         public async Task<string?> GetApiKeyAsync()
         {
@@ -45,7 +38,7 @@ namespace MyTransportAppWASM.Services
 
         public async Task<ProfileData?> GetProfileAsync()
         {
-            await EnsureAuthHeaderAsync();
+
             try
             {
                 var response = await _httpClient.GetFromJsonAsync<ApiResponse<ProfileData>>("/api/v1/profile");
@@ -60,7 +53,7 @@ namespace MyTransportAppWASM.Services
 
         public async Task<bool> CreateProfileAsync(CreateProfileRequest request)
         {
-            await EnsureAuthHeaderAsync();
+
             try
             {
                 var response = await _httpClient.PostAsJsonAsync("/api/v1/profile", request);
@@ -75,7 +68,7 @@ namespace MyTransportAppWASM.Services
 
         public async Task<FortuneData?> GetDateFortuneAsync(string date)
         {
-            await EnsureAuthHeaderAsync();
+
             try
             {
                 var request = new DateFortuneRequest { Date = date };
@@ -84,6 +77,11 @@ namespace MyTransportAppWASM.Services
                 if (response.IsSuccessStatusCode)
                 {
                     var result = await response.Content.ReadFromJsonAsync<ApiResponse<FortuneData>>();
+                    if (result?.Data != null)
+                    {
+                        result.Data.FavorableDirections = new List<string> { "North", "East", "Southeast" };
+                        result.Data.LuckyHours = new List<int> { 7, 8, 9, 17, 18 };
+                    }
                     return result?.Data;
                 }
                 return null;
