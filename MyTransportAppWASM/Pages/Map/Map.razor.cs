@@ -376,6 +376,11 @@ public partial class Map : IAsyncDisposable
       return new ProviderVehicleRefresh(provider.Endpoint, ProviderVehicleRefreshStatus.Failed);
     }
 
+    foreach (var vehicle in vehicles)
+    {
+      vehicle.TransportType = provider.TransportType;
+    }
+
     return new ProviderVehicleRefresh(
       provider.Endpoint,
       ProviderVehicleRefreshStatus.Updated,

@@ -181,12 +181,12 @@
   margin-right: 12px;
 }
 
-::deep .bus-marker {
+::deep .transport-marker {
   cursor: pointer;
   transition: transform 0.2s;
 }
 
-::deep .bus-marker:hover {
+::deep .transport-marker:hover {
   transform: scale(1.2);
 }
 

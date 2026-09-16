@@ -1,6 +1,6 @@
 namespace MyTransportAppWASM.Models
 {
-  public record TransportProvider(string Name, string Endpoint, double CenterLat, double CenterLng, double RadiusKm);
+  public record TransportProvider(string Name, string Endpoint, double CenterLat, double CenterLng, double RadiusKm, string TransportType = "Bus");
 
   // Models for Live Routing Service
   public record GoogleRoute
@@ -23,6 +23,8 @@ namespace MyTransportAppWASM.Models
 
   public record BusLocation
   {
+    [System.Text.Json.Serialization.JsonPropertyName("transportType")]
+    public string? TransportType { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("routeId")]
     public string? RouteId { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("vehicleId")]
