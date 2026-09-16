@@ -1,7 +1,8 @@
 /* Forms */
 .form-input {
   width: 100%;
-  padding: 0.75rem 1rem;
+  height: 3rem;
+  padding: 0 1rem;
   border-radius: 12px;
   border: 1px solid var(--border-color);
   background: var(--bg-color);

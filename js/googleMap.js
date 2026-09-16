@@ -3,12 +3,40 @@ let map, userMarker, infoWindow;
 let storedApiKey = null;
 const activeMarkers = Object.create(null);
 const autocompletes = Object.create(null);
+const advancedMarkerEventHandlers = new WeakMap();
+const transportMarkerTypes = {
+	bus: { icon: "🚌", className: "bus-marker", label: "Bus" },
+	lrt: { icon: "🚈", className: "lrt-marker", label: "LRT" },
+	mrt: { icon: "🚇", className: "mrt-marker", label: "MRT" },
+	ktmb: { icon: "🚆", className: "ktmb-marker", label: "KTMB" },
+};
+const unknownTransportMarker = { icon: "🚉", className: "unknown-marker", label: "Vehicle" };
 
 // Route rendering state (replaces legacy DirectionsRenderer)
 let routePolylines = [];
 let routeMarkers = [];
+let routeOptionsMap = new Map();
+let currentActiveRouteId = -1;
+let locationPickerMap = null;
+let locationPickerMarkers = [];
 
+function addAdvancedMarkerEventListener(marker, eventName, handler) {
+	marker.addEventListener(eventName, handler);
 
+	const handlers = advancedMarkerEventHandlers.get(marker) || [];
+	handlers.push({ eventName, handler });
+	advancedMarkerEventHandlers.set(marker, handlers);
+}
+
+function removeAdvancedMarker(marker) {
+	const handlers = advancedMarkerEventHandlers.get(marker) || [];
+	for (const { eventName, handler } of handlers) {
+		marker.removeEventListener(eventName, handler);
+	}
+	advancedMarkerEventHandlers.delete(marker);
+	if (infoWindow?.get("anchor") === marker) infoWindow.close();
+	marker.map = null;
+}
 
 export async function loadGoogleMaps(apiKey) {
 	if (apiKey) storedApiKey = apiKey;
@@ -50,7 +78,7 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 	if (!el) throw new Error(`Element #${elementId} not found.`);
 
 	// Using modern importLibrary pattern
-	const [{ Map, InfoWindow }, { AdvancedMarkerElement, PinElement }] = await Promise.all([
+	const [{ Map, InfoWindow }, { AdvancedMarkerElement }] = await Promise.all([
 		google.maps.importLibrary("maps"),
 		google.maps.importLibrary("marker"),
 	]);
@@ -73,7 +101,7 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 	});
 
 	const pin = document.createElement("div");
-	pin.innerHTML = "🚶";
+	pin.textContent = "🚶";
 	pin.style.fontSize = "33px";
 
 	userMarker = new AdvancedMarkerElement({
@@ -84,8 +112,8 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 		content: pin,
 	});
 
-	// Add dragend listener to update origin in Blazor
-	userMarker.addListener("dragend", async () => {
+	// Add gmp-dragend listener to update origin in Blazor
+	addAdvancedMarkerEventListener(userMarker, "gmp-dragend", async () => {
 		const newPos = userMarker.position;
 		try {
 			const address = await reverseGeocode(newPos.lat, newPos.lng);
@@ -123,6 +151,10 @@ export async function initAutocomplete(elementId, dotNetHelper, methodName, apiK
 
 	// Create the new PlaceAutocompleteElement widget
 	const placeAutocomplete = new PlaceAutocompleteElement({});
+	placeAutocomplete.setAttribute(
+		"aria-label",
+		methodName === "UpdateOrigin" ? "Origin" : "Destination",
+	);
 
 	// Style the widget to fill its parent container
 	placeAutocomplete.style.width = "100%";
@@ -186,8 +218,10 @@ export async function updateUserMarker(lat, lng) {
 export function clearRoute() {
 	routePolylines.forEach(p => p.setMap(null));
 	routePolylines = [];
-	routeMarkers.forEach(m => (m.map = null));
+	routeMarkers.forEach(removeAdvancedMarker);
 	routeMarkers = [];
+	routeOptionsMap.clear();
+	currentActiveRouteId = -1;
 }
 
 /**
@@ -283,6 +317,134 @@ export async function showRouteByName(originName, destinationName, travelMode = 
 	}
 }
 
+export async function getTransitRoutes(originName, destinationName) {
+	await loadGoogleMaps();
+	try {
+		const [originLoc, destinationLoc] = await Promise.all([
+			geocodePlaceName(originName),
+			geocodePlaceName(destinationName)
+		]);
+
+		const { Route } = await google.maps.importLibrary("routes");
+		const { GeometryLibrary } = await google.maps.importLibrary("geometry");
+
+		const request = {
+			origin: originLoc,
+			destination: destinationLoc,
+			travelMode: "TRANSIT",
+			computeAlternativeRoutes: true,
+			fields: ["*"],
+		};
+
+		const { routes } = await Route.computeRoutes(request);
+
+		if (!routes || routes.length === 0) {
+			return [];
+		}
+
+		return routes.map((r, index) => {
+			const steps = [];
+			if (r.legs && r.legs.length > 0) {
+				r.legs.forEach(leg => {
+					if (leg.steps) {
+						leg.steps.forEach(step => {
+							if (step.transitDetails) {
+								const td = step.transitDetails;
+								steps.push({
+									lineShortName: td.transitLine?.shortName || td.transitLine?.nameShort || "",
+									lineName: td.transitLine?.name || "",
+									departureLat: typeof td.departureStop?.location?.lat === 'function' ? td.departureStop.location.lat() : (td.departureStop?.location?.lat || 0),
+									departureLng: typeof td.departureStop?.location?.lng === 'function' ? td.departureStop.location.lng() : (td.departureStop?.location?.lng || 0),
+									departureStopName: td.departureStop?.name || ""
+								});
+							}
+						});
+					}
+				});
+			}
+
+			let encodedPolyline = "";
+			if (r.path && google.maps.geometry?.encoding) {
+				encodedPolyline = google.maps.geometry.encoding.encodePath(r.path);
+			}
+
+			return {
+				routeId: index,
+				encodedPolyline: encodedPolyline,
+				durationSeconds: r.durationMillis ? Math.round(r.durationMillis / 1000) : 0,
+				distanceMeters: r.distanceMeters || 0,
+				transitSteps: steps
+			};
+		});
+
+	} catch (err) {
+		console.error("getTransitRoutes failed:", err);
+		throw err;
+	}
+}
+
+export async function drawMultipleRoutes(routesData, activeRouteId, dotNetRef) {
+	await loadGoogleMaps();
+	if (!map) throw new Error("Map not initialized.");
+	
+	const { GeometryLibrary } = await google.maps.importLibrary("geometry");
+
+	clearRoute();
+	currentActiveRouteId = activeRouteId;
+
+	const bounds = new google.maps.LatLngBounds();
+
+	routesData.forEach(routeData => {
+		if (!routeData.path) return;
+		
+		const path = google.maps.geometry.encoding.decodePath(routeData.path);
+		
+		const polyline = new google.maps.Polyline({
+			path: path,
+			strokeColor: "#808080",
+			strokeWeight: 3,
+			zIndex: 1,
+			clickable: true
+		});
+
+		polyline.addListener("click", () => {
+			if (currentActiveRouteId !== routeData.id) {
+				setActiveRoute(routeData.id);
+				dotNetRef.invokeMethodAsync('OnRouteSelected', routeData.id);
+			}
+		});
+
+		polyline.setMap(map);
+		routePolylines.push(polyline);
+		routeOptionsMap.set(routeData.id, { polyline, hasLiveBus: routeData.hasLiveBus });
+		
+		path.forEach(latLng => bounds.extend(latLng));
+	});
+
+	if (routesData.length > 0) {
+		map.fitBounds(bounds);
+		setActiveRoute(activeRouteId);
+	}
+}
+
+export function setActiveRoute(routeId) {
+	currentActiveRouteId = routeId;
+	
+	routeOptionsMap.forEach((data, id) => {
+		const isActive = (id === routeId);
+		const color = isActive ? (data.hasLiveBus ? "#0F9D58" : "#4285F4") : "#808080";
+		const weight = isActive ? 6 : 3;
+		const zIndex = isActive ? 100 : 1;
+
+		data.polyline.setOptions({
+			strokeColor: color,
+			strokeWeight: weight,
+			zIndex: zIndex
+		});
+	});
+}
+
+
 export async function geocodePlaceName(name) {
 	await loadGoogleMaps();
 	const { Geocoder } = await google.maps.importLibrary("geocoding");
@@ -315,6 +477,17 @@ export async function reverseGeocode(lat, lng) {
 	});
 }
 
+function getTransportMarker(location) {
+	const type = typeof location.transportType === "string" ? location.transportType.trim().toLowerCase() : "";
+	return Object.hasOwn(transportMarkerTypes, type) ? transportMarkerTypes[type] : unknownTransportMarker;
+}
+
+function updateTransportMarkerElement(element, location) {
+	const markerType = getTransportMarker(location);
+	element.textContent = location.icon || markerType.icon;
+	element.className = `transport-marker ${markerType.className}`;
+}
+
 export async function syncMarkers(locations) {
 	if (!map || !infoWindow) return;
 	
@@ -328,67 +501,53 @@ export async function syncMarkers(locations) {
 	const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
 
 	try {
-		const currentIds = new Set(locations.map(l => l.vehicleId).filter(id => id != null));
+		const currentIds = new Set();
 
-		// Remove old markers
-		for (const id in activeMarkers) {
-			if (!currentIds.has(id)) {
-				if (activeMarkers[id]._clickListener) {
-					activeMarkers[id]._clickListener.remove();
-				}
-				activeMarkers[id].map = null;
-				delete activeMarkers[id];
-			}
-		}
-
-		locations.forEach(loc => {
+		for (const loc of locations) {
 			const id = loc.vehicleId;
-			if (id == null) return;
-			
-			const pos = { lat: loc.lat, lng: loc.lng };
+			if (id == null || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) {
+				console.warn("syncMarkers: skipping invalid vehicle location", loc);
+				continue;
+			}
+			currentIds.add(id);
+
+			const speedKmh = (loc.speed || 0) * 3.6;
+			loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
+			const title = `Route ${loc.routeId || 'Unknown'} - ${id}`;
 			
 			if (activeMarkers[id]) {
 				const marker = activeMarkers[id];
-				marker.position = pos;
-
-				// Convert speed if provided (GTFS-RT speed is m/s)
-				const speedKmh = (loc.speed || 0) * 3.6;
-				loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
-				
+				const previous = marker.busData;
+				if (!previous || previous.lat !== loc.lat || previous.lng !== loc.lng) {
+					marker.position = { lat: loc.lat, lng: loc.lng };
+				}
+				marker.title = title;
+				updateTransportMarkerElement(marker.content, loc);
 				marker.busData = loc;
 			} else {
+				const pos = { lat: loc.lat, lng: loc.lng };
 				const el = document.createElement("div");
-				el.textContent = loc.icon || "🚌";
-				el.className = "bus-marker";
+				updateTransportMarkerElement(el, loc);
 				el.style.fontSize = "28px";
 
 				const marker = new AdvancedMarkerElement({
 					position: pos,
 					map,
-					title: `Route ${loc.routeId || 'Unknown'} - ${id}`,
+					title,
 					content: el,
+					gmpClickable: true,
 				});
 
-				const speedKmh = (loc.speed || 0) * 3.6;
-				loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
 				marker.busData = loc;
 
-				marker._clickListener = marker.addListener("gmp-click", () => {
+				addAdvancedMarkerEventListener(marker, "gmp-click", () => {
 					if (infoWindow.get("anchor") === marker) {
 						infoWindow.close();
 						return;
 					}
 
 					const currentLoc = marker.busData;
-					const content = `
-						<div class="bus-info-window">
-							<div class="bus-info-header">Bus ${id}</div>
-							<div class="bus-info-item"><b>Route</b> <span>${currentLoc.routeId || 'N/A'}</span></div>
-							<div class="bus-info-item"><b>Speed</b> <span>${currentLoc.displaySpeed}${currentLoc.displaySpeed === "-" ? "" : " km/h"}</span></div>
-							<div class="bus-info-item"><b>Updated</b> <span>${new Date(currentLoc.timestamp * 1000).toLocaleTimeString()}</span></div>
-						</div>
-					`;
-					infoWindow.setContent(content);
+					infoWindow.setContent(buildVehicleInfoContent(id, currentLoc));
 					infoWindow.open({
 						anchor: marker,
 						map,
@@ -397,10 +556,55 @@ export async function syncMarkers(locations) {
 
 				activeMarkers[id] = marker;
 			}
-		});
+		}
+
+		// Remove markers absent from the latest complete provider snapshot.
+		for (const id in activeMarkers) {
+			if (!currentIds.has(id)) {
+				removeAdvancedMarker(activeMarkers[id]);
+				delete activeMarkers[id];
+			}
+		}
 	} catch (err) {
 		console.error("syncMarkers internal error:", err);
 	}
+}
+
+function buildVehicleInfoContent(id, location) {
+	const content = document.createElement("div");
+	content.className = "bus-info-window";
+
+	const header = document.createElement("div");
+	header.className = "bus-info-header";
+	header.textContent = `${getTransportMarker(location).label} ${id}`;
+	content.appendChild(header);
+
+	appendBusInfoRow(content, "Route", location.routeId || "N/A");
+	appendBusInfoRow(
+		content,
+		"Speed",
+		`${location.displaySpeed}${location.displaySpeed === "-" ? "" : " km/h"}`,
+	);
+	appendBusInfoRow(
+		content,
+		"Updated",
+		new Date(location.timestamp * 1000).toLocaleTimeString(),
+	);
+
+	return content;
+}
+
+function appendBusInfoRow(container, label, value) {
+	const row = document.createElement("div");
+	row.className = "bus-info-item";
+
+	const heading = document.createElement("b");
+	heading.textContent = label;
+	const text = document.createElement("span");
+	text.textContent = value;
+
+	row.append(heading, text);
+	container.appendChild(row);
 }
 export async function showLocationPickerMap(containerId, locations, dotnetHelper, apiKey) {
     await loadGoogleMaps(apiKey);
@@ -410,8 +614,11 @@ export async function showLocationPickerMap(containerId, locations, dotnetHelper
     const container = document.getElementById(containerId);
     if (!container) return;
 
+    cleanupLocationPickerMap();
+    container.replaceChildren();
+
     // Center map around Malaysia
-    const map = new Map(container, {
+    locationPickerMap = new Map(container, {
         center: { lat: 4.2105, lng: 101.9758 },
         zoom: 6,
         mapId: "LOCATION_PICKER_MAP",
@@ -421,14 +628,23 @@ export async function showLocationPickerMap(containerId, locations, dotnetHelper
     locations.forEach(loc => {
         const marker = new AdvancedMarkerElement({
             position: { lat: loc.latitude, lng: loc.longitude },
-            map: map,
-            title: loc.location_name
+            map: locationPickerMap,
+            title: loc.location_name,
+            gmpClickable: true
         });
 
-        marker.addListener("gmp-click", () => {
+        locationPickerMarkers.push(marker);
+
+        addAdvancedMarkerEventListener(marker, "gmp-click", () => {
             dotnetHelper.invokeMethodAsync('OnLocationSelectedFromMap', loc.latitude, loc.longitude, `MET ID: ${loc.location_id}`, loc.location_name);
         });
     });
+}
+
+export function cleanupLocationPickerMap() {
+    locationPickerMarkers.forEach(removeAdvancedMarker);
+    locationPickerMarkers = [];
+    locationPickerMap = null;
 }
 
 export function showDialog(dialog) {
@@ -445,15 +661,12 @@ export function closeDialog(dialog) {
 
 export function cleanupMap() {
 	for (const id in activeMarkers) {
-		if (activeMarkers[id]._clickListener) {
-			activeMarkers[id]._clickListener.remove();
-		}
-		activeMarkers[id].map = null;
+		removeAdvancedMarker(activeMarkers[id]);
 		delete activeMarkers[id];
 	}
 	routePolylines.forEach(p => p.setMap(null));
 	routePolylines = [];
-	routeMarkers.forEach(m => (m.map = null));
+	routeMarkers.forEach(removeAdvancedMarker);
 	routeMarkers = [];
 	
 	if (infoWindow) {
@@ -461,7 +674,7 @@ export function cleanupMap() {
 		infoWindow = null;
 	}
 	if (userMarker) {
-		userMarker.map = null;
+		removeAdvancedMarker(userMarker);
 		userMarker = null;
 	}
 	map = null;

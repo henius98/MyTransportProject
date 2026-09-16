@@ -100,8 +100,18 @@ div.modal, form.modal {
 
 /* Disable wave animation for users who prefer reduced motion */
 @media (prefers-reduced-motion: reduce) {
+  .modal__backdrop,
+  div.modal,
+  form.modal {
+    animation: none;
+  }
+
   .modal__icon {
     animation: none;
+  }
+
+  .modal__close {
+    transition: none;
   }
 }
 
