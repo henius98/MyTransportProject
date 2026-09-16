@@ -132,7 +132,7 @@
                 if (!FetchOutlook && Provider.Periods.Count > 1)
                 {
                     var now = DateTimeOffset.UtcNow;
-                    var closest = Provider.Periods.OrderBy(p => Math.Abs((p.Time - now).Ticks)).FirstOrDefault();
+                    var closest = Provider.Periods.MinBy(p => Math.Abs((p.Time - now).Ticks));
                     if (closest != null)
                         Provider = Provider with { Periods = new List<WeatherTimeSlice> { closest } };
                 }

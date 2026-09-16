@@ -1,0 +1,43 @@
+@using System.Runtime.InteropServices
+
+<PageTitle>MyTransport WASM Benchmarks</PageTitle>
+
+<main>
+  <h1>MyTransport WASM Benchmarks</h1>
+  <p>@_status</p>
+  <pre id="benchmark-results" data-complete="@_complete.ToString().ToLowerInvariant()">@_results</pre>
+</main>
+
+@code {
+  private bool _complete;
+  private string _status = "Warming up browser runtime…";
+  private string _results = string.Empty;
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (!firstRender)
+    {
+      return;
+    }
+
+    // Give the browser one paint before intentionally running synchronous CPU work.
+    await Task.Delay(50);
+    try
+    {
+      var results = BrowserBenchmarkRunner.Run();
+      _results = string.Join('\n', results.Select(result =>
+        $"{result.Name}|median_us={result.MedianMicroseconds:F2}|p95_us={result.P95Microseconds:F2}|alloc_bytes_op={result.AllocatedBytesPerOperation}"));
+      _status = $"Complete on {RuntimeInformation.FrameworkDescription}; browser={OperatingSystem.IsBrowser()}";
+    }
+    catch (Exception ex)
+    {
+      _status = "Benchmark failed";
+      _results = ex.ToString();
+    }
+    finally
+    {
+      _complete = true;
+      StateHasChanged();
+    }
+  }
+}

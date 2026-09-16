@@ -1,7 +1,7 @@
-@using Blazored.LocalStorage
 @using MyTransportAppWASM.Services
+@using MyTransportAppWASM.Services.Interfaces
 @inject LanguageService Language
-@inject ILocalStorageService LocalStorage
+@inject IUserSettingsService UserSettings
 
 <div class="d-flex align-items-center justify-content-between w-100 p-0 m-0">
     <div class="d-flex align-items-center">
@@ -34,15 +34,6 @@
     private LanguageOption CurrentOption => LanguageService.SupportedLanguages.FirstOrDefault(l => l.Code ==
 Language.CurrentLanguageName) ?? LanguageService.SupportedLanguages[0];
 
-    protected override async Task OnInitializedAsync()
-    {
-        var savedLang = await LocalStorage.GetItemAsync<string>("user_language");
-        if (!string.IsNullOrEmpty(savedLang) && savedLang != Language.CurrentLanguageName)
-        {
-            await Language.LoadLanguageAsync(savedLang);
-        }
-    }
-
     private void ToggleDropdown()
     {
         _isOpen = !_isOpen;
@@ -59,7 +50,7 @@ Language.CurrentLanguageName) ?? LanguageService.SupportedLanguages[0];
     private async Task ChangeLanguage(string langCode)
     {
         await Language.LoadLanguageAsync(langCode);
-        await LocalStorage.SetItemAsync("user_language", langCode);
+        await UserSettings.UpdateLanguageAsync(langCode);
         _isOpen = false;
     }
 }

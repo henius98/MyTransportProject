@@ -10,6 +10,21 @@ namespace MyTransportAppWASM.Utils
     /// </summary>
     private const int MaxTraversalDepth = 10;
 
+    private static readonly string[] ParallelTemperatureNames = ["temperature_2m_max", "temperature_2m", "temperature"];
+    private static readonly string[] ParallelPrecipitationNames = ["precipitation_probability_max", "precipitation_probability", "precipitation", "rain"];
+    private static readonly string[] WeatherCodeNames = ["weather_code", "weathercode"];
+    private static readonly string[] TemperatureNames = ["temperature", "temperature_2m", "temp"];
+    private static readonly string[] MaximumTemperatureNames = ["temperature_2m_max", "max_temp"];
+    private static readonly string[] MinimumTemperatureNames = ["temperature_2m_min", "min_temp"];
+    private static readonly string[] PrecipitationNames = ["precipitation", "rain", "precip_mm", "precip"];
+    private static readonly string[] ProbabilityNames = ["probability", "precipitation_probability", "precipitation_probability_max", "pop"];
+    private static readonly string[] WindNames = ["wind", "wind_speed", "wind_speed_10m"];
+    private static readonly string[] TimeNames = ["time", "datetime", "ob_time", "ts", "date"];
+    private static readonly string[] MorningForecastNames = ["morning_forecast"];
+    private static readonly string[] AfternoonForecastNames = ["afternoon_forecast"];
+    private static readonly string[] NightForecastNames = ["night_forecast"];
+    private static readonly string[] SummaryNames = ["summary", "description", "weather", "forecast"];
+
     public static IReadOnlyList<WeatherTimeSlice> ShapeSlices(JsonDocument document, IReadOnlyList<WeatherTimeSlice> fallback, string label)
     {
       JsonElement root = document.RootElement;
@@ -27,19 +42,24 @@ namespace MyTransportAppWASM.Utils
           if (node.TryGetProperty("time", out var timeArray) && timeArray.ValueKind == JsonValueKind.Array)
           {
             int count = timeArray.GetArrayLength();
-            JsonElement? tempArray = GetPropertyAnyName(node, "temperature_2m_max", "temperature_2m", "temperature");
-            JsonElement? precipArray = GetPropertyAnyName(node, "precipitation_probability_max", "precipitation_probability", "precipitation", "rain");
-            JsonElement? weatherCodeArray = GetPropertyAnyName(node, "weather_code", "weathercode");
+            JsonElement? tempArray = GetPropertyAnyName(node, ParallelTemperatureNames);
+            JsonElement? precipArray = GetPropertyAnyName(node, ParallelPrecipitationNames);
+            JsonElement? weatherCodeArray = GetPropertyAnyName(node, WeatherCodeNames);
+            int tempCount = GetArrayLength(tempArray);
+            int precipCount = GetArrayLength(precipArray);
+            int weatherCodeCount = GetArrayLength(weatherCodeArray);
+            var fallbackTime = DateTimeOffset.UtcNow;
+
+            results.EnsureCapacity(count);
 
             for (int i = 0; i < count; i++)
             {
-              DateTimeOffset time = DateTimeOffset.UtcNow;
-              if (timeArray[i].ValueKind == JsonValueKind.String && DateTimeOffset.TryParse(timeArray[i].GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var t)) time = t;
-              else if (timeArray[i].ValueKind == JsonValueKind.Number && timeArray[i].TryGetInt64(out long epoch)) time = DateTimeOffset.FromUnixTimeSeconds(epoch);
+              DateTimeOffset time = fallbackTime;
+              if (TryGetDate(timeArray[i], out var parsedTime)) time = parsedTime;
 
-              double? temp = tempArray.HasValue && tempArray.Value.GetArrayLength() > i && tempArray.Value[i].ValueKind == JsonValueKind.Number ? tempArray.Value[i].GetDouble() : null;
-              double? precip = precipArray.HasValue && precipArray.Value.GetArrayLength() > i && precipArray.Value[i].ValueKind == JsonValueKind.Number ? precipArray.Value[i].GetDouble() : null;
-              double? weatherCodeDouble = weatherCodeArray.HasValue && weatherCodeArray.Value.GetArrayLength() > i && weatherCodeArray.Value[i].ValueKind == JsonValueKind.Number ? weatherCodeArray.Value[i].GetDouble() : null;
+              double? temp = tempArray.HasValue && tempCount > i && tempArray.Value[i].ValueKind == JsonValueKind.Number ? tempArray.Value[i].GetDouble() : null;
+              double? precip = precipArray.HasValue && precipCount > i && precipArray.Value[i].ValueKind == JsonValueKind.Number ? precipArray.Value[i].GetDouble() : null;
+              double? weatherCodeDouble = weatherCodeArray.HasValue && weatherCodeCount > i && weatherCodeArray.Value[i].ValueKind == JsonValueKind.Number ? weatherCodeArray.Value[i].GetDouble() : null;
 
               string? summary = null;
               string? icon = null;
@@ -67,15 +87,15 @@ namespace MyTransportAppWASM.Utils
 
       if (root.ValueKind == JsonValueKind.Array)
       {
+        // MetMalaysia records commonly expand into morning, afternoon, and night
+        // slices. Size for that shape so large forecasts do not grow and copy the
+        // backing array after two-thirds of the output has already been produced.
+        results.EnsureCapacity(Math.Min(root.GetArrayLength(), 512) * 3);
         foreach (var item in root.EnumerateArray())
         {
           if (item.ValueKind == JsonValueKind.Object)
           {
-            var sliceList = ExtractSingleSlice(item, null, label);
-            if (sliceList != null && sliceList.Count > 0 && !sliceList[0].IsPlaceholder)
-            {
-              results.AddRange(sliceList);
-            }
+            AppendSingleSlices(item, results, label);
           }
         }
         if (results.Count > 0) return results;
@@ -84,7 +104,12 @@ namespace MyTransportAppWASM.Utils
       return ExtractSingleSlice(root, fallback, label);
     }
 
-    private static JsonElement? GetPropertyAnyName(JsonElement element, params string[] names)
+    private static int GetArrayLength(JsonElement? element) =>
+      element.HasValue && element.Value.ValueKind == JsonValueKind.Array
+        ? element.Value.GetArrayLength()
+        : 0;
+
+    private static JsonElement? GetPropertyAnyName(JsonElement element, string[] names)
     {
       foreach (var prop in element.EnumerateObject())
       {
@@ -95,88 +120,86 @@ namespace MyTransportAppWASM.Utils
 
     private static IReadOnlyList<WeatherTimeSlice> ExtractSingleSlice(JsonElement root, IReadOnlyList<WeatherTimeSlice>? fallback, string label)
     {
-      double? temperature = FindFirstDouble(root, 0, "temperature", "temperature_2m", "temp");
-      double? maxTemp = FindFirstDouble(root, 0, "temperature_2m_max", "max_temp");
-      double? minTemp = FindFirstDouble(root, 0, "temperature_2m_min", "min_temp");
-      temperature ??= maxTemp;
-      double? precipitation = FindFirstDouble(root, 0, "precipitation", "rain", "precip_mm", "precip");
-      double? probability = FindFirstDouble(root, 0, "probability", "precipitation_probability", "precipitation_probability_max", "pop");
-      probability = NormalizeProbability(probability);
+      var slices = new List<WeatherTimeSlice>(3);
+      return AppendSingleSlices(root, slices, label)
+        ? slices
+        : fallback ?? Array.Empty<WeatherTimeSlice>();
+    }
 
-      string? wind = FindFirstString(root, 0, "wind", "wind_speed", "wind_speed_10m");
-      DateTimeOffset time = FindFirstDate(root, 0, "time", "datetime", "ob_time", "ts", "date") ?? DateTimeOffset.UtcNow;
-      
-      string? morning = FindFirstString(root, 0, "morning_forecast");
-      string? afternoon = FindFirstString(root, 0, "afternoon_forecast");
-      string? night = FindFirstString(root, 0, "night_forecast");
+    private static bool AppendSingleSlices(JsonElement root, List<WeatherTimeSlice> destination, string label)
+    {
+      var fields = new WeatherFields();
+      CollectFields(root, 0, ref fields);
 
-      if (morning != null || afternoon != null || night != null)
+      double? temperature = fields.Temperature ?? fields.MaximumTemperature;
+      double? probability = NormalizeProbability(fields.Probability);
+      DateTimeOffset time = fields.Time ?? DateTimeOffset.UtcNow;
+
+      if (fields.MorningForecast != null || fields.AfternoonForecast != null || fields.NightForecast != null)
       {
-          var list = new List<WeatherTimeSlice>();
-          if (morning != null)
+          if (fields.MorningForecast != null)
           {
-              list.Add(new WeatherTimeSlice
+              destination.Add(new WeatherTimeSlice
               {
                   Label = "Pagi",
                   Time = time,
                   TemperatureC = temperature,
-                  MinTemperatureC = minTemp,
-                  MaxTemperatureC = maxTemp,
-                  PrecipitationMm = precipitation,
+                  MinTemperatureC = fields.MinimumTemperature,
+                  MaxTemperatureC = fields.MaximumTemperature,
+                  PrecipitationMm = fields.Precipitation,
                   ProbabilityOfRain = probability,
-                  Wind = wind,
-                  Summary = morning,
-                  Icon = GetIconForSummaryString(morning, time)
+                  Wind = fields.Wind,
+                  Summary = fields.MorningForecast,
+                  Icon = GetIconForSummaryString(fields.MorningForecast, time)
               });
           }
-          if (afternoon != null)
+          if (fields.AfternoonForecast != null)
           {
               var petangTime = time.AddHours(6);
-              list.Add(new WeatherTimeSlice
+              destination.Add(new WeatherTimeSlice
               {
                   Label = "Petang",
                   Time = petangTime,
                   TemperatureC = temperature,
-                  MinTemperatureC = minTemp,
-                  MaxTemperatureC = maxTemp,
-                  PrecipitationMm = precipitation,
+                  MinTemperatureC = fields.MinimumTemperature,
+                  MaxTemperatureC = fields.MaximumTemperature,
+                  PrecipitationMm = fields.Precipitation,
                   ProbabilityOfRain = probability,
-                  Wind = wind,
-                  Summary = afternoon,
-                  Icon = GetIconForSummaryString(afternoon, petangTime)
+                  Wind = fields.Wind,
+                  Summary = fields.AfternoonForecast,
+                  Icon = GetIconForSummaryString(fields.AfternoonForecast, petangTime)
               });
           }
-          if (night != null)
+          if (fields.NightForecast != null)
           {
               var malamTime = time.AddHours(12);
-              list.Add(new WeatherTimeSlice
+              destination.Add(new WeatherTimeSlice
               {
                   Label = "Malam",
                   Time = malamTime,
                   TemperatureC = temperature,
-                  MinTemperatureC = minTemp,
-                  MaxTemperatureC = maxTemp,
-                  PrecipitationMm = precipitation,
+                  MinTemperatureC = fields.MinimumTemperature,
+                  MaxTemperatureC = fields.MaximumTemperature,
+                  PrecipitationMm = fields.Precipitation,
                   ProbabilityOfRain = probability,
-                  Wind = wind,
-                  Summary = night,
-                  Icon = GetIconForSummaryString(night, malamTime)
+                  Wind = fields.Wind,
+                  Summary = fields.NightForecast,
+                  Icon = GetIconForSummaryString(fields.NightForecast, malamTime)
               });
           }
-          return list;
+          return true;
       }
 
-      string? summary = FindFirstString(root, 0, "summary", "description", "weather", "forecast");
+      string? summary = fields.Summary;
       
       string? icon = null;
       if (summary == null)
       {
-        double? weatherCode = FindFirstDouble(root, 0, "weather_code", "weathercode");
-        if (weatherCode.HasValue)
+        if (fields.WeatherCode.HasValue)
         {
           var localTime = time.ToOffset(TimeSpan.FromHours(8));
           bool isNight = localTime.Hour < 7 || localTime.Hour > 19;
-          (summary, icon) = MapWmoCode(weatherCode.Value, isNight);
+          (summary, icon) = MapWmoCode(fields.WeatherCode.Value, isNight);
         }
       }
       else
@@ -186,27 +209,25 @@ namespace MyTransportAppWASM.Utils
 
 
 
-      if (temperature is null && precipitation is null && probability is null && summary is null && wind is null)
+      if (temperature is null && fields.Precipitation is null && probability is null && summary is null && fields.Wind is null)
       {
-        return fallback ?? new List<WeatherTimeSlice>();
+        return false;
       }
 
-      return new List<WeatherTimeSlice>
+      destination.Add(new WeatherTimeSlice
       {
-          new()
-          {
-              Label = label,
-              Time = time,
-              TemperatureC = temperature,
-              MinTemperatureC = minTemp,
-              MaxTemperatureC = maxTemp,
-              PrecipitationMm = precipitation,
-              ProbabilityOfRain = probability,
-              Wind = wind,
-              Summary = summary,
-              Icon = icon
-          }
-      };
+          Label = label,
+          Time = time,
+          TemperatureC = temperature,
+          MinTemperatureC = fields.MinimumTemperature,
+          MaxTemperatureC = fields.MaximumTemperature,
+          PrecipitationMm = fields.Precipitation,
+          ProbabilityOfRain = probability,
+          Wind = fields.Wind,
+          Summary = summary,
+          Icon = icon
+      });
+      return true;
     }
 
     private static double? NormalizeProbability(double? probability)
@@ -218,108 +239,125 @@ namespace MyTransportAppWASM.Utils
       return 0;
     }
 
-    private static double? FindFirstDouble(JsonElement element, int depth, params string[] names)
+    private static void CollectFields(JsonElement element, int depth, ref WeatherFields fields)
     {
-      if (depth >= MaxTraversalDepth) return null;
+      if (depth >= MaxTraversalDepth)
+      {
+        return;
+      }
 
       if (element.ValueKind == JsonValueKind.Array)
       {
         foreach (JsonElement item in element.EnumerateArray())
         {
-          double? nested = FindFirstDouble(item, depth + 1, names);
-          if (nested.HasValue) return nested;
+          CollectFields(item, depth + 1, ref fields);
         }
+
+        return;
       }
 
-      if (element.ValueKind == JsonValueKind.Object)
+      if (element.ValueKind != JsonValueKind.Object)
       {
-        foreach (JsonProperty property in element.EnumerateObject())
-        {
-          if (MatchesAnyName(property.Name, names))
-          {
-            if (property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetDouble(out double number))
-              return number;
-
-            if (property.Value.ValueKind == JsonValueKind.Array)
-            {
-              foreach (JsonElement item in property.Value.EnumerateArray())
-                if (item.ValueKind == JsonValueKind.Number && item.TryGetDouble(out double n))
-                  return n;
-            }
-          }
-
-          double? nested = FindFirstDouble(property.Value, depth + 1, names);
-          if (nested.HasValue) return nested;
-        }
+        return;
       }
-      return null;
+
+      foreach (JsonProperty property in element.EnumerateObject())
+      {
+        string propertyName = property.Name;
+        JsonElement value = property.Value;
+
+        if (fields.Temperature is null && MatchesAnyName(propertyName, TemperatureNames) && TryGetFirstDouble(value, out var temperature))
+          fields.Temperature = temperature;
+        if (fields.MaximumTemperature is null && MatchesAnyName(propertyName, MaximumTemperatureNames) && TryGetFirstDouble(value, out var maximumTemperature))
+          fields.MaximumTemperature = maximumTemperature;
+        if (fields.MinimumTemperature is null && MatchesAnyName(propertyName, MinimumTemperatureNames) && TryGetFirstDouble(value, out var minimumTemperature))
+          fields.MinimumTemperature = minimumTemperature;
+        if (fields.Precipitation is null && MatchesAnyName(propertyName, PrecipitationNames) && TryGetFirstDouble(value, out var precipitation))
+          fields.Precipitation = precipitation;
+        if (fields.Probability is null && MatchesAnyName(propertyName, ProbabilityNames) && TryGetFirstDouble(value, out var probability))
+          fields.Probability = probability;
+        if (fields.WeatherCode is null && MatchesAnyName(propertyName, WeatherCodeNames) && TryGetFirstDouble(value, out var weatherCode))
+          fields.WeatherCode = weatherCode;
+
+        if (fields.Wind is null && MatchesAnyName(propertyName, WindNames) && value.ValueKind == JsonValueKind.String)
+          fields.Wind = value.GetString();
+        if (fields.MorningForecast is null && MatchesAnyName(propertyName, MorningForecastNames) && value.ValueKind == JsonValueKind.String)
+          fields.MorningForecast = value.GetString();
+        if (fields.AfternoonForecast is null && MatchesAnyName(propertyName, AfternoonForecastNames) && value.ValueKind == JsonValueKind.String)
+          fields.AfternoonForecast = value.GetString();
+        if (fields.NightForecast is null && MatchesAnyName(propertyName, NightForecastNames) && value.ValueKind == JsonValueKind.String)
+          fields.NightForecast = value.GetString();
+        if (fields.Summary is null && MatchesAnyName(propertyName, SummaryNames) && value.ValueKind == JsonValueKind.String)
+          fields.Summary = value.GetString();
+
+        if (fields.Time is null && MatchesAnyName(propertyName, TimeNames) && TryGetDate(value, out var time))
+          fields.Time = time;
+
+        CollectFields(value, depth + 1, ref fields);
+      }
     }
 
-    private static string? FindFirstString(JsonElement element, int depth, params string[] names)
+    private static bool TryGetFirstDouble(JsonElement element, out double value)
     {
-      if (depth >= MaxTraversalDepth) return null;
+      if (element.ValueKind == JsonValueKind.Number && element.TryGetDouble(out value))
+      {
+        return true;
+      }
 
       if (element.ValueKind == JsonValueKind.Array)
       {
         foreach (JsonElement item in element.EnumerateArray())
         {
-          string? nested = FindFirstString(item, depth + 1, names);
-          if (!string.IsNullOrWhiteSpace(nested)) return nested;
-        }
-      }
-
-      if (element.ValueKind == JsonValueKind.Object)
-      {
-        foreach (JsonProperty property in element.EnumerateObject())
-        {
-          if (MatchesAnyName(property.Name, names) &&
-              property.Value.ValueKind == JsonValueKind.String)
+          if (item.ValueKind == JsonValueKind.Number && item.TryGetDouble(out value))
           {
-            return property.Value.GetString();
+            return true;
           }
-
-          string? nested = FindFirstString(property.Value, depth + 1, names);
-          if (!string.IsNullOrWhiteSpace(nested)) return nested;
         }
       }
-      return null;
+
+      value = default;
+      return false;
     }
 
-    private static DateTimeOffset? FindFirstDate(JsonElement element, int depth, params string[] names)
+    private static bool TryGetDate(JsonElement element, out DateTimeOffset value)
     {
-      if (depth >= MaxTraversalDepth) return null;
-
-      if (element.ValueKind == JsonValueKind.Array)
+      if (element.ValueKind == JsonValueKind.String &&
+          DateTimeOffset.TryParse(element.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out value))
       {
-        foreach (JsonElement item in element.EnumerateArray())
+        return true;
+      }
+
+      if (element.ValueKind == JsonValueKind.Number && element.TryGetInt64(out long epoch))
+      {
+        try
         {
-          DateTimeOffset? nestedItem = FindFirstDate(item, depth + 1, names);
-          if (nestedItem.HasValue) return nestedItem;
+          value = DateTimeOffset.FromUnixTimeSeconds(epoch);
+          return true;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+          // Continue searching for a valid date field.
         }
       }
 
-      if (element.ValueKind == JsonValueKind.Object)
-      {
-        foreach (JsonProperty property in element.EnumerateObject())
-        {
-          if ((names.Length == 0 || MatchesAnyName(property.Name, names)) &&
-              property.Value.ValueKind == JsonValueKind.String &&
-              DateTimeOffset.TryParse(property.Value.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out DateTimeOffset parsed))
-          {
-            return parsed;
-          }
+      value = default;
+      return false;
+    }
 
-          if ((names.Length == 0 || MatchesAnyName(property.Name, names)) &&
-              property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetInt64(out long epoch))
-          {
-            try { return DateTimeOffset.FromUnixTimeSeconds(epoch); } catch { }
-          }
-
-          DateTimeOffset? nested = FindFirstDate(property.Value, depth + 1, names);
-          if (nested.HasValue) return nested;
-        }
-      }
-      return null;
+    private struct WeatherFields
+    {
+      public double? Temperature;
+      public double? MaximumTemperature;
+      public double? MinimumTemperature;
+      public double? Precipitation;
+      public double? Probability;
+      public double? WeatherCode;
+      public DateTimeOffset? Time;
+      public string? Wind;
+      public string? MorningForecast;
+      public string? AfternoonForecast;
+      public string? NightForecast;
+      public string? Summary;
     }
 
     /// <summary>
@@ -376,36 +414,38 @@ namespace MyTransportAppWASM.Utils
     {
         if (string.IsNullOrWhiteSpace(summary)) return "bi-cloud text-secondary";
         
-        var lower = summary.ToLowerInvariant();
         var localTime = time.ToOffset(TimeSpan.FromHours(8));
         bool isNight = localTime.Hour < 7 || localTime.Hour > 19;
 
-        if (lower.Contains("ribut petir") || lower.Contains("thunder") || lower.Contains("lightning") || lower.Contains("squall"))
+        if (ContainsIgnoreCase(summary, "ribut petir") || ContainsIgnoreCase(summary, "thunder") || ContainsIgnoreCase(summary, "lightning") || ContainsIgnoreCase(summary, "squall"))
         {
-            if (lower.Contains("hail") || lower.Contains("batu")) return "bi-cloud-hail text-warning";
-            if (lower.Contains("beberapa tempat") || lower.Contains("satu dua tempat") || lower.Contains("few places") || lower.Contains("isolated")) return "bi-cloud-lightning-fill text-warning";
+            if (ContainsIgnoreCase(summary, "hail") || ContainsIgnoreCase(summary, "batu")) return "bi-cloud-hail text-warning";
+            if (ContainsIgnoreCase(summary, "beberapa tempat") || ContainsIgnoreCase(summary, "satu dua tempat") || ContainsIgnoreCase(summary, "few places") || ContainsIgnoreCase(summary, "isolated")) return "bi-cloud-lightning-fill text-warning";
             return "bi-cloud-lightning-rain-fill text-warning";
         }
-        if (lower.Contains("snow") || lower.Contains("salji"))
+        if (ContainsIgnoreCase(summary, "snow") || ContainsIgnoreCase(summary, "salji"))
         {
-            if (lower.Contains("heavy") || lower.Contains("lebat")) return "bi-cloud-snow-fill text-primary";
+            if (ContainsIgnoreCase(summary, "heavy") || ContainsIgnoreCase(summary, "lebat")) return "bi-cloud-snow-fill text-primary";
             return "bi-snow text-primary";
         }
-        if (lower.Contains("freezing") || lower.Contains("beku")) return "bi-cloud-sleet-fill text-info";
-        if (lower.Contains("fog") || lower.Contains("kabus") || lower.Contains("haze") || lower.Contains("rime")) return "bi-cloud-fog2-fill text-secondary";
-        if (lower.Contains("heavy rain") || lower.Contains("violent") || lower.Contains("hujan lebat")) return "bi-cloud-rain-heavy-fill text-primary";
-        if (lower.Contains("moderate rain") || lower.Contains("hujan sederhana")) return "bi-cloud-rain-fill text-primary";
-        if (lower.Contains("slight rain") || lower.Contains("hujan renyai") || lower.Contains("beberapa tempat")) return "bi-cloud-drizzle-fill text-info";
-        if (lower.Contains("drizzle") || lower.Contains("gerimis"))
+        if (ContainsIgnoreCase(summary, "freezing") || ContainsIgnoreCase(summary, "beku")) return "bi-cloud-sleet-fill text-info";
+        if (ContainsIgnoreCase(summary, "fog") || ContainsIgnoreCase(summary, "kabus") || ContainsIgnoreCase(summary, "haze") || ContainsIgnoreCase(summary, "rime")) return "bi-cloud-fog2-fill text-secondary";
+        if (ContainsIgnoreCase(summary, "heavy rain") || ContainsIgnoreCase(summary, "violent") || ContainsIgnoreCase(summary, "hujan lebat")) return "bi-cloud-rain-heavy-fill text-primary";
+        if (ContainsIgnoreCase(summary, "moderate rain") || ContainsIgnoreCase(summary, "hujan sederhana")) return "bi-cloud-rain-fill text-primary";
+        if (ContainsIgnoreCase(summary, "slight rain") || ContainsIgnoreCase(summary, "hujan renyai") || ContainsIgnoreCase(summary, "beberapa tempat")) return "bi-cloud-drizzle-fill text-info";
+        if (ContainsIgnoreCase(summary, "drizzle") || ContainsIgnoreCase(summary, "gerimis"))
         {
-            if (lower.Contains("light") || lower.Contains("ringan")) return "bi-cloud-drizzle text-info";
+            if (ContainsIgnoreCase(summary, "light") || ContainsIgnoreCase(summary, "ringan")) return "bi-cloud-drizzle text-info";
             return "bi-cloud-drizzle-fill text-info";
         }
-        if (lower.Contains("hujan") || lower.Contains("rain") || lower.Contains("shower")) return "bi-cloud-rain-fill text-info";
-        if (lower.Contains("overcast") || lower.Contains("mendung")) return "bi-clouds-fill text-secondary";
-        if (lower.Contains("partly cloudy") || lower.Contains("separa mendung") || lower.Contains("cloudy")) return isNight ? "bi-cloud-moon-fill text-secondary" : "bi-cloud-sun-fill text-primary";
-        if (lower.Contains("clear") || lower.Contains("tiada hujan") || lower.Contains("fair") || lower.Contains("sunny") || lower.Contains("cerah")) return isNight ? "bi-moon-stars-fill text-primary" : "bi-sun-fill text-warning";
+        if (ContainsIgnoreCase(summary, "hujan") || ContainsIgnoreCase(summary, "rain") || ContainsIgnoreCase(summary, "shower")) return "bi-cloud-rain-fill text-info";
+        if (ContainsIgnoreCase(summary, "overcast") || ContainsIgnoreCase(summary, "mendung")) return "bi-clouds-fill text-secondary";
+        if (ContainsIgnoreCase(summary, "partly cloudy") || ContainsIgnoreCase(summary, "separa mendung") || ContainsIgnoreCase(summary, "cloudy")) return isNight ? "bi-cloud-moon-fill text-secondary" : "bi-cloud-sun-fill text-primary";
+        if (ContainsIgnoreCase(summary, "clear") || ContainsIgnoreCase(summary, "tiada hujan") || ContainsIgnoreCase(summary, "fair") || ContainsIgnoreCase(summary, "sunny") || ContainsIgnoreCase(summary, "cerah")) return isNight ? "bi-moon-stars-fill text-primary" : "bi-sun-fill text-warning";
         return isNight ? "bi-cloud-moon-fill text-secondary" : "bi-cloud-sun-fill text-primary";
     }
+
+    private static bool ContainsIgnoreCase(string value, string candidate) =>
+      value.Contains(candidate, StringComparison.OrdinalIgnoreCase);
   }
 }

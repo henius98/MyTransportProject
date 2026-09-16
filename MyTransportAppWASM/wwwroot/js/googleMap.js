@@ -9,6 +9,8 @@ let routePolylines = [];
 let routeMarkers = [];
 let routeOptionsMap = new Map();
 let currentActiveRouteId = -1;
+let locationPickerMap = null;
+let locationPickerMarkers = [];
 
 
 
@@ -52,7 +54,7 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 	if (!el) throw new Error(`Element #${elementId} not found.`);
 
 	// Using modern importLibrary pattern
-	const [{ Map, InfoWindow }, { AdvancedMarkerElement, PinElement }] = await Promise.all([
+	const [{ Map, InfoWindow }, { AdvancedMarkerElement }] = await Promise.all([
 		google.maps.importLibrary("maps"),
 		google.maps.importLibrary("marker"),
 	]);
@@ -75,7 +77,7 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 	});
 
 	const pin = document.createElement("div");
-	pin.innerHTML = "🚶";
+	pin.textContent = "🚶";
 	pin.style.fontSize = "33px";
 
 	userMarker = new AdvancedMarkerElement({
@@ -125,6 +127,10 @@ export async function initAutocomplete(elementId, dotNetHelper, methodName, apiK
 
 	// Create the new PlaceAutocompleteElement widget
 	const placeAutocomplete = new PlaceAutocompleteElement({});
+	placeAutocomplete.setAttribute(
+		"aria-label",
+		methodName === "UpdateOrigin" ? "Origin" : "Destination",
+	);
 
 	// Style the widget to fill its parent container
 	placeAutocomplete.style.width = "100%";
@@ -460,35 +466,25 @@ export async function syncMarkers(locations) {
 	const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
 
 	try {
-		const currentIds = new Set(locations.map(l => l.vehicleId).filter(id => id != null));
+		const currentIds = new Set();
 
-		// Remove old markers
-		for (const id in activeMarkers) {
-			if (!currentIds.has(id)) {
-				if (activeMarkers[id]._clickListener) {
-					activeMarkers[id]._clickListener.remove();
-				}
-				activeMarkers[id].map = null;
-				delete activeMarkers[id];
-			}
-		}
-
-		locations.forEach(loc => {
+		for (const loc of locations) {
 			const id = loc.vehicleId;
-			if (id == null) return;
-			
-			const pos = { lat: loc.lat, lng: loc.lng };
+			if (id == null) continue;
+			currentIds.add(id);
+
+			const speedKmh = (loc.speed || 0) * 3.6;
+			loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
 			
 			if (activeMarkers[id]) {
 				const marker = activeMarkers[id];
-				marker.position = pos;
-
-				// Convert speed if provided (GTFS-RT speed is m/s)
-				const speedKmh = (loc.speed || 0) * 3.6;
-				loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
-				
+				const previous = marker.busData;
+				if (!previous || previous.lat !== loc.lat || previous.lng !== loc.lng) {
+					marker.position = { lat: loc.lat, lng: loc.lng };
+				}
 				marker.busData = loc;
 			} else {
+				const pos = { lat: loc.lat, lng: loc.lng };
 				const el = document.createElement("div");
 				el.textContent = loc.icon || "🚌";
 				el.className = "bus-marker";
@@ -501,8 +497,6 @@ export async function syncMarkers(locations) {
 					content: el,
 				});
 
-				const speedKmh = (loc.speed || 0) * 3.6;
-				loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
 				marker.busData = loc;
 
 				marker._clickListener = marker.addListener("gmp-click", () => {
@@ -512,15 +506,7 @@ export async function syncMarkers(locations) {
 					}
 
 					const currentLoc = marker.busData;
-					const content = `
-						<div class="bus-info-window">
-							<div class="bus-info-header">Bus ${id}</div>
-							<div class="bus-info-item"><b>Route</b> <span>${currentLoc.routeId || 'N/A'}</span></div>
-							<div class="bus-info-item"><b>Speed</b> <span>${currentLoc.displaySpeed}${currentLoc.displaySpeed === "-" ? "" : " km/h"}</span></div>
-							<div class="bus-info-item"><b>Updated</b> <span>${new Date(currentLoc.timestamp * 1000).toLocaleTimeString()}</span></div>
-						</div>
-					`;
-					infoWindow.setContent(content);
+					infoWindow.setContent(buildBusInfoContent(id, currentLoc));
 					infoWindow.open({
 						anchor: marker,
 						map,
@@ -529,10 +515,58 @@ export async function syncMarkers(locations) {
 
 				activeMarkers[id] = marker;
 			}
-		});
+		}
+
+		// Remove markers absent from the latest complete provider snapshot.
+		for (const id in activeMarkers) {
+			if (!currentIds.has(id)) {
+				if (activeMarkers[id]._clickListener) {
+					activeMarkers[id]._clickListener.remove();
+				}
+				activeMarkers[id].map = null;
+				delete activeMarkers[id];
+			}
+		}
 	} catch (err) {
 		console.error("syncMarkers internal error:", err);
 	}
+}
+
+function buildBusInfoContent(id, location) {
+	const content = document.createElement("div");
+	content.className = "bus-info-window";
+
+	const header = document.createElement("div");
+	header.className = "bus-info-header";
+	header.textContent = `Bus ${id}`;
+	content.appendChild(header);
+
+	appendBusInfoRow(content, "Route", location.routeId || "N/A");
+	appendBusInfoRow(
+		content,
+		"Speed",
+		`${location.displaySpeed}${location.displaySpeed === "-" ? "" : " km/h"}`,
+	);
+	appendBusInfoRow(
+		content,
+		"Updated",
+		new Date(location.timestamp * 1000).toLocaleTimeString(),
+	);
+
+	return content;
+}
+
+function appendBusInfoRow(container, label, value) {
+	const row = document.createElement("div");
+	row.className = "bus-info-item";
+
+	const heading = document.createElement("b");
+	heading.textContent = label;
+	const text = document.createElement("span");
+	text.textContent = value;
+
+	row.append(heading, text);
+	container.appendChild(row);
 }
 export async function showLocationPickerMap(containerId, locations, dotnetHelper, apiKey) {
     await loadGoogleMaps(apiKey);
@@ -542,8 +576,11 @@ export async function showLocationPickerMap(containerId, locations, dotnetHelper
     const container = document.getElementById(containerId);
     if (!container) return;
 
+    cleanupLocationPickerMap();
+    container.replaceChildren();
+
     // Center map around Malaysia
-    const map = new Map(container, {
+    locationPickerMap = new Map(container, {
         center: { lat: 4.2105, lng: 101.9758 },
         zoom: 6,
         mapId: "LOCATION_PICKER_MAP",
@@ -553,14 +590,22 @@ export async function showLocationPickerMap(containerId, locations, dotnetHelper
     locations.forEach(loc => {
         const marker = new AdvancedMarkerElement({
             position: { lat: loc.latitude, lng: loc.longitude },
-            map: map,
+            map: locationPickerMap,
             title: loc.location_name
         });
+
+        locationPickerMarkers.push(marker);
 
         marker.addListener("gmp-click", () => {
             dotnetHelper.invokeMethodAsync('OnLocationSelectedFromMap', loc.latitude, loc.longitude, `MET ID: ${loc.location_id}`, loc.location_name);
         });
     });
+}
+
+export function cleanupLocationPickerMap() {
+    locationPickerMarkers.forEach(marker => (marker.map = null));
+    locationPickerMarkers = [];
+    locationPickerMap = null;
 }
 
 export function showDialog(dialog) {

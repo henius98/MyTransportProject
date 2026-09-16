@@ -1,8 +1,6 @@
 
 namespace MyTransportAppWASM.Pages.Map;
 
-using System.Collections.Concurrent;
-
 public partial class Map : IAsyncDisposable
 {
   [Inject] private IJSRuntime JS { get; set; } = default!;
@@ -27,29 +25,73 @@ public partial class Map : IAsyncDisposable
   private bool _isDisposed = false;
   private string locationStatus = "Initializing...";
   private bool isCollapsed = false;
-  private ConcurrentDictionary<string, List<MyTransportAppWASM.Models.BusLocation>> _providerVehicleCache = new();
+  private IReadOnlyList<TransportProvider> _transportProviders = Array.Empty<TransportProvider>();
+  private List<MyTransportAppWASM.Models.BusLocation> _cachedVehicles = [];
+  private TimeSpan _pollingInterval = TimeSpan.FromSeconds(15);
+  private TransitRefreshCoordinator _transitRefresh = new(
+    TimeSpan.FromSeconds(15),
+    TimeSpan.FromMinutes(2),
+    TimeSpan.FromMinutes(2));
+  private readonly SemaphoreSlim _refreshGate = new(1, 1);
   private List<MyTransportAppWASM.Models.EnrichedRoute> _routeOptions = new();
   private int _activeRouteId = -1;
+  private Task _autocompleteTask = Task.CompletedTask;
+  private Task _pollingTask = Task.CompletedTask;
+  private Task _fortuneTask = Task.CompletedTask;
 
   private string MapContainerClass => Theme.IsDarkMode ? "theme-dark" : "theme-light";
   private string MapOverlayClass => $"map-overlay {(isCollapsed ? "collapsed" : "")}".Trim();
 
   private void ToggleCollapse() => isCollapsed = !isCollapsed;
 
-  protected override async Task OnInitializedAsync()
+  protected override Task OnInitializedAsync()
   {
     Latitude = Config.GetValue<double?>("DefaultLocation:Latitude")
         ?? throw new InvalidOperationException("Missing configuration: DefaultLocation:Latitude");
     Longitude = Config.GetValue<double?>("DefaultLocation:Longitude")
         ?? throw new InvalidOperationException("Missing configuration: DefaultLocation:Longitude");
+    _transportProviders = Config.GetSection("TransportProviders").Get<List<TransportProvider>>() ?? [];
+
+    var pollingSeconds = Math.Max(5, Config.GetValue("TransitPolling:IntervalSeconds", 15));
+    var maximumBackoffSeconds = Math.Max(
+      pollingSeconds,
+      Config.GetValue("TransitPolling:MaximumBackoffSeconds", 120));
+    var maximumSnapshotAgeSeconds = Math.Max(
+      pollingSeconds,
+      Config.GetValue("TransitPolling:MaximumSnapshotAgeSeconds", 120));
+    _pollingInterval = TimeSpan.FromSeconds(pollingSeconds);
+    _transitRefresh = new TransitRefreshCoordinator(
+      _pollingInterval,
+      TimeSpan.FromSeconds(maximumBackoffSeconds),
+      TimeSpan.FromSeconds(maximumSnapshotAgeSeconds));
+
     Theme.OnThemeChanged += OnThemeChanged;
-    
-    try {
-        TodayFortune = await BaziFlowService.GetDateFortuneAsync(DateTime.Now.ToString("yyyy-MM-dd"));
-    } catch { }
+
+    // Fortune data is optional route decoration and must not delay the map's first render.
+    _fortuneTask = LoadTodayFortuneAsync();
+    return Task.CompletedTask;
   }
 
-  private async void OnThemeChanged()
+  private async Task LoadTodayFortuneAsync()
+  {
+    try
+    {
+      if (!await BaziFlowService.HasApiKeyAsync())
+      {
+        return;
+      }
+
+      TodayFortune = await BaziFlowService.GetDateFortuneAsync(DateTime.Now.ToString("yyyy-MM-dd"));
+    }
+    catch (Exception ex)
+    {
+      Console.Error.WriteLine($"Today's fortune could not be loaded: {ex.Message}");
+    }
+  }
+
+  private void OnThemeChanged() => _ = InvokeAsync(UpdateMapThemeAsync);
+
+  private async Task UpdateMapThemeAsync()
   {
     if (mapModule != null && !_isDisposed)
     {
@@ -72,18 +114,18 @@ public partial class Map : IAsyncDisposable
     try
     {
       objRef = DotNetObjectReference.Create(this);
-      mapModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/googleMap.js?v=" + DateTime.Now.Ticks);
+      mapModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/googleMap.js");
 
       if (_isDisposed) return;
 
       // Initialize autocomplete concurrently so it's not blocked by GPS loading
-      _ = InitializeAutocompleteAsync();
+      _autocompleteTask = InitializeAutocompleteAsync();
       await InitializeMapOptimisticallyAsync();
 
       if (_isDisposed) return;
 
       // Start periodic bus refresh using PeriodicTimer (WASM-friendly, no SynchronizationContext issues)
-      _ = RunBusPollingLoopAsync(_cts.Token);
+      _pollingTask = RunBusPollingLoopAsync(_cts.Token);
     }
     catch (Exception ex)
     {
@@ -97,13 +139,13 @@ public partial class Map : IAsyncDisposable
   /// </summary>
   private async Task RunBusPollingLoopAsync(CancellationToken cancellationToken)
   {
-    using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+    using var timer = new PeriodicTimer(_pollingInterval);
 
     try
     {
       while (await timer.WaitForNextTickAsync(cancellationToken))
       {
-        await InvokeAsync(RefreshBusPosition);
+        await InvokeAsync(() => RefreshBusPosition(force: false));
       }
     }
     catch (OperationCanceledException)
@@ -138,6 +180,7 @@ public partial class Map : IAsyncDisposable
       }
       else
       {
+        LocationService.UpdateLocation(initialLat, initialLng);
         locationStatus = "Using default location";
       }
 
@@ -177,7 +220,7 @@ public partial class Map : IAsyncDisposable
   [JSInvokable]
   public async Task UpdateUserPosition(double lat, double lng)
   {
-    // This could be used to sync back to LocationService if needed
+    LocationService.UpdateLocation(lat, lng);
     await RefreshBusPosition();
     StateHasChanged();
   }
@@ -237,20 +280,25 @@ public partial class Map : IAsyncDisposable
     }
   }
 
-  private async Task RefreshBusPosition()
+  private Task RefreshBusPosition() => RefreshBusPosition(force: true);
+
+  private async Task RefreshBusPosition(bool force)
   {
     var pos = LocationService.LastKnownLocation;
     if (mapModule == null || _isDisposed || pos == null) return;
+    if (!await _refreshGate.WaitAsync(0)) return;
 
     try
     {
-      var providers = Config.GetSection("TransportProviders").Get<List<TransportProvider>>() ?? new();
-      var nearbyProviders = providers.Where(p =>
+      var nearbyProviders = _transportProviders.Where(p =>
           CalculateDistance(pos.Latitude, pos.Longitude, p.CenterLat, p.CenterLng) <= p.RadiusKm
       ).ToList();
 
-      if (!nearbyProviders.Any())
+      if (nearbyProviders.Count == 0)
       {
+        _transitRefresh.Clear();
+        _cachedVehicles = [];
+        await mapModule.InvokeVoidAsync("syncMarkers", Array.Empty<MyTransportAppWASM.Models.BusLocation>());
         locationStatus = "No bus providers found nearby.";
         StateHasChanged();
         return;
@@ -258,39 +306,35 @@ public partial class Map : IAsyncDisposable
 
       if (_isDisposed) return;
       var cancellationToken = _cts.Token;
+      var refreshStartedAt = DateTimeOffset.UtcNow;
+      var providersToRefresh = _transitRefresh.GetProvidersToRefresh(
+        nearbyProviders,
+        refreshStartedAt,
+        force);
 
-      var tasks = nearbyProviders.Select(async provider =>
-      {
-        var feed = await GtfsService.GetBusPositionsAsync(provider.Endpoint, cancellationToken);
-        if (_isDisposed || feed?.Entity == null) return;
-
-        _providerVehicleCache[provider.Endpoint] = feed.Entity
-                  .Where(e => e.Vehicle?.Position != null)
-                  .Select(e => new MyTransportAppWASM.Models.BusLocation
-                  {
-                    TripId = e.Vehicle.Trip?.TripId,
-                    RouteId = e.Vehicle.Trip?.RouteId,
-                    VehicleId = e.Vehicle.Vehicle.Id,
-                    Lat = e.Vehicle.Position.Latitude,
-                    Lng = e.Vehicle.Position.Longitude,
-                    Bearing = e.Vehicle.Position.Bearing,
-                    Speed = e.Vehicle.Position.Speed,
-                    Timestamp = e.Vehicle.Timestamp
-                  }).ToList();
-      });
-
-      await Task.WhenAll(tasks);
+      var refreshResults = await Task.WhenAll(
+        providersToRefresh.Select(provider => FetchProviderVehiclesAsync(
+          provider,
+          _transitRefresh.HasUsableSnapshot(provider.Endpoint, refreshStartedAt),
+          cancellationToken)));
 
       if (_isDisposed || mapModule == null) return;
 
-      var allVehicles = nearbyProviders
-          .Where(p => _providerVehicleCache.ContainsKey(p.Endpoint))
-          .SelectMany(p => _providerVehicleCache[p.Endpoint])
-          .ToList();
+      var outcome = _transitRefresh.ApplyResults(
+        nearbyProviders,
+        refreshResults,
+        DateTimeOffset.UtcNow);
+      _cachedVehicles = outcome.Vehicles;
 
-      await mapModule.InvokeVoidAsync("syncMarkers", allVehicles);
-      lastUpdated = DateTime.Now;
-      locationStatus = $"Buses updated: {lastUpdated:HH:mm:ss} ({nearbyProviders.Count} source(s))";
+      await mapModule.InvokeVoidAsync("syncMarkers", _cachedVehicles);
+
+      var successfulRefreshCount = outcome.AttemptedProviderCount - outcome.FailedProviderCount;
+      if (successfulRefreshCount > 0)
+      {
+        lastUpdated = DateTime.Now;
+      }
+
+      locationStatus = BuildTransitStatus(outcome, nearbyProviders.Count);
       StateHasChanged();
     }
     catch (OperationCanceledException)
@@ -302,6 +346,64 @@ public partial class Map : IAsyncDisposable
       if (_isDisposed) return;
       Console.Error.WriteLine($"RefreshBusPosition failed: {ex.Message}");
     }
+    finally
+    {
+      _refreshGate.Release();
+    }
+  }
+
+  private async Task<ProviderVehicleRefresh> FetchProviderVehiclesAsync(
+    TransportProvider provider,
+    bool allowNotModified,
+    CancellationToken cancellationToken)
+  {
+    var result = await GtfsService.GetBusPositionsAsync(
+      provider.Endpoint,
+      allowNotModified,
+      cancellationToken);
+    if (_isDisposed || result.Status == GtfsFetchStatus.Failed)
+    {
+      return new ProviderVehicleRefresh(provider.Endpoint, ProviderVehicleRefreshStatus.Failed);
+    }
+
+    if (result.Status == GtfsFetchStatus.NotModified)
+    {
+      return new ProviderVehicleRefresh(provider.Endpoint, ProviderVehicleRefreshStatus.NotModified);
+    }
+
+    if (result.Vehicles is not { } vehicles)
+    {
+      return new ProviderVehicleRefresh(provider.Endpoint, ProviderVehicleRefreshStatus.Failed);
+    }
+
+    return new ProviderVehicleRefresh(
+      provider.Endpoint,
+      ProviderVehicleRefreshStatus.Updated,
+      vehicles);
+  }
+
+  private string BuildTransitStatus(TransitRefreshOutcome outcome, int nearbyProviderCount)
+  {
+    if (_cachedVehicles.Count == 0)
+    {
+      return outcome.FailedProviderCount > 0 || outcome.ExpiredProviderCount > 0
+        ? "Live bus data unavailable; retrying with backoff."
+        : $"No active vehicles reported ({nearbyProviderCount} source(s)).";
+    }
+
+    var staleSuffix = outcome.StaleProviderCount > 0
+      ? $", {outcome.StaleProviderCount} temporarily stale"
+      : string.Empty;
+    var expiredSuffix = outcome.ExpiredProviderCount > 0
+      ? $", {outcome.ExpiredProviderCount} expired"
+      : string.Empty;
+
+    if (lastUpdated == default)
+    {
+      return $"Showing {_cachedVehicles.Count} buses ({nearbyProviderCount} source(s){staleSuffix}{expiredSuffix})";
+    }
+
+    return $"Buses updated: {lastUpdated:HH:mm:ss} ({nearbyProviderCount} source(s){staleSuffix}{expiredSuffix})";
   }
 
   private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
@@ -334,6 +436,15 @@ public partial class Map : IAsyncDisposable
       _routeOptions.Clear();
       StateHasChanged();
 
+      if (!string.Equals(mode, "TRANSIT", StringComparison.Ordinal))
+      {
+        await mapModule.InvokeVoidAsync("showRouteByName", origin, destination, mode);
+        _activeRouteId = -1;
+        locationStatus = $"{char.ToUpperInvariant(mode[0])}{mode[1..].ToLowerInvariant()} route ready.";
+        StateHasChanged();
+        return;
+      }
+
       var googleRoutes = await mapModule.InvokeAsync<List<MyTransportAppWASM.Models.GoogleRoute>>("getTransitRoutes", origin, destination);
       
       if (googleRoutes == null || googleRoutes.Count == 0)
@@ -343,8 +454,7 @@ public partial class Map : IAsyncDisposable
         return;
       }
 
-      var allVehicles = _providerVehicleCache.Values.SelectMany(x => x).ToList();
-      _routeOptions = await LiveRouting.EnrichRoutesAsync(googleRoutes, allVehicles);
+      _routeOptions = await LiveRouting.EnrichRoutesAsync(googleRoutes, _cachedVehicles);
 
       if (TodayFortune != null)
       {
@@ -406,6 +516,8 @@ public partial class Map : IAsyncDisposable
     try
     {
       await mapModule.InvokeVoidAsync("clearRoute");
+      _routeOptions.Clear();
+      _activeRouteId = -1;
       locationStatus = "Route cleared.";
       StateHasChanged();
     }
@@ -425,6 +537,7 @@ public partial class Map : IAsyncDisposable
 
     // Cancel the polling loop and any in-flight HTTP calls
     await _cts.CancelAsync();
+    await Task.WhenAll(_autocompleteTask, _pollingTask);
     _cts.Dispose();
 
     objRef?.Dispose();

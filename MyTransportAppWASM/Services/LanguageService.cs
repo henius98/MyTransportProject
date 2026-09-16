@@ -25,6 +25,7 @@ namespace MyTransportAppWASM.Services
 
         private readonly HttpClient _http;
         private Dictionary<string, string> _translations = new();
+        private int _loadVersion;
         public event Action? OnLanguageChanged;
 
         public string CurrentLanguageName { get; private set; } = "en-US";
@@ -36,10 +37,16 @@ namespace MyTransportAppWASM.Services
 
         public async Task LoadLanguageAsync(string langCode)
         {
+            var version = ++_loadVersion;
+            if (_translations.Count > 0 && string.Equals(CurrentLanguageName, langCode, StringComparison.Ordinal))
+            {
+                return;
+            }
+
             try
             {
                 var response = await _http.GetFromJsonAsync<Dictionary<string, string>>($"i18n/{langCode}.json");
-                if (response != null)
+                if (response != null && version == _loadVersion)
                 {
                     _translations = response;
                     CurrentLanguageName = langCode;

@@ -1,6 +1,4 @@
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using Blazored.LocalStorage;
 using MyTransportAppWASM.Models.BaziFlow;
 using MyTransportAppWASM.Services.Interfaces;
 
@@ -9,10 +7,10 @@ namespace MyTransportAppWASM.Services
     public class BaziFlowService : IBaziFlowService
     {
         private readonly HttpClient _httpClient;
-        private readonly ILocalStorageService _localStorage;
+        private readonly IBrowserStorageService _localStorage;
         private const string ApiKeyStorageKey = "baziflow_api_key";
 
-        public BaziFlowService(HttpClient httpClient, ILocalStorageService localStorage)
+        public BaziFlowService(HttpClient httpClient, IBrowserStorageService localStorage)
         {
             _httpClient = httpClient;
             _localStorage = localStorage;
@@ -22,12 +20,12 @@ namespace MyTransportAppWASM.Services
 
         public async Task<string?> GetApiKeyAsync()
         {
-            return await _localStorage.GetItemAsync<string>(ApiKeyStorageKey);
+            return await _localStorage.GetStringAsync(ApiKeyStorageKey);
         }
 
         public async Task SaveApiKeyAsync(string apiKey)
         {
-            await _localStorage.SetItemAsync(ApiKeyStorageKey, apiKey);
+            await _localStorage.SetStringAsync(ApiKeyStorageKey, apiKey);
         }
 
         public async Task<bool> HasApiKeyAsync()
@@ -41,7 +39,9 @@ namespace MyTransportAppWASM.Services
 
             try
             {
-                var response = await _httpClient.GetFromJsonAsync<ApiResponse<ProfileData>>("/api/v1/profile");
+                var response = await _httpClient.GetFromJsonAsync(
+                    "/api/v1/profile",
+                    MyTransportAppWASM.Models.AppJsonSerializerContext.Default.ApiResponseProfileData);
                 return response?.Data;
             }
             catch (Exception ex)
@@ -56,7 +56,10 @@ namespace MyTransportAppWASM.Services
 
             try
             {
-                var response = await _httpClient.PostAsJsonAsync("/api/v1/profile", request);
+                using var response = await _httpClient.PostAsJsonAsync(
+                    "/api/v1/profile",
+                    request,
+                    MyTransportAppWASM.Models.AppJsonSerializerContext.Default.CreateProfileRequest);
                 return response.IsSuccessStatusCode;
             }
             catch (Exception ex)
@@ -72,11 +75,15 @@ namespace MyTransportAppWASM.Services
             try
             {
                 var request = new DateFortuneRequest { Date = date };
-                var response = await _httpClient.PostAsJsonAsync("/api/v1/date-fortune", request);
+                using var response = await _httpClient.PostAsJsonAsync(
+                    "/api/v1/date-fortune",
+                    request,
+                    MyTransportAppWASM.Models.AppJsonSerializerContext.Default.DateFortuneRequest);
                 
                 if (response.IsSuccessStatusCode)
                 {
-                    var result = await response.Content.ReadFromJsonAsync<ApiResponse<FortuneData>>();
+                    var result = await response.Content.ReadFromJsonAsync(
+                        MyTransportAppWASM.Models.AppJsonSerializerContext.Default.ApiResponseFortuneData);
                     if (result?.Data != null)
                     {
                         result.Data.FavorableDirections = new List<string> { "North", "East", "Southeast" };

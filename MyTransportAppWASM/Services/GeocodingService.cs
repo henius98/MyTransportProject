@@ -40,7 +40,7 @@ namespace MyTransportAppWASM.Services
             Encoding.UTF8,
             "application/json");
 
-        var response = await _httpClient.SendAsync(request);
+        using var response = await _httpClient.SendAsync(request);
         if (response.IsSuccessStatusCode)
         {
           var data = await response.Content.ReadFromJsonAsync(MyTransportAppWASM.Models.AppJsonSerializerContext.Default.PlacesNewResponse);
@@ -64,7 +64,7 @@ namespace MyTransportAppWASM.Services
       return null;
     }
 
-    private List<MetLocation>? _cachedMetLocations;
+    private Task<List<MetLocation>?>? _metLocationsTask;
 
     public async Task<List<(double Lat, double Lng, string FormattedAddress, string Name)>> GetSuggestionsAsync(string address)
     {
@@ -73,14 +73,10 @@ namespace MyTransportAppWASM.Services
 
       try
       {
-        if (_cachedMetLocations == null)
+        var metLocations = await GetMetLocationsAsync();
+        if (metLocations != null)
         {
-          _cachedMetLocations = await _httpClient.GetFromJsonAsync("data/recreation_centres.json", MyTransportAppWASM.Models.AppJsonSerializerContext.Default.ListMetLocation);
-        }
-
-        if (_cachedMetLocations != null)
-        {
-          return _cachedMetLocations
+          return metLocations
             .Where(l => l.LocationName != null && l.LocationName.Contains(address, StringComparison.OrdinalIgnoreCase))
             .Take(15)
             .Select(l => (l.Latitude, l.Longitude, $"MET ID: {l.LocationId}", l.LocationName!))
@@ -99,11 +95,7 @@ namespace MyTransportAppWASM.Services
     {
       try
       {
-        if (_cachedMetLocations == null)
-        {
-          _cachedMetLocations = await _httpClient.GetFromJsonAsync("data/recreation_centres.json", MyTransportAppWASM.Models.AppJsonSerializerContext.Default.ListMetLocation);
-        }
-        return _cachedMetLocations ?? new();
+        return await GetMetLocationsAsync() ?? [];
       }
       catch (Exception ex)
       {
@@ -112,19 +104,41 @@ namespace MyTransportAppWASM.Services
       return new();
     }
 
+    private async Task<List<MetLocation>?> GetMetLocationsAsync()
+    {
+      var loadTask = _metLocationsTask ??= _httpClient.GetFromJsonAsync(
+        "data/recreation_centres.json",
+        MyTransportAppWASM.Models.AppJsonSerializerContext.Default.ListMetLocation);
+
+      try
+      {
+        return await loadTask;
+      }
+      catch
+      {
+        // Allow a later call to retry after a transient static-asset failure.
+        if (ReferenceEquals(_metLocationsTask, loadTask))
+        {
+          _metLocationsTask = null;
+        }
+
+        throw;
+      }
+    }
+
     public async Task<string?> ReverseGeocodeAsync(double lat, double lng)
     {
       if (string.IsNullOrWhiteSpace(_apiKey)) return null;
 
-      string url = $"https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lng}&key={_apiKey}";
+      string url = FormattableString.Invariant($"https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lng}&key={_apiKey}");
       
       try
       {
-        var response = await _httpClient.GetAsync(url);
+        using var response = await _httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
         if (response.IsSuccessStatusCode)
         {
-          var jsonString = await response.Content.ReadAsStringAsync();
-          using var document = System.Text.Json.JsonDocument.Parse(jsonString);
+          await using var jsonStream = await response.Content.ReadAsStreamAsync();
+          using var document = await System.Text.Json.JsonDocument.ParseAsync(jsonStream);
           var root = document.RootElement;
           
           if (root.TryGetProperty("status", out var status) && status.GetString() == "OK")

@@ -64,11 +64,7 @@ a,
   color: #0071c1;
 }
 
-.btn-primary {
-  color: #ffffff;
-  background-color: #1b6ec2;
-  border-color: #1861ac;
-}
+
 
 /* Hide focus ring only for mouse/pointer users — keyboard users still get :focus-visible */
 h1:focus:not(:focus-visible) {

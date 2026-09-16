@@ -11,33 +11,66 @@
     <base href="/" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
     <link
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
-      rel="stylesheet"
+      rel="preload"
+      as="style"
+      onload="this.onload=null;this.rel='stylesheet'"
     />
-    
-    <!-- Critical App CSS (Loaded in parallel to avoid @import waterfall) -->
-    <link rel="stylesheet" href="css/base/variables.css" />
-    <link rel="stylesheet" href="css/base/typography.css" />
-    <link rel="stylesheet" href="css/components/card.css" />
-    <link rel="stylesheet" href="css/components/button.css" />
-    <link rel="stylesheet" href="css/components/form.css" />
-    <link rel="stylesheet" href="css/components/badge.css" />
-    <link rel="stylesheet" href="css/components/modal.css" />
-    <link rel="stylesheet" href="css/components/stats.css" />
-    <link rel="stylesheet" href="css/components/navigation.css" />
-    <link rel="stylesheet" href="css/components/error.css" />
-    <link href="MyTransportAppWASM.styles.css" rel="stylesheet" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" /></noscript>
+
+    <!-- The splash is fully inlined below, so app styles can download without blocking FCP. -->
+    <link rel="preload" as="style" href="css/base/variables.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <link rel="preload" as="style" href="css/base/typography.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <link rel="preload" as="style" href="css/components/card.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <link rel="preload" as="style" href="css/components/button.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <link rel="preload" as="style" href="css/components/form.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <link rel="preload" as="style" href="css/components/badge.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <link rel="preload" as="style" href="css/components/modal.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <link rel="preload" as="style" href="css/components/stats.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <link rel="preload" as="style" href="css/components/navigation.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <link rel="preload" as="style" href="css/components/error.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <link rel="preload" as="style" href="MyTransportAppWASM.styles.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript>
+      <link rel="stylesheet" href="css/base/variables.css" />
+      <link rel="stylesheet" href="css/base/typography.css" />
+      <link rel="stylesheet" href="css/components/card.css" />
+      <link rel="stylesheet" href="css/components/button.css" />
+      <link rel="stylesheet" href="css/components/form.css" />
+      <link rel="stylesheet" href="css/components/badge.css" />
+      <link rel="stylesheet" href="css/components/modal.css" />
+      <link rel="stylesheet" href="css/components/stats.css" />
+      <link rel="stylesheet" href="css/components/navigation.css" />
+      <link rel="stylesheet" href="css/components/error.css" />
+      <link rel="stylesheet" href="MyTransportAppWASM.styles.css" />
+    </noscript>
 
     <!-- Non-critical CSS loaded asynchronously -->
-    <link rel="preload" as="style" href="lib/bootstrap/dist/css/bootstrap.min.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <noscript><link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" /></noscript>
-    
+    <link
+      rel="preload"
+      as="style"
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+      integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
+      crossorigin="anonymous"
+      onload="this.onload=null;this.rel='stylesheet'"
+      onerror="this.onerror=null;this.removeAttribute('integrity');this.removeAttribute('crossorigin');this.href='lib/bootstrap/dist/css/bootstrap.min.css'"
+    />
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+        integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
+        crossorigin="anonymous"
+      />
+    </noscript>
+
     <link rel="preload" as="style" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" crossorigin="anonymous" onload="this.onload=null;this.rel='stylesheet'" />
     <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" crossorigin="anonymous" /></noscript>
 
     <link rel="icon" type="image/svg+xml" href="myTransport.svg" />
     <link rel="preload" href="myTransport.svg" as="image" fetchpriority="high" />
+    <link rel="preload" href="i18n/en-US.json" as="fetch" crossorigin="anonymous" fetchpriority="low" />
     <!-- SVG icon fetched by browser via <link rel="icon"> and splash <img> — redundant preload added for LCP optimization -->
     <link href="manifest.webmanifest" rel="manifest" />
     <meta
@@ -150,17 +183,7 @@
       <button class="dismiss" aria-label="Dismiss error">🗙</button>
     </div>
     <script>
-      window.welcomeManager = {
-        setSeen: function () {
-          localStorage.setItem("hasSeenWelcome", "true");
-        },
-        hasSeen: function () {
-          return localStorage.getItem("hasSeenWelcome") === "true";
-        },
-      };
-
-      // Purge all OIDC session state to prevent silent re-authentication after logout.
-      // The Blazor AuthenticationService.js stores tokens under 'oidc.*' keys in sessionStorage.
+      // Firebase Auth state is managed natively by Firebase JS SDK
       window.appAuth = {
         explicitLogoutKey: "mytransport.explicitLogout",
         noteExplicitLogout: function () {
@@ -171,46 +194,32 @@
         },
         wasExplicitLogout: function () {
           return sessionStorage.getItem(this.explicitLogoutKey) === "true";
-        },
-        purgeOidcState: function () {
-          var keysToRemove = [];
-          for (var i = 0; i < sessionStorage.length; i++) {
-            var key = sessionStorage.key(i);
-            if (
-              key &&
-              key !== this.explicitLogoutKey &&
-              (key.startsWith("oidc.") ||
-                key.startsWith(
-                  "Microsoft.AspNetCore.Components.WebAssembly.Authentication",
-                ))
-            ) {
-              keysToRemove.push(key);
-            }
-          }
-          keysToRemove.forEach(function (k) {
-            sessionStorage.removeItem(k);
-          });
-          console.log(
-            "[appAuth] Purged " +
-              keysToRemove.length +
-              " OIDC key(s) from sessionStorage",
-          );
-        },
+        }
       };
     </script>
     <!-- Empty importmap removed — no module specifier overrides needed -->
     <script src="js/theme-manager.js"></script>
-    <script src="_content/Microsoft.AspNetCore.Components.WebAssembly.Authentication/AuthenticationService.js"></script>
-    <script src="_framework/blazor.webassembly.js"></script>
+    <script src="_framework/blazor.webassembly.js" autostart="false"></script>
+    <script type="module">
+      await Promise.allSettled([
+        import("./js/firebase-auth.js"),
+        import("./js/firebase-firestore.js"),
+      ]);
+      await Blazor.start();
+    </script>
+
     <script src="js/auth.js" type="module"></script>
     <script>
       // Unregister any previously cached service workers to suppress stale no-op fetch handler warnings
       if ("serviceWorker" in navigator) {
+        var appBaseUrl = new URL(document.baseURI).href;
         navigator.serviceWorker
           .getRegistrations()
           .then(function (registrations) {
             for (let reg of registrations) {
-              reg.unregister();
+              if (reg.scope.startsWith(appBaseUrl)) {
+                reg.unregister();
+              }
             }
           });
       }
@@ -220,11 +229,18 @@
       window.dialogHelper = {
         showModal: function (id) {
           var el = document.getElementById(id);
-          if (el) el.showModal();
+          if (el && !el.open) el.showModal();
         },
         close: function (id) {
           var el = document.getElementById(id);
-          if (el) el.close();
+          if (el && el.open) el.close();
+        },
+      };
+
+      window.navigationHelper = {
+        collapseMobileMenu: function () {
+          var toggler = document.querySelector(".navbar-toggler");
+          if (toggler && toggler.checked) toggler.click();
         },
       };
 

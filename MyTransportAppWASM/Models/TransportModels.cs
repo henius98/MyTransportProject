@@ -23,8 +23,6 @@ namespace MyTransportAppWASM.Models
 
   public record BusLocation
   {
-    [System.Text.Json.Serialization.JsonPropertyName("tripId")]
-    public string? TripId { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("routeId")]
     public string? RouteId { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("vehicleId")]

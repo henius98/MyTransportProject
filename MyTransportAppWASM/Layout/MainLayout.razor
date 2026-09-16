@@ -2,6 +2,8 @@
 @using MyTransportAppWASM.Services
 @inject ThemeService Theme
 @inject LanguageService Language
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IUserSettingsService UserSettings
 @implements IDisposable
 
 <div class="page" style="@SidebarStyle">
@@ -31,11 +33,15 @@
             </ErrorBoundary>
         </article>
     </main>
+
+    <LoginModal />
 </div>
 
 @code {
     private bool isCollapsed = false;
     private bool isHovered = false;
+    private int preferenceVersion;
+    private bool disposed;
 
     private bool EffectiveIsCollapsed => isCollapsed && !isHovered;
 
@@ -44,9 +50,32 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await Theme.InitializeAsync();
+        AuthStateProvider.AuthenticationStateChanged += HandleAuthenticationChanged;
         Theme.OnThemeChanged += StateHasChanged;
         Language.OnLanguageChanged += StateHasChanged;
+        await ApplyPreferencesAsync();
+    }
+
+    private void HandleAuthenticationChanged(Task<AuthenticationState> state) =>
+        _ = InvokeAsync(ApplyPreferencesAsync);
+
+    private async Task ApplyPreferencesAsync()
+    {
+        var version = ++preferenceVersion;
+        try
+        {
+            var settings = await UserSettings.GetSettingsAsync();
+            if (disposed || version != preferenceVersion) return;
+            await Theme.ApplyAsync(settings);
+            if (disposed || version != preferenceVersion) return;
+            var language = LanguageService.SupportedLanguages.Any(option => option.Code == settings.Language)
+                ? settings.Language! : "en-US";
+            await Language.LoadLanguageAsync(language);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Could not apply preferences: {ex.Message}");
+        }
     }
 
     private void ExpandSidebar() => isCollapsed = false;
@@ -57,6 +86,8 @@
 
     public void Dispose()
     {
+        disposed = true;
+        AuthStateProvider.AuthenticationStateChanged -= HandleAuthenticationChanged;
         Theme.OnThemeChanged -= StateHasChanged;
         Language.OnLanguageChanged -= StateHasChanged;
     }

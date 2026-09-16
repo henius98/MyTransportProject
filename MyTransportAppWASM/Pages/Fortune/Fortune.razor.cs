@@ -23,42 +23,56 @@ namespace MyTransportAppWASM.Pages.Fortune
         private async Task LoadDataAsync()
         {
             isLoading = true;
-            hasApiKey = await BaziFlowService.HasApiKeyAsync();
+            errorMessage = null;
 
-            if (hasApiKey)
+            try
             {
-                var profileData = await BaziFlowService.GetProfileAsync();
-                if (profileData?.Profile != null)
+                hasApiKey = await BaziFlowService.HasApiKeyAsync();
+
+                if (hasApiKey)
                 {
-                    profile = profileData.Profile;
-                    var dateStr = DateTime.Now.ToString("yyyy-MM-dd");
-                    fortune = await BaziFlowService.GetDateFortuneAsync(dateStr);
-                }
-                else
-                {
-                    // Profile might not exist even if API key is present
-                    profile = null;
+                    var profileData = await BaziFlowService.GetProfileAsync();
+                    if (profileData?.Profile != null)
+                    {
+                        profile = profileData.Profile;
+                        var dateStr = DateTime.Now.ToString("yyyy-MM-dd");
+                        fortune = await BaziFlowService.GetDateFortuneAsync(dateStr);
+                    }
+                    else
+                    {
+                        profile = null;
+                    }
                 }
             }
-            isLoading = false;
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Could not load BaziFlow data: {ex.Message}");
+                errorMessage = "Could not load your fortune settings on this device.";
+            }
+            finally
+            {
+                isLoading = false;
+            }
         }
 
-            private async Task HandleSetupSubmit()
+        private async Task HandleSetupSubmit()
+        {
+            errorMessage = null;
+            isSaving = true;
+
+            try
             {
-                errorMessage = null;
-                isSaving = true;
-            
-            await BaziFlowService.SaveApiKeyAsync(setupModel.ApiKey);
-            
-            var request = new CreateProfileRequest
-            {
-                Gender = setupModel.Gender,
-                BirthDate = setupModel.BirthDate,
-                BirthHour = setupModel.BirthHour,
-                BirthMinute = setupModel.BirthMinute,
-                Location = "Malaysia" // Default location for transport app
-            };
-            
+                await BaziFlowService.SaveApiKeyAsync(setupModel.ApiKey);
+
+                var request = new CreateProfileRequest
+                {
+                    Gender = setupModel.Gender,
+                    BirthDate = setupModel.BirthDate,
+                    BirthHour = setupModel.BirthHour,
+                    BirthMinute = setupModel.BirthMinute,
+                    Location = "Malaysia"
+                };
+
                 var success = await BaziFlowService.CreateProfileAsync(request);
                 if (success)
                 {
@@ -68,10 +82,18 @@ namespace MyTransportAppWASM.Pages.Fortune
                 {
                     errorMessage = "Failed to create profile. Your API key may be invalid or the service is down.";
                     hasApiKey = false;
-                    await BaziFlowService.SaveApiKeyAsync(string.Empty); // Clear invalid key
+                    await BaziFlowService.SaveApiKeyAsync(string.Empty);
                 }
-                
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Could not save BaziFlow setup: {ex.Message}");
+                errorMessage = "Could not save your setup on this device. Check browser storage permissions and try again.";
+            }
+            finally
+            {
                 isSaving = false;
+            }
         }
 
         public class SetupModel

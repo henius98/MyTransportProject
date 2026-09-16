@@ -3,7 +3,6 @@
 @inject IJSRuntime JSRuntime
 @using Microsoft.Extensions.Configuration
 @inject IConfiguration Config
-@implements IDisposable
 @implements IAsyncDisposable
 
 <div class="d-flex gap-2 align-items-center w-100">
@@ -17,7 +16,7 @@
            @onkeydown="HandleKeyDown"
            role="combobox"
            aria-expanded="@(_showSuggestions ? "true" : "false")"
-           aria-controls="autocomplete-listbox"
+           aria-controls="@ListboxId"
            aria-autocomplete="list"
            aria-activedescendant="@(_activeIndex >= 0 && _suggestions.Count > _activeIndex ? $"suggestion-{_activeIndex}" : null)"
            placeholder="e.g., Kuala Lumpur Sentral" />
@@ -26,7 +25,7 @@
     {
         <div class="position-absolute w-100 mt-1 p-0 shadow-sm"
              style="z-index: 1000; max-height: 250px; overflow-y: auto; background: var(--bg-color, #fff); border-radius: 12px; border: 1px solid var(--border-color); overflow-x: hidden;">
-            <ul id="autocomplete-listbox" class="list-unstyled m-0" role="listbox">
+            <ul id="@ListboxId" class="list-unstyled m-0" role="listbox">
                 @if (_isSearchingSuggestions && _suggestions.Count == 0)
                 {
                     <li class="p-2 text-muted" role="option" aria-disabled="true">Searching...</li>
@@ -100,7 +99,7 @@
     [Parameter] public EventCallback<(double Lat, double Lng, string FormattedAddress, string Name)> OnSuggestionSelected { get; set; }
 
     private string _searchText = string.Empty;
-    private System.Timers.Timer _debounceTimer = new System.Timers.Timer(400);
+    private CancellationTokenSource? _debounceCts;
     private List<(double Lat, double Lng, string FormattedAddress, string Name)> _suggestions = new();
     private bool _showSuggestions = false;
     private bool _isSearchingSuggestions = false;
@@ -109,12 +108,12 @@
     private bool _isLoadingMap = false;
     private DotNetObjectReference<LocationSearchAutocomplete>? _dotNetRef;
     private IJSObjectReference? _mapModule;
+    private bool _disposed;
+    private string ListboxId => $"{Id ?? "location-search"}-listbox";
 
     protected override void OnInitialized()
     {
         _dotNetRef = DotNetObjectReference.Create(this);
-        _debounceTimer.Elapsed += OnDebounceTimerElapsed;
-        _debounceTimer.AutoReset = false;
         _searchText = Value;
     }
 
@@ -126,40 +125,60 @@
         }
     }
 
-    private Task TriggerSearch()
+    private async Task TriggerSearch()
     {
-        ValueChanged.InvokeAsync(_searchText);
+        await ValueChanged.InvokeAsync(_searchText);
 
-        _debounceTimer.Stop();
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+        _debounceCts = new CancellationTokenSource();
         _isSearchingSuggestions = true;
         _showSuggestions = true;
-        _debounceTimer.Start();
 
-        return Task.CompletedTask;
+        _ = DebounceSearchAsync(_searchText, _debounceCts.Token);
     }
 
-    private async void OnDebounceTimerElapsed(object? sender, System.Timers.ElapsedEventArgs e)
+    private async Task DebounceSearchAsync(string searchText, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(_searchText))
+        try
         {
+            await Task.Delay(400, cancellationToken);
+
+            if (string.IsNullOrWhiteSpace(searchText))
+            {
+                _suggestions.Clear();
+                _isSearchingSuggestions = false;
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            var results = await GeocodingService.GetSuggestionsAsync(searchText);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            await InvokeAsync(() =>
+            {
+                _suggestions = results;
+                _activeIndex = -1;
+                _isSearchingSuggestions = false;
+                StateHasChanged();
+            });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // A newer keystroke superseded this search.
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+
+            Console.Error.WriteLine($"Location search failed: {ex.Message}");
             await InvokeAsync(() =>
             {
                 _suggestions.Clear();
                 _isSearchingSuggestions = false;
                 StateHasChanged();
             });
-            return;
         }
-
-        var results = await GeocodingService.GetSuggestionsAsync(_searchText);
-
-        await InvokeAsync(() =>
-        {
-            _suggestions = results ?? new();
-            _activeIndex = -1;
-            _isSearchingSuggestions = false;
-            StateHasChanged();
-        });
     }
 
     private int _activeIndex = -1;
@@ -206,7 +225,7 @@
         {
             if (_mapModule == null)
             {
-                _mapModule = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/googleMap.js?v=" + DateTime.Now.Ticks);
+                _mapModule = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/googleMap.js");
             }
             
             await _mapModule.InvokeVoidAsync("showDialog", _mapDialog);
@@ -251,22 +270,18 @@
         await SelectSuggestion((lat, lng, formattedAddress, name));
     }
 
-    public void Dispose()
-    {
-        if (_debounceTimer != null)
-        {
-            _debounceTimer.Elapsed -= OnDebounceTimerElapsed;
-            _debounceTimer.Dispose();
-        }
-        _dotNetRef?.Dispose();
-    }
-
     public async ValueTask DisposeAsync()
     {
+        _disposed = true;
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+        _dotNetRef?.Dispose();
+
         if (_mapModule != null)
         {
             try
             {
+                await _mapModule.InvokeVoidAsync("cleanupLocationPickerMap");
                 await _mapModule.DisposeAsync();
             }
             catch (JSDisconnectedException) { }

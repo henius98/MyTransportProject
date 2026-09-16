@@ -1,0 +1,37 @@
+@page "/google"
+
+<GoogleServicePage Title="My Google" Description="Plan your day around your journeys.">
+    <ChildContent Context="uid">
+        <div class="google-service-grid">
+            <a class="google-service-card" href="google/calendar">
+                <span class="bi bi-calendar3 google-service-icon" aria-hidden="true"></span>
+                <h2>Calendar</h2>
+                <p>Check what's next. Create and edit events around your travel plans.</p>
+                <span class="google-card-action">View calendar <span aria-hidden="true">→</span></span>
+            </a>
+            <a class="google-service-card" href="google/tasks">
+                <span class="bi bi-check2-square google-service-icon" aria-hidden="true"></span>
+                <h2>Tasks</h2>
+                <p>Keep your to-dos in order. Add details, set due dates, and mark tasks complete.</p>
+                <span class="google-card-action">View tasks <span aria-hidden="true">→</span></span>
+            </a>
+            <a class="google-service-card" href="google/notes">
+                <span class="bi bi-sticky google-service-icon" aria-hidden="true"></span>
+                <h2>Keep notes</h2>
+                <p>Open your saved ideas, checklists, and reminders in Google Keep.</p>
+                <span class="google-card-action">Find your notes <span aria-hidden="true">→</span></span>
+            </a>
+        </div>
+        <section class="google-panel google-other-services" aria-labelledby="other-google-services">
+            <div>
+                <h2 id="other-google-services">More from Google</h2>
+                <p class="google-muted">Open these services in a new tab. Check the account shown in Google if you use more than one.</p>
+            </div>
+            <div class="google-actions">
+                <a href="https://mail.google.com/" target="_blank" rel="noopener noreferrer" class="btn btn--secondary">Gmail ↗</a>
+                <a href="https://drive.google.com/" target="_blank" rel="noopener noreferrer" class="btn btn--secondary">Drive ↗</a>
+                <a href="https://docs.google.com/" target="_blank" rel="noopener noreferrer" class="btn btn--secondary">Docs ↗</a>
+            </div>
+        </section>
+    </ChildContent>
+</GoogleServicePage>

@@ -30,9 +30,8 @@ public class ThemeService
     }
   }
 
-  public async Task InitializeAsync()
+  public async Task ApplyAsync(MyTransportAppWASM.Models.UserSettings settings)
   {
-      var settings = await _userSettingsService.GetSettingsAsync();
       IsDarkMode = settings.Theme != "light";
       await _js.InvokeVoidAsync("themeManager.setTheme", IsDarkMode, "global");
   }

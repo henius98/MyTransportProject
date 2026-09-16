@@ -1,0 +1,7 @@
+@page "/google/tasks"
+
+<GoogleServicePage Title="Google Tasks" Service="tasks" Description="Keep track of your Google tasks, due dates, and completed work.">
+    <ChildContent Context="uid">
+        <GoogleTasksContent @key="uid" UserId="@uid" />
+    </ChildContent>
+</GoogleServicePage>

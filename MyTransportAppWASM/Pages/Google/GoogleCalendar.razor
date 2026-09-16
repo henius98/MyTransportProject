@@ -1,0 +1,7 @@
+@page "/google/calendar"
+
+<GoogleServicePage Title="Google Calendar" Service="calendar" Description="See your agenda and manage events in your Google calendars.">
+    <ChildContent Context="uid">
+        <GoogleCalendarContent @key="uid" UserId="@uid" />
+    </ChildContent>
+</GoogleServicePage>

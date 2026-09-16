@@ -1,0 +1,150 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@using MyTransportAppWASM.Services
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthStateProvider
+@inject AppStateService AppState
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<dialog class="login-modal" id="loginModal" aria-labelledby="login-modal-title"
+        @onclick="HandleBackdropClick" @oncancel="HandleCancel">
+    <div class="login-modal-content card shadow-lg" @onclick:stopPropagation="true">
+        <div class="card-body text-center p-5">
+            <button type="button" class="btn-close modal-close-btn" aria-label="Close" @onclick="CloseAsync"></button>
+            <h3 id="login-modal-title" class="mb-4 fw-bold">Sign in</h3>
+            <p class="text-muted mb-4">Sign in to sync your preferences and access personalized features.</p>
+            
+            @if (isLoggingIn)
+            {
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            }
+            else
+            {
+                <button class="btn auth-btn w-100 d-flex justify-content-center align-items-center"
+                        @onclick="SignInWithGoogle">
+                    <span class="bi bi-google me-2" aria-hidden="true"></span> Sign in with Google
+                </button>
+            }
+            
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="alert alert-danger mt-3" role="alert">
+                    @errorMessage
+                </div>
+            }
+        </div>
+    </div>
+</dialog>
+
+@code {
+    private bool isLoggingIn;
+    private string? errorMessage;
+
+    protected override void OnInitialized()
+    {
+        AppState.OnShowLoginRequested += HandleShowModalRequested;
+        AppState.OnHideLoginRequested += HandleHideModalRequested;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && AppState.IsLoginRequested)
+        {
+            await ShowModalAsync();
+        }
+    }
+
+    private void HandleShowModalRequested() => _ = InvokeAsync(ShowModalAsync);
+
+    private void HandleHideModalRequested() => _ = InvokeAsync(CloseDialogAsync);
+
+    private async Task ShowModalAsync()
+    {
+        // Check if already authenticated
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (authState.User.Identity?.IsAuthenticated == true)
+        {
+            AppState.ClearLoginRequest();
+            return;
+        }
+
+        errorMessage = null;
+        isLoggingIn = false;
+        StateHasChanged();
+        await JS.InvokeVoidAsync("dialogHelper.showModal", "loginModal");
+    }
+
+    private async Task CloseAsync()
+    {
+        AppState.ClearLoginRequest();
+        await CloseDialogAsync();
+        AppState.ClearReturnUrl();
+    }
+
+    private async Task CloseDialogAsync()
+    {
+        await JS.InvokeVoidAsync("dialogHelper.close", "loginModal");
+    }
+
+    private async Task HandleBackdropClick(MouseEventArgs e)
+    {
+        await CloseAsync();
+    }
+
+    private void HandleCancel(EventArgs e)
+    {
+        AppState.ClearLoginRequest();
+        AppState.ClearReturnUrl();
+    }
+
+    private async Task SignInWithGoogle()
+    {
+        try
+        {
+            isLoggingIn = true;
+            errorMessage = null;
+            await InvokeAsync(StateHasChanged);
+            
+            if (AuthStateProvider is not FirebaseAuthenticationStateProvider firebaseAuth)
+            {
+                throw new InvalidOperationException("Firebase authentication is not available.");
+            }
+
+            await firebaseAuth.SignInWithGoogleAsync();
+            
+            var returnUrl = AppState.TakeReturnUrl();
+            AppState.ClearLoginRequest();
+            await CloseDialogAsync();
+
+            if (IsSafeReturnUrl(returnUrl))
+            {
+                Navigation.NavigateTo(returnUrl!, replace: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "Failed to sign in. Please try again.";
+            Console.WriteLine(ex);
+        }
+        finally
+        {
+            isLoggingIn = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private bool IsSafeReturnUrl(string? returnUrl)
+    {
+        return Uri.TryCreate(returnUrl, UriKind.Absolute, out var target)
+            && Uri.TryCreate(Navigation.BaseUri, UriKind.Absolute, out var appBase)
+            && appBase.IsBaseOf(target);
+    }
+
+    public void Dispose()
+    {
+        AppState.OnShowLoginRequested -= HandleShowModalRequested;
+        AppState.OnHideLoginRequested -= HandleHideModalRequested;
+    }
+}

@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/data/settings {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+
+      function validSettings() {
+        let data = request.resource.data;
+        let location = data.get('defaultLocation', null);
+        return data.keys().hasOnly(['theme', 'language', 'hasSeenWelcome', 'defaultLocation'])
+          && data.get('theme', null) in [null, 'dark', 'light']
+          && data.get('language', null) in [null, 'en-US', 'zh-CN', 'ms-MY']
+          && (data.get('hasSeenWelcome', null) == null || data.hasSeenWelcome is bool)
+          && (location == null || (location is map
+            && location.keys().hasOnly(['latitude', 'longitude'])
+            && location.latitude is number && location.longitude is number
+            && location.latitude >= -90 && location.latitude <= 90
+            && location.longitude >= -180 && location.longitude <= 180));
+      }
+
+      allow read, delete: if isOwner();
+      allow create, update: if isOwner() && validSettings();
+    }
+  }
+}

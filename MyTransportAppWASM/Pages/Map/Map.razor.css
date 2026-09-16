@@ -62,9 +62,17 @@
   user-select: none;
   border-bottom: 1px solid var(--border-color);
   background: rgba(var(--primary-blue-rgb), 0.03);
+  color: var(--text-color);
+  text-align: left;
   border-top-left-radius: 20px;
   border-top-right-radius: 20px;
   /* white-space: nowrap; */
+}
+
+.overlay-header:focus-visible,
+.route-option:focus-visible {
+  outline: 3px solid var(--primary-blue);
+  outline-offset: -3px;
 }
 
 .collapsed-icon {
@@ -117,6 +125,19 @@
   gap: 8px;
   font-size: 0.8rem;
   color: var(--text-dim);
+}
+
+.route-option {
+  width: 100%;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
+  cursor: pointer;
+  text-align: left;
+}
+
+.route-option:hover {
+  border-color: var(--primary-blue);
 }
 
 .pulse-dot {

@@ -25,6 +25,17 @@
   transition: transform 0.3s ease;
 }
 
+.dashboard__link {
+  color: inherit;
+  text-align: left;
+  text-decoration: none;
+}
+
+.dashboard__link:focus-visible {
+  outline: 3px solid var(--primary-blue);
+  outline-offset: 4px;
+}
+
 .card:hover .dashboard__icon {
   transform: scale(1.1) rotate(5deg);
 }
@@ -41,4 +52,3 @@
   font-weight: 700;
   font-size: 1rem;
 }
-

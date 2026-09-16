@@ -16,8 +16,10 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
-    <RunAOTCompilation>true</RunAOTCompilation>
-    <WasmStripILAfterAOT>true</WasmStripILAfterAOT>
+    <!-- GitHub Pages serves raw WASM rather than the generated compressed sidecars.
+         The measured publish payload was 7.37 MB interpreted versus 29.17 MB full AOT,
+         and the smaller build also reached the rendered Home page sooner. -->
+    <RunAOTCompilation>false</RunAOTCompilation>
     <WasmOptimizationPreference>Speed</WasmOptimizationPreference>
     <DebuggerSupport>false</DebuggerSupport>
     <EventSourceSupport>false</EventSourceSupport>
@@ -27,26 +29,19 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Google.Protobuf" Version="3.34.1" />
-    <PackageReference Include="Grpc.Tools" Version="2.80.0">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.7" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Authentication" Version="10.0.7" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" Version="10.0.7" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.7" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.7" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.7" />
-    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.1.0" />
-    <PackageReference Include="Blazored.LocalStorage" Version="4.5.0" />
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="Models\Protos\gtfs-realtime.proto" GrpcServices="None" />
+    <ProjectReference Include="..\MyTransportAppWASM.Gtfs\MyTransportAppWASM.Gtfs.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <TrimmerRootAssembly Include="Google.Protobuf" />
+    <BlazorWebAssemblyLazyLoad Include="MyTransportAppWASM.Gtfs.dll" />
   </ItemGroup>
 
 </Project>

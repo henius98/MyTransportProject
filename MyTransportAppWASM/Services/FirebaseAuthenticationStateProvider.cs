@@ -4,13 +4,14 @@ using Microsoft.JSInterop;
 
 namespace MyTransportAppWASM.Services
 {
-    public class FirebaseAuthenticationStateProvider : AuthenticationStateProvider, IDisposable
+    public class FirebaseAuthenticationStateProvider : AuthenticationStateProvider, IAsyncDisposable
     {
         private readonly IJSRuntime _jsRuntime;
         private DotNetObjectReference<FirebaseAuthenticationStateProvider>? _dotNetRef;
         private ClaimsPrincipal _currentUser = new ClaimsPrincipal(new ClaimsIdentity());
-        private TaskCompletionSource<AuthenticationState> _initialAuthStateTcs = new TaskCompletionSource<AuthenticationState>();
-        private bool _isInitialized;
+        private readonly TaskCompletionSource _initialAuthStateTcs =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private Task? _initializationTask;
 
         public FirebaseAuthenticationStateProvider(IJSRuntime jsRuntime)
         {
@@ -19,17 +20,41 @@ namespace MyTransportAppWASM.Services
 
         public async Task InitializeAsync()
         {
-            if (!_isInitialized)
+            _initializationTask ??= InitializeCoreAsync();
+
+            try
             {
-                _isInitialized = true;
-                _dotNetRef = DotNetObjectReference.Create(this);
-                await _jsRuntime.InvokeVoidAsync("window.firebaseAuthInterop.onAuthStateChanged", _dotNetRef);
+                await _initializationTask;
             }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Firebase authentication initialization failed: {ex.Message}");
+                if (!_initialAuthStateTcs.Task.IsCompleted) SetAuthenticationState(user: null);
+            }
+        }
+
+        private async Task InitializeCoreAsync()
+        {
+            _dotNetRef?.Dispose();
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await _jsRuntime.InvokeVoidAsync("window.firebaseAuthInterop.onAuthStateChanged", _dotNetRef);
         }
 
         [JSInvokable]
         public void OnAuthStateChanged(FirebaseUser? user)
         {
+            SetAuthenticationState(user);
+        }
+
+        private void SetAuthenticationState(FirebaseUser? user)
+        {
+            if (_initialAuthStateTcs.Task.IsCompleted &&
+                _currentUser.FindFirst(ClaimTypes.NameIdentifier)?.Value == user?.Uid &&
+                (_currentUser.FindFirst(ClaimTypes.Email)?.Value ?? "") == (user?.Email ?? "") &&
+                (_currentUser.Identity?.Name ?? "") == (user?.DisplayName ?? "") &&
+                (_currentUser.FindFirst("picture")?.Value ?? "") == (user?.PhotoURL ?? ""))
+                return;
+
             if (user != null)
             {
                 var claims = new List<Claim>
@@ -52,7 +77,7 @@ namespace MyTransportAppWASM.Services
 
             if (!_initialAuthStateTcs.Task.IsCompleted)
             {
-                _initialAuthStateTcs.SetResult(authState);
+                _initialAuthStateTcs.SetResult();
             }
 
             NotifyAuthenticationStateChanged(Task.FromResult(authState));
@@ -60,22 +85,57 @@ namespace MyTransportAppWASM.Services
 
         public override async Task<AuthenticationState> GetAuthenticationStateAsync()
         {
+            if (_initialAuthStateTcs.Task.IsCompleted)
+                return new AuthenticationState(_currentUser);
+
+            try
+            {
+                await WaitForInitialStateAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch (TimeoutException)
+            {
+                Console.Error.WriteLine("Firebase authentication did not respond within 10 seconds; continuing anonymously.");
+                if (!_initialAuthStateTcs.Task.IsCompleted) SetAuthenticationState(user: null);
+            }
+
+            return new AuthenticationState(_currentUser);
+        }
+
+        private async Task WaitForInitialStateAsync()
+        {
             await InitializeAsync();
-            return await _initialAuthStateTcs.Task;
+            await _initialAuthStateTcs.Task;
         }
 
         public async Task SignInWithGoogleAsync()
         {
-            await _jsRuntime.InvokeVoidAsync("window.firebaseAuthInterop.signInWithGoogle");
+            var user = await _jsRuntime.InvokeAsync<FirebaseUser>("window.firebaseAuthInterop.signInWithGoogle");
+            SetAuthenticationState(user);
+            if (_initializationTask?.IsFaulted == true) _initializationTask = null;
+            await InitializeAsync();
         }
 
         public async Task SignOutAsync()
         {
             await _jsRuntime.InvokeVoidAsync("window.firebaseAuthInterop.signOut");
+            SetAuthenticationState(user: null);
         }
 
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
+            try
+            {
+                await _jsRuntime.InvokeVoidAsync("window.firebaseAuthInterop.disposeAuthStateChanged");
+            }
+            catch (JSException)
+            {
+                // The module may never have loaded (for example while offline).
+            }
+            catch (JSDisconnectedException)
+            {
+                // Normal during browser teardown.
+            }
+
             _dotNetRef?.Dispose();
         }
     }

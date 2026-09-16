@@ -1,0 +1,153 @@
+.google-workspace {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 2rem 0 3rem;
+    color: var(--text-color);
+}
+
+.google-heading h1 {
+    font-family: 'Outfit', sans-serif;
+    font-size: clamp(2rem, 4vw, 3rem);
+    margin-bottom: .5rem;
+}
+
+.google-eyebrow {
+    color: var(--primary-blue);
+    font-size: .8rem;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    margin-bottom: .5rem;
+}
+
+.google-tabs {
+    display: flex;
+    gap: .5rem;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--border-color);
+    margin: 1.5rem 0 1rem;
+}
+
+.google-tabs ::deep a {
+    padding: .75rem 1rem;
+    color: var(--text-dim);
+    text-decoration: none;
+    border-bottom: 3px solid transparent;
+    white-space: nowrap;
+}
+
+.google-tabs ::deep a.active {
+    color: var(--primary-blue);
+    border-bottom-color: var(--primary-blue);
+    font-weight: 700;
+}
+
+.google-account-line {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    overflow-wrap: anywhere;
+    font-size: .9rem;
+    color: var(--text-dim);
+    margin-bottom: 1.5rem;
+}
+
+.google-workspace ::deep h2 { font-size: 1.25rem; }
+.google-workspace ::deep h3 { font-size: 1.1rem; }
+.google-workspace ::deep .google-muted { color: var(--text-dim); }
+
+.google-workspace ::deep .google-panel,
+.google-workspace ::deep .google-service-card {
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    background: var(--card-bg);
+    padding: 1.5rem;
+    margin-bottom: 1.25rem;
+    min-width: 0;
+}
+
+.google-workspace ::deep .google-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(300px, 1fr);
+    gap: 1.25rem;
+    align-items: start;
+}
+
+.google-workspace ::deep .google-service-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.25rem;
+}
+
+.google-workspace ::deep .google-service-card {
+    display: flex;
+    flex-direction: column;
+    text-decoration: none;
+    color: var(--text-color);
+}
+
+.google-workspace ::deep .google-service-card:hover { border-color: var(--primary-blue); }
+.google-workspace ::deep .google-service-card p { color: var(--text-dim); }
+.google-workspace ::deep .google-card-action { margin-top: auto; color: var(--primary-blue); font-weight: 600; }
+.google-workspace ::deep .google-service-icon { display: block; font-size: 1.8rem; color: var(--primary-blue); margin-bottom: 1.5rem; }
+
+.google-workspace ::deep .google-toolbar,
+.google-workspace ::deep .google-actions,
+.google-workspace ::deep .google-connection {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: .75rem;
+}
+
+.google-workspace ::deep .google-toolbar { margin-bottom: 1.25rem; align-items: end; }
+.google-workspace ::deep .google-connection { justify-content: space-between; }
+.google-workspace ::deep .google-connection p { margin: .4rem 0 0; max-width: 70ch; font-size: .9rem; }
+.google-workspace ::deep .google-field { display: grid; gap: .4rem; margin-bottom: 1rem; }
+.google-workspace ::deep .google-field label { font-size: .9rem; font-weight: 600; }
+.google-workspace ::deep .google-toolbar .google-field { margin-bottom: 0; flex: 1 1 160px; }
+.google-workspace ::deep .google-editor { min-width: 0; }
+.google-workspace ::deep .google-editor label { display: block; margin-bottom: .4rem; }
+.google-workspace ::deep .google-editor input[type="checkbox"] + label { display: inline; }
+
+.google-workspace ::deep .form-control,
+.google-workspace ::deep .form-select {
+    border: 1px solid var(--border-color);
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    border-radius: 8px;
+    min-height: 2.75rem;
+}
+
+.google-workspace ::deep .form-select { padding-right: 2.5rem; }
+.google-workspace ::deep textarea { resize: vertical; }
+.google-workspace ::deep input[type="checkbox"] { accent-color: var(--primary-blue); }
+.google-workspace ::deep input[type="date"],
+.google-workspace ::deep input[type="datetime-local"] { color-scheme: dark; }
+.theme-light .google-workspace ::deep input[type="date"],
+.theme-light .google-workspace ::deep input[type="datetime-local"] { color-scheme: light; }
+
+.google-workspace ::deep .google-list { list-style: none; padding: 0; margin: 0; }
+.google-workspace ::deep .google-list-item { padding: 1rem 0; border-bottom: 1px solid var(--border-color); overflow-wrap: anywhere; }
+.google-workspace ::deep .google-list-item:first-child { padding-top: 0; }
+.google-workspace ::deep .google-list-item:last-child { border-bottom: 0; }
+.google-workspace ::deep .google-empty { padding: 3rem 1.5rem; text-align: center; }
+.google-workspace ::deep .google-keep { max-width: 750px; }
+.google-workspace ::deep .google-keep .google-muted { margin: 1rem 0 0; }
+.google-workspace ::deep .google-error { border-left: 3px solid #ef4444; padding: 1rem; background: var(--card-bg); overflow-wrap: anywhere; }
+.google-workspace ::deep .google-status { padding: .75rem 0; color: var(--text-dim); }
+.google-workspace ::deep .btn { height: auto; min-height: 2.75rem; padding: .6rem 1rem; transition: none; }
+.google-workspace ::deep .btn:hover { transform: none; }
+.google-workspace ::deep :focus-visible { outline: 2px solid var(--primary-blue); outline-offset: 3px; }
+
+@media (max-width: 900px) {
+    .google-workspace ::deep .google-grid,
+    .google-workspace ::deep .google-service-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 480px) {
+    .google-workspace { padding-top: 1.25rem; }
+    .google-workspace ::deep .google-panel,
+    .google-workspace ::deep .google-service-card { padding: 1rem; }
+    .google-tabs ::deep a { padding: .75rem .4rem; font-size: .9rem; }
+}

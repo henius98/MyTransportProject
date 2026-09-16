@@ -1,10 +1,8 @@
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
-using Blazored.LocalStorage;
-using System.Reflection;
-using System.Globalization;
 using Microsoft.AspNetCore.Components.Authorization;
 using MyTransportAppWASM.Services.Interfaces;
+using MyTransportAppWASM.Services.Handlers;
 
 namespace MyTransportAppWASM
 {
@@ -18,50 +16,55 @@ namespace MyTransportAppWASM
       builder.RootComponents.Add<App>("#app");
       builder.RootComponents.Add<HeadOutlet>("head::after");
 
-      builder.Services.AddBlazoredLocalStorage();
+      builder.Services.AddScoped<IBrowserStorageService, BrowserStorageService>();
 
       builder.Services.Configure<WeatherOptions>(builder.Configuration.GetSection("WeatherProviders"));
       builder.Services.AddMemoryCache();
 
       builder.Services.AddSingleton<IFormFactor, FormFactor>();
 
-      // Fail-fast resilience pipeline optimized for mobile networks (shorter timeouts, fewer retries)
-      Action<Microsoft.Extensions.Http.Resilience.HttpStandardResilienceOptions> failFastResilience = options =>
-      {
-        options.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(15);
-        options.AttemptTimeout.Timeout = TimeSpan.FromSeconds(10);
-        options.Retry.MaxRetryAttempts = 2;
-      };
+      // Browser requests already share the browser's connection pool. Keep failures
+      // bounded without pulling a server-oriented retry/circuit-breaker stack into WASM.
+      static void ConfigureExternalApiClient(HttpClient client) =>
+        client.Timeout = TimeSpan.FromSeconds(15);
 
-      builder.Services.AddHttpClient<IGtfsService, GtfsService>()
-          .AddStandardResilienceHandler(failFastResilience);
+      builder.Services.AddHttpClient<IGtfsService, GtfsService>(ConfigureExternalApiClient);
 
-      builder.Services.AddHttpClient<IWeatherPlannerService, WeatherPlannerService>()
-          .AddStandardResilienceHandler(failFastResilience);
+      builder.Services.AddTransient<WeatherRateLimitingHandler>();
+      builder.Services.AddHttpClient<IWeatherPlannerService, WeatherPlannerService>(ConfigureExternalApiClient)
+          .AddHttpMessageHandler<WeatherRateLimitingHandler>();
 
-      builder.Services.AddHttpClient<IGeocodingService, GeocodingService>(client =>
+      builder.Services.AddHttpClient("StaticAssets", client =>
       {
         client.BaseAddress = new Uri(builder.HostEnvironment.BaseAddress);
-      })
-          .AddStandardResilienceHandler(failFastResilience);
+        client.Timeout = TimeSpan.FromSeconds(15);
+      });
+      builder.Services.AddScoped<IGeocodingService>(services => new GeocodingService(
+          services.GetRequiredService<IHttpClientFactory>().CreateClient("StaticAssets"),
+          services.GetRequiredService<IConfiguration>()));
 
+      builder.Services.AddTransient<BaziFlowAuthHandler>();
       builder.Services.AddHttpClient<IBaziFlowService, BaziFlowService>(client =>
       {
           client.BaseAddress = new Uri(builder.Configuration["BaziFlow:BaseUrl"] ?? "http://localhost:3000");
-      }).AddStandardResilienceHandler(failFastResilience);
+          ConfigureExternalApiClient(client);
+      })
+      .AddHttpMessageHandler<BaziFlowAuthHandler>();
 
       builder.Services.AddScoped<ThemeService>();
-      builder.Services.AddScoped<LanguageService>();
+      builder.Services.AddScoped<LanguageService>(services => new LanguageService(
+          services.GetRequiredService<IHttpClientFactory>().CreateClient("StaticAssets")));
       builder.Services.AddScoped<ILocationService, LocationService>();
       builder.Services.AddScoped<MyTransportAppWASM.Services.Interfaces.ILiveRoutingService, LiveRoutingService>();
       builder.Services.AddTransient<CountdownTimer>();
 
       builder.Services.AddAuthorizationCore();
       builder.Services.AddScoped<AuthenticationStateProvider, FirebaseAuthenticationStateProvider>();
+      builder.Services.AddScoped<GoogleWorkspaceService>();
       builder.Services.AddScoped<IUserSettingsService, UserSettingsService>();
       builder.Services.AddScoped<AppStateService>();
 
-      builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
+
 
       var host = builder.Build();
 

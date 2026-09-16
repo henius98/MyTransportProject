@@ -1,15 +1,10 @@
 @inject NavigationManager Navigation
-@inject IJSRuntime JS
+@inject MyTransportAppWASM.Services.AppStateService AppState
 
 @code {
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        if (await JS.InvokeAsync<bool>("appAuth.wasExplicitLogout"))
-        {
-            Navigation.NavigateTo("");
-            return;
-        }
-
-        Navigation.NavigateTo($"authentication/login?returnUrl={Uri.EscapeDataString(Navigation.Uri)}");
+        AppState.ReturnUrl = Navigation.Uri;
+        AppState.RequestShowLogin();
     }
 }

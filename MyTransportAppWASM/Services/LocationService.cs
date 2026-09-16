@@ -30,8 +30,7 @@ namespace MyTransportAppWASM.Services
         var location = await _geoModule.InvokeAsync<Location?>("getUserLocation");
         if (location != null)
         {
-          LastKnownLocation = location;
-          OnLocationChanged?.Invoke(location);
+          UpdateLocation(location.Latitude, location.Longitude, location.Accuracy);
         }
         return location;
       }
@@ -40,6 +39,12 @@ namespace MyTransportAppWASM.Services
         Console.Error.WriteLine($"LocationService error: {ex.Message}");
         return null;
       }
+    }
+
+    public void UpdateLocation(double latitude, double longitude, double? accuracy = null)
+    {
+      LastKnownLocation = new Location(latitude, longitude, accuracy);
+      OnLocationChanged?.Invoke(LastKnownLocation);
     }
 
     public async ValueTask DisposeAsync()

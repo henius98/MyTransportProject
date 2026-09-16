@@ -1,0 +1,83 @@
+@inject GoogleWorkspaceService Google
+@implements IDisposable
+
+@if (checking)
+{
+    <p class="google-status" role="status">Checking access…</p>
+}
+else
+{
+    <div class="google-panel google-connection">
+        <div>
+            <h2>@(connected ? $"Google {ServiceName}" : $"Connect Google {ServiceName}")</h2>
+            <p class="google-muted">@(connected
+                ? "Access lasts for this browser session. Reconnect if Google asks you to renew it."
+                : $"Allow this app to view and edit your {PermissionDescription}. You choose whether to grant access in Google's window.")</p>
+        </div>
+        <button type="button" class="btn btn--secondary" disabled="@connecting" @onclick="ConnectAsync">
+            @(connecting ? "Connecting…" : connected ? "Reconnect" : $"Connect {ServiceName}")
+        </button>
+    </div>
+}
+
+@if (error is not null)
+{
+    <p class="google-error" role="alert">@error</p>
+}
+
+@if (connected)
+{
+    @ChildContent
+}
+
+@code {
+    [Parameter, EditorRequired] public string UserId { get; set; } = "";
+    [Parameter, EditorRequired] public string Service { get; set; } = "";
+    [Parameter, EditorRequired] public RenderFragment ChildContent { get; set; } = default!;
+    private string ServiceName => Service == "calendar" ? "Calendar" : "Tasks";
+    private string PermissionDescription => Service == "calendar" ? "calendars and events" : "task lists and tasks";
+    private bool checking = true;
+    private bool connected;
+    private bool connecting;
+    private bool disposed;
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var hasAccess = await Google.IsConnectedAsync(UserId, Service);
+            if (!disposed) connected = hasAccess;
+        }
+        catch (JSException)
+        {
+            if (!disposed) error = "Could not check Google access. Try connecting again.";
+        }
+        finally
+        {
+            checking = false;
+        }
+    }
+
+    private async Task ConnectAsync()
+    {
+        if (connecting) return;
+        connecting = true;
+        error = null;
+        try
+        {
+            await Google.ConnectAsync(UserId, Service);
+            if (!disposed) connected = true;
+        }
+        catch (JSException ex)
+        {
+            if (!disposed) error = ex.Message.Split('\n')[0];
+        }
+        finally
+        {
+            connecting = false;
+        }
+    }
+
+    public void Dispose() => disposed = true;
+}

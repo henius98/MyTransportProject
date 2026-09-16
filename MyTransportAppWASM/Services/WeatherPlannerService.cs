@@ -1,7 +1,5 @@
-using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Options;
 
 namespace MyTransportAppWASM.Services
 {
@@ -9,17 +7,14 @@ namespace MyTransportAppWASM.Services
   {
 
     private readonly HttpClient _httpClient;
-    private readonly WeatherOptions _options;
     private readonly IMemoryCache _cache;
 
-    public WeatherPlannerService(HttpClient httpClient, IOptions<WeatherOptions> options, IMemoryCache cache)
+    public WeatherPlannerService(HttpClient httpClient, IMemoryCache cache)
     {
       _httpClient = httpClient;
-      _options = options.Value;
       _cache = cache;
     }
 
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _hostSemaphores = new();
 
     public async Task<WeatherProviderResult> FetchProviderDataAsync(WeatherProviderOptions provider, Uri endpoint, string label, CancellationToken cancellationToken = default)
     {
@@ -27,69 +22,112 @@ namespace MyTransportAppWASM.Services
       if (!provider.Enabled) return BuildSample(provider, "Disabled", fallback, endpoint);
 
       string cacheKey = $"weather_api_{endpoint.AbsoluteUri}";
-      if (_cache.TryGetValue(cacheKey, out WeatherProviderResult? cachedResult) && cachedResult != null)
-      {
-         return cachedResult with { Status = "Live (Cached)", Periods = cachedResult.Periods.Select(p => p with { Label = label }).ToList() };
-      }
 
       try
       {
-        using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
-        if (!string.IsNullOrWhiteSpace(provider.ApiKey))
-          request.Headers.TryAddWithoutValidation("Authorization", provider.ApiKey);
-
-        var semaphore = _hostSemaphores.GetOrAdd(endpoint.Host, _ => new SemaphoreSlim(1, 1));
-        await semaphore.WaitAsync(cancellationToken);
-        HttpResponseMessage response;
-        try
+        var lazyTask = _cache.GetOrCreate(cacheKey, entry =>
         {
-            // Double-check cache inside the lock to prevent cache stampede
-            if (_cache.TryGetValue(cacheKey, out WeatherProviderResult? doubleCachedResult) && doubleCachedResult != null)
-            {
-                return doubleCachedResult with { Status = "Live (Cached)", Periods = doubleCachedResult.Periods.Select(p => p with { Label = label }).ToList() };
-            }
+            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10);
+            return new Lazy<Task<WeatherProviderResult>>(
+              () => FetchProviderDataCoreAsync(provider, endpoint, label, fallback),
+              LazyThreadSafetyMode.ExecutionAndPublication);
+        });
 
-            response = await _httpClient.SendAsync(request, cancellationToken);
-            // Add a small delay to space out sequential requests to the same host (especially data.gov.my)
-            await Task.Delay(500, cancellationToken);
-        }
-        finally
+        var cachedResult = await lazyTask!.Value.WaitAsync(cancellationToken);
+
+        if (!string.Equals(cachedResult.Status, "Live", StringComparison.Ordinal))
         {
-            semaphore.Release();
+          // MemoryCacheEntryOptions cannot be changed after the factory returns.
+          // Replace the entry explicitly so transient failures do not persist for 10 minutes.
+          _cache.Set(cacheKey, lazyTask, TimeSpan.FromSeconds(30));
+          return RelabelIfRequired(cachedResult, label);
         }
 
-        if (!response.IsSuccessStatusCode)
-        {
-          var failedResult = BuildSample(provider, $"HTTP {(int)response.StatusCode}", fallback, endpoint);
-          // Cache the failure for a short time to prevent retry storms on rate limits
-          _cache.Set(cacheKey, failedResult, TimeSpan.FromSeconds(30));
-          return failedResult;
-        }
-
-        await using var payload = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var document = await JsonDocument.ParseAsync(payload, cancellationToken: cancellationToken);
-
-        var result = new WeatherProviderResult
-        {
-          Provider = provider.Name,
-          Source = provider.Source,
-          Status = "Live",
-          RetrievedAt = DateTimeOffset.UtcNow,
-          Periods = WeatherShaper.ShapeSlices(document, fallback, label),
-          Endpoint = endpoint
-        };
-
-        _cache.Set(cacheKey, result, TimeSpan.FromMinutes(10));
-        return result;
+        var status = (DateTimeOffset.UtcNow - cachedResult.RetrievedAt).TotalSeconds > 2
+          ? "Live (Cached)"
+          : "Live";
+        var labeledResult = RelabelIfRequired(cachedResult, label);
+        return string.Equals(labeledResult.Status, status, StringComparison.Ordinal)
+          ? labeledResult
+          : labeledResult with { Status = status };
+      }
+      catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+      {
+        // The caller only cancelled its wait; the shared request remains useful to
+        // other callers and is still bounded by HttpClient.Timeout.
+        throw;
       }
       catch (Exception)
       {
+        _cache.Remove(cacheKey);
         return BuildSample(provider, "Unavailable", fallback, endpoint);
       }
     }
 
-    private static IReadOnlyList<WeatherTimeSlice> CreatePlaceholder() => new List<WeatherTimeSlice>
+    private async Task<WeatherProviderResult> FetchProviderDataCoreAsync(
+      WeatherProviderOptions provider,
+      Uri endpoint,
+      string label,
+      IReadOnlyList<WeatherTimeSlice> fallback)
     {
+      var requestTimeout = _httpClient.Timeout == Timeout.InfiniteTimeSpan
+        ? TimeSpan.FromSeconds(15)
+        : _httpClient.Timeout;
+      using var timeoutCts = new CancellationTokenSource(requestTimeout);
+      var requestToken = timeoutCts.Token;
+      using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+      if (!string.IsNullOrWhiteSpace(provider.ApiKey))
+      {
+        request.Headers.TryAddWithoutValidation("Authorization", provider.ApiKey);
+      }
+
+      // The shared request is bounded by HttpClient.Timeout. Individual callers can
+      // cancel their wait without cancelling the request for every coalesced caller.
+      using var response = await _httpClient.SendAsync(
+        request,
+        HttpCompletionOption.ResponseHeadersRead,
+        requestToken);
+
+      if (!response.IsSuccessStatusCode)
+      {
+        return BuildSample(provider, $"HTTP {(int)response.StatusCode}", fallback, endpoint);
+      }
+
+      await using var payload = await response.Content.ReadAsStreamAsync(requestToken);
+      using var document = await JsonDocument.ParseAsync(payload, cancellationToken: requestToken);
+
+      return new WeatherProviderResult
+      {
+        Provider = provider.Name,
+        Source = provider.Source,
+        Status = "Live",
+        RetrievedAt = DateTimeOffset.UtcNow,
+        Periods = WeatherShaper.ShapeSlices(document, fallback, label),
+        Endpoint = endpoint
+      };
+    }
+
+    private static WeatherProviderResult RelabelIfRequired(WeatherProviderResult result, string label)
+    {
+      for (var index = 0; index < result.Periods.Count; index++)
+      {
+        if (!string.Equals(result.Periods[index].Label, label, StringComparison.Ordinal))
+        {
+          var relabeledPeriods = new List<WeatherTimeSlice>(result.Periods.Count);
+          foreach (var period in result.Periods)
+          {
+            relabeledPeriods.Add(period with { Label = label });
+          }
+
+          return result with { Periods = relabeledPeriods };
+        }
+      }
+
+      return result;
+    }
+
+    private static IReadOnlyList<WeatherTimeSlice> CreatePlaceholder() =>
+    [
         new()
         {
             Label = "N/A",
@@ -97,7 +135,7 @@ namespace MyTransportAppWASM.Services
             Summary = "Pending API data.",
             IsPlaceholder = true
         }
-    };
+    ];
 
     private static WeatherProviderResult BuildSample(WeatherProviderOptions provider, string status, IReadOnlyList<WeatherTimeSlice> slices, Uri? endpoint = null) => new()
     {

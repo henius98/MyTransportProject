@@ -4,6 +4,8 @@
 @inject IJSRuntime JS
 @inject LanguageService Language
 @inject AppStateService AppState
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IUserSettingsService UserSettings
 
 @implements IDisposable
 
@@ -45,7 +47,7 @@
                                     <div class="text-truncate">
                                         <div class="profile__name fw-bold">@(context.User?.Identity?.Name ?? "User")</div>
                                         <div class="text-muted text--xs text-truncate" style="font-size: 0.75rem;">
-                                            @(context.User?.FindFirst("email")?.Value ?? "")</div>
+                                            @(context.User?.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? "")</div>
                                         </div>
                                     </div>
                                     <small class="text-muted d-block mb-2">Signed in with Google</small>
@@ -71,15 +73,24 @@
                                 </div>
                                 
                                 <div class="switch-group d-flex align-items-center justify-content-between p-2 rounded">
-                                    <LanguageSwitcher />
+                                    <LanguageSwitcher @key="Language.CurrentLanguageName" />
                                 </div>
                             </div>
 
                             <hr class="my-2 border-secondary" />
 
+                            @if (!string.IsNullOrEmpty(UserSettings.SyncError))
+                            {
+                                <p class="text-warning small" role="status">@UserSettings.SyncError</p>
+                            }
+                            @if (!string.IsNullOrEmpty(logoutError))
+                            {
+                                <p class="text-danger small" role="alert">@logoutError</p>
+                            }
+
                             <AuthorizeView>
                                 <Authorized>
-                                    <button class="nav-link btn btn-link text-start w-100" @onclick="BeginLogOut">
+                                    <button class="nav-link btn btn-link text-start w-100" disabled="@isLoggingOut" @onclick="BeginLogOut">
                                         <span class="bi bi-box-arrow-right-nav-menu me-2" aria-hidden="true"></span> @Language["LogOut"]
                                     </button>
                                 </Authorized>
@@ -127,21 +138,32 @@
                         <span class="nav-text ms-2">@Language["Fortune"]</span>
                     </NavLink>
                 </div>
+                <AuthorizeView>
+                    <Authorized>
+                        <div class="nav-item px-3">
+                            <NavLink class="nav-link" href="google">
+                                <span class="bi bi-google" aria-hidden="true"></span>
+                                <span class="nav-text ms-2">@Language["MyGoogle"]</span>
+                            </NavLink>
+                        </div>
+                    </Authorized>
+                </AuthorizeView>
             </nav>
         </div>
     </div>
 
 @code {
     [Parameter] public bool IsCollapsed { get; set; }
-    [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
-
     private string ContainerClass => $"nav-menu-container {(IsCollapsed ? "collapsed" : "")}".Trim();
     private bool showUserMenu;
+    private bool isLoggingOut;
+    private string? logoutError;
 
     protected override async Task OnInitializedAsync()
     {
         Theme.OnThemeChanged += StateHasChanged;
         Language.OnLanguageChanged += StateHasChanged;
+        UserSettings.SyncStatusChanged += HandleSyncStatusChanged;
     }
 
     private void ToggleUserMenu() => showUserMenu = !showUserMenu;
@@ -154,22 +176,37 @@
 
     private async Task BeginLogOut()
     {
-        await JS.InvokeVoidAsync("window.firebaseAuthInterop.signOut");
-        Navigation.NavigateTo("");
+        isLoggingOut = true;
+        logoutError = null;
+        try
+        {
+            await ((FirebaseAuthenticationStateProvider)AuthStateProvider).SignOutAsync();
+            showUserMenu = false;
+        }
+        catch (JSException)
+        {
+            logoutError = "Could not sign out. Please try again.";
+        }
+        finally
+        {
+            isLoggingOut = false;
+        }
     }
+
+    private void HandleSyncStatusChanged() => _ = InvokeAsync(StateHasChanged);
 
     public void Dispose()
     {
         Theme.OnThemeChanged -= StateHasChanged;
         Language.OnLanguageChanged -= StateHasChanged;
+        UserSettings.SyncStatusChanged -= HandleSyncStatusChanged;
     }
 
     private async Task CollapseNav()
     {
         try
         {
-            // Trigger the CSS-only mobile menu to close when a link is clicked
-            await JS.InvokeVoidAsync("eval", "var t = document.querySelector('.navbar-toggler'); if(t && t.checked) t.click();");
+            await JS.InvokeVoidAsync("navigationHelper.collapseMobileMenu");
         }
         catch { }
     }

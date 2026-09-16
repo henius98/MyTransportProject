@@ -9,10 +9,8 @@
     <div id="map"></div>
 
     <div class="@MapOverlayClass glass-panel">
-        <div class="overlay-header d-flex justify-content-between align-items-center w-100" 
+        <button type="button" class="overlay-header d-flex justify-content-between align-items-center w-100"
              @onclick="ToggleCollapse" 
-             @onkeydown="@(e => { if (e.Key == "Enter" || e.Key == " ") ToggleCollapse(); })"
-             role="button" tabindex="0" 
              aria-expanded="@((!isCollapsed).ToString().ToLower())" aria-label="Toggle tracker panel">
             <div class="d-flex align-items-center gap-2">
                 <span class="collapsed-icon" aria-hidden="true">📍</span>
@@ -21,7 +19,7 @@
                     <h2 class="m-0 fs-5">Rapid Bus Tracker</h2>
                 }
             </div>
-        </div>
+        </button>
 
         <div class="overlay-body" style="@(isCollapsed ? "visibility: hidden;" : "")">
                 <div class="control-group mb-3">
@@ -63,8 +61,8 @@
                     </button>
                 </div>
 
-                <div class="tracker-status">
-                    <span class="pulse-dot"></span>
+                <div class="tracker-status" role="status" aria-live="polite">
+                    <span class="pulse-dot" aria-hidden="true"></span>
                     <span>@(string.IsNullOrEmpty(locationStatus) ? "Ready" : locationStatus)</span>
                 </div>
 
@@ -74,7 +72,10 @@
                         <h3 class="fs-6 mb-2">Live Route Options</h3>
                         @foreach (var route in _routeOptions)
                         {
-                            <div @key="route.OriginalRoute.RouteId" class="card mb-2 p-2 shadow-sm @(route.HasLiveBus ? "border-success" : "") @(route.OriginalRoute.RouteId == _activeRouteId ? "border-primary border-2 shadow" : "")" style="background: var(--card-bg); border: 1px solid var(--border-color); cursor: pointer;" @onclick="() => SelectRoute(route)">
+                            <button type="button" @key="route.OriginalRoute.RouteId"
+                                    class="route-option card mb-2 p-2 shadow-sm @(route.HasLiveBus ? "border-success" : "") @(route.OriginalRoute.RouteId == _activeRouteId ? "border-primary border-2 shadow" : "")"
+                                    aria-pressed="@(route.OriginalRoute.RouteId == _activeRouteId)"
+                                    @onclick="() => SelectRoute(route)">
                                 <div class="d-flex justify-content-between align-items-center">
                                     <strong style="color: var(--text-color);">Option @(route.OriginalRoute.RouteId + 1)</strong>
                                     <div>
@@ -103,11 +104,10 @@
                                         }
                                     </div>
                                 }
-                            </div>
+                            </button>
                         }
                     </div>
                 }
             </div>
     </div>
 </div>
-

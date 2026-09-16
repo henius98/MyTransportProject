@@ -1,3 +1,5 @@
 <Solution>
+  <Project Path="MyTransportAppWASM.Gtfs/MyTransportAppWASM.Gtfs.csproj" />
   <Project Path="MyTransportAppWASM/MyTransportAppWASM.csproj" />
+  <Project Path="tests/MyTransportAppWASM.Tests/MyTransportAppWASM.Tests.csproj" />
 </Solution>

@@ -1,0 +1,286 @@
+@using System.Globalization
+@implements IDisposable
+@inject GoogleWorkspaceService Workspace
+
+<div class="google-toolbar">
+    <div class="google-field">
+        <label for="google-task-list-choice">Task list</label>
+        <select id="google-task-list-choice" class="form-select" @bind:get="listId" @bind:set="ChangeListAsync" disabled="@(busy || taskLists.Count == 0)">
+            @foreach (var list in taskLists)
+            {
+                <option value="@list.Id">@list.Title</option>
+            }
+        </select>
+    </div>
+    <button type="button" class="btn btn--secondary" @onclick="RefreshAsync" disabled="@busy">@(busy ? "Loading…" : "Refresh tasks")</button>
+    <a href="https://tasks.google.com/" target="_blank" rel="noopener noreferrer">Open Google Tasks ↗</a>
+</div>
+<p class="google-muted">Refreshing reloads the selected task's details.</p>
+@if (!string.IsNullOrEmpty(error))
+{
+    <p class="google-error" role="alert">@error</p>
+}
+@if (!string.IsNullOrEmpty(status))
+{
+    <p class="google-status" role="status">@status</p>
+}
+
+<div class="google-grid" aria-busy="@busy">
+    <section class="google-panel" aria-labelledby="google-tasks-title">
+        <div class="google-toolbar">
+            <h2 id="google-tasks-title">Your tasks</h2>
+            <button type="button" class="btn btn--primary" @onclick="NewTask" disabled="@(busy || string.IsNullOrEmpty(listId))">New task</button>
+        </div>
+        @if (busy && tasks.Count == 0)
+        {
+            <p class="google-empty" role="status">Loading your tasks…</p>
+        }
+        else if (taskLists.Count == 0)
+        {
+            <p class="google-empty">No task lists are available. Create a list in Google Tasks, then refresh here.</p>
+        }
+        else if (tasks.Count == 0)
+        {
+            <p class="google-empty">This list has no tasks yet.</p>
+        }
+        else
+        {
+            <ul class="google-list">
+                @foreach (var task in tasks)
+                {
+                    <li class="google-list-item" @key="task.Id">
+                        <button type="button" class="btn btn--secondary" @onclick="() => SelectTask(task)" disabled="@busy" aria-pressed="@(selectedTask?.Id == task.Id)">@(string.IsNullOrWhiteSpace(task.Title) ? "Untitled task" : task.Title)</button>
+                        <p class="google-muted">
+                            @(task.Status == "completed" ? "Completed" : "To do")
+                            @if (DueDate(task.Due) is DateTime date)
+                            {
+                                <span> · Due @date.ToString("d")</span>
+                            }
+                            @if (!string.IsNullOrEmpty(task.Parent))
+                            {
+                                <span> · Subtask</span>
+                            }
+                            @if (task.AssignmentInfo != null)
+                            {
+                                <span> · Assigned task</span>
+                            }
+                        </p>
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+
+    <section class="google-panel" aria-labelledby="google-task-editor-title">
+        <h2 id="google-task-editor-title">@(selectedTask == null ? "New task" : "Task details")</h2>
+        @if (selectedTask?.AssignmentInfo != null)
+        {
+            <p class="google-muted">Manage this assigned task in Google Tasks or the app where it was assigned.</p>
+        }
+        @if (!string.IsNullOrEmpty(selectedTask?.WebViewLink))
+        {
+            <p><a href="@selectedTask.WebViewLink" target="_blank" rel="noopener noreferrer">Open this task in Google ↗</a></p>
+        }
+        <form @onsubmit="SaveAsync" @onsubmit:preventDefault>
+            <fieldset class="google-editor" disabled="@(busy || !CanEdit)">
+                <div class="google-field">
+                    <label for="google-task-title">Title</label>
+                    <input id="google-task-title" class="form-control" @bind="title" maxlength="1024" required />
+                </div>
+                <div class="google-field">
+                    <label for="google-task-notes">Notes</label>
+                    <textarea id="google-task-notes" class="form-control" rows="5" @bind="notes" maxlength="8192"></textarea>
+                </div>
+                <div class="google-field">
+                    <label for="google-task-due">Due date (optional)</label>
+                    <input id="google-task-due" class="form-control" type="date" @bind="dueDate" aria-describedby="google-task-due-help" />
+                    <span id="google-task-due-help" class="google-muted">Google Tasks stores a date without a time.</span>
+                </div>
+                <label><input type="checkbox" @bind="completed" /> Completed</label>
+                <div class="google-actions">
+                    <button type="submit" class="btn btn--primary">@(busy ? "Please wait…" : selectedTask == null ? "Create task" : "Save changes")</button>
+                    @if (selectedTask != null)
+                    {
+                        <button type="button" class="btn btn--secondary" @onclick="() => confirmDelete = true">Delete</button>
+                    }
+                </div>
+                @if (confirmDelete)
+                {
+                    <div class="google-status" role="alert">
+                        <p>Delete this task and any subtasks from Google Tasks?</p>
+                        <div class="google-actions">
+                            <button type="button" class="btn btn--secondary" @onclick="DeleteAsync">Yes, delete</button>
+                            <button type="button" class="btn btn--secondary" @onclick="() => confirmDelete = false">Keep task</button>
+                        </div>
+                    </div>
+                }
+            </fieldset>
+        </form>
+    </section>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string UserId { get; set; } = string.Empty;
+
+    private List<GoogleTaskList> taskLists = [];
+    private List<GoogleTask> tasks = [];
+    private string listId = string.Empty;
+    private GoogleTask? selectedTask;
+    private string title = string.Empty;
+    private string notes = string.Empty;
+    private DateTime? dueDate;
+    private bool completed;
+    private bool busy;
+    private bool disposed;
+    private bool confirmDelete;
+    private string? error;
+    private string? status;
+
+    private bool CanEdit => !string.IsNullOrEmpty(listId) && selectedTask?.AssignmentInfo == null;
+
+    protected override Task OnInitializedAsync() => RefreshAsync();
+
+    private async Task ChangeListAsync(string value)
+    {
+        if (busy || disposed) return;
+        listId = value;
+        tasks.Clear();
+        NewTask();
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (busy || disposed) return;
+        busy = true;
+        error = status = null;
+        try
+        {
+            if (taskLists.Count == 0)
+            {
+                var result = await Workspace.ListTaskListsAsync(UserId);
+                if (disposed) return;
+                taskLists = result.ToList();
+                listId = taskLists.FirstOrDefault()?.Id ?? string.Empty;
+            }
+            if (!string.IsNullOrEmpty(listId))
+            {
+                var result = await Workspace.ListTasksAsync(UserId, listId);
+                if (disposed) return;
+                tasks = result.ToList();
+                if (selectedTask != null)
+                {
+                    var refreshed = tasks.FirstOrDefault(task => task.Id == selectedTask.Id);
+                    if (refreshed == null)
+                    {
+                        NewTask();
+                        status = "The selected task is no longer in this list.";
+                    }
+                    else
+                    {
+                        SelectTask(refreshed);
+                        status = "Task details refreshed from Google Tasks.";
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            if (!disposed) error = ErrorMessage(ex);
+        }
+        finally
+        {
+            if (!disposed) busy = false;
+        }
+    }
+
+    private void NewTask()
+    {
+        selectedTask = null;
+        title = notes = string.Empty;
+        dueDate = null;
+        completed = confirmDelete = false;
+        error = status = null;
+    }
+
+    private void SelectTask(GoogleTask task)
+    {
+        selectedTask = task;
+        title = task.Title;
+        notes = task.Notes ?? string.Empty;
+        dueDate = DueDate(task.Due);
+        completed = task.Status == "completed";
+        confirmDelete = false;
+        error = status = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (busy || disposed || !CanEdit) return;
+        error = status = null;
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            error = "Enter a task title.";
+            return;
+        }
+
+        busy = true;
+        try
+        {
+            var body = new GoogleTaskEdit
+            {
+                Title = title.Trim(), Notes = notes,
+                Due = dueDate?.ToString("yyyy-MM-dd'T'00:00:00.000'Z'", CultureInfo.InvariantCulture),
+                Status = completed ? "completed" : "needsAction",
+                Completed = completed ? selectedTask?.Completed ?? DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture) : null
+            };
+            var saved = await Workspace.SaveTaskAsync(UserId, listId, selectedTask?.Id, body, selectedTask?.Etag);
+            if (disposed) return;
+            var index = tasks.FindIndex(task => task.Id == saved.Id);
+            if (index < 0) tasks.Insert(0, saved);
+            else tasks[index] = saved;
+            SelectTask(saved);
+            status = "Task saved to Google Tasks.";
+        }
+        catch (Exception ex)
+        {
+            if (!disposed) error = ErrorMessage(ex);
+        }
+        finally
+        {
+            if (!disposed) busy = false;
+        }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (busy || disposed || selectedTask == null || !CanEdit || !confirmDelete) return;
+        busy = true;
+        error = status = null;
+        try
+        {
+            var deletedId = selectedTask.Id;
+            await Workspace.DeleteTaskAsync(UserId, listId, deletedId, selectedTask.Etag);
+            if (disposed) return;
+            tasks.RemoveAll(task => task.Id == deletedId || task.Parent == deletedId);
+            NewTask();
+            status = "Task deleted from Google Tasks.";
+        }
+        catch (Exception ex)
+        {
+            if (!disposed) error = ErrorMessage(ex);
+        }
+        finally
+        {
+            if (!disposed) busy = false;
+        }
+    }
+
+    private static DateTime? DueDate(string? value) => value?.Length >= 10 && DateTime.TryParseExact(value[..10], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) ? date : null;
+
+    private static string ErrorMessage(Exception exception) => exception is JSException
+        ? exception.Message.Split('\n')[0]
+        : "Google Tasks could not complete the request. Your changes are still in the form. Try again, or reconnect your account.";
+
+    public void Dispose() => disposed = true;
+}

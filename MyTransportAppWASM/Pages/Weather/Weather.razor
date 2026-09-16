@@ -32,8 +32,8 @@
     <h2 id="help-title" class="fw-bold">How this works</h2>
     <p class="text-start">Plan your trip with precision using our multi-source weather engine:</p>
     <ul class="text-start mb-3 list-unstyled">
-      <li class="mb-2"><span aria-hidden="true">📍</span> <strong>Search:</strong> Type any place name and click 🔍 to
-        update coordinates.</li>
+      <li class="mb-2"><span aria-hidden="true">📍</span> <strong>Search:</strong> Type a Malaysian forecast
+        location and select a result to update the coordinates.</li>
         <li class="mb-2"><span aria-hidden="true">🌦️</span> <strong>Baseline:</strong> Real-time forecasts from
           high-availability providers.</li>
           <li class="mb-2"><span aria-hidden="true">📅</span> <strong>Outlooks:</strong> Multi-day weather trends for your
@@ -55,7 +55,7 @@
                 </div>
               }
               <div class="mb-3">
-                <label class="form-label" for="placeSearch">Search by Place Name</label>
+                <label class="form-label" for="placeSearch">Search forecast locations</label>
                 <search class="search-container d-flex gap-2 align-items-center">
                   <LocationSearchAutocomplete id="placeSearch" Value="@query.PlaceName"
                                               OnSuggestionSelected="HandleSuggestionSelected" />
@@ -68,11 +68,13 @@
               <div class="row g-3">
                 <div class="col-6">
                   <label class="form-label" for="latInput">Latitude</label>
-                  <InputNumber id="latInput" TValue="double" @bind-Value="query.Latitude" class="form-input" Step="0.001" />
+                  <InputNumber id="latInput" TValue="double" @bind-Value="query.Latitude" class="form-input"
+                               @bind-Value:after="ClearSelectedPlace" Step="0.001" min="-90" max="90" />
                 </div>
                 <div class="col-6">
                   <label class="form-label" for="lngInput">Longitude</label>
-                  <InputNumber id="lngInput" TValue="double" @bind-Value="query.Longitude" class="form-input" Step="0.001" />
+                  <InputNumber id="lngInput" TValue="double" @bind-Value="query.Longitude" class="form-input"
+                               @bind-Value:after="ClearSelectedPlace" Step="0.001" min="-180" max="180" />
                 </div>
                 <div class="col-6">
                   <label class="form-label" for="departInput">Depart</label>
@@ -104,20 +106,17 @@
               <div class="mt-4">
                 <h2 class="mb-3 fw-semibold text-primary h4" style="letter-spacing: -0.01em;">Real-Time Forecast</h2>
                 <div class="planner mb-4">
-                  @if (_options.MetMalaysia.Enabled)
+                  @if (_options.MetMalaysia.Enabled && !string.IsNullOrWhiteSpace(query.LocationId))
                   {
-                    <MetMalaysiaWeatherCard @key="@(queryKey + "-met-baseline")" Options="_options.MetMalaysia" Query="query"
-                                            Label="Baseline" FetchOutlook="false" />
+                    <MetMalaysiaWeatherCard Options="_options.MetMalaysia" Query="query" Label="Baseline" FetchOutlook="false" />
                   }
                   @if (_options.OpenMeteo.Enabled)
                   {
-                    <OpenMeteoWeatherCard @key="@(queryKey + "-open-baseline")" Options="_options.OpenMeteo" Query="query"
-                                          Label="Baseline" FetchOutlook="false" />
+                    <OpenMeteoWeatherCard Options="_options.OpenMeteo" Query="query" Label="Baseline" FetchOutlook="false" />
                   }
                   @if (_options.SingaporeNEA.Enabled && IsNearSingapore(query.Latitude, query.Longitude))
                   {
-                    <SingaporeNeaWeatherCard @key="@(queryKey + "-nea-baseline")" Options="_options.SingaporeNEA" Query="query"
-                                             Label="Baseline" FetchOutlook="false" />
+                    <SingaporeNeaWeatherCard Options="_options.SingaporeNEA" Query="query" Label="Baseline" FetchOutlook="false" />
                   }
                 </div>
               </div>
@@ -130,20 +129,17 @@
           {
             <h2 class="mb-3 fw-semibold text-primary h4" style="letter-spacing: -0.01em;">Multi-Day Outlook</h2>
             <div class="planner">
-              @if (_options.MetMalaysia.Enabled)
+              @if (_options.MetMalaysia.Enabled && !string.IsNullOrWhiteSpace(query.LocationId))
               {
-                <MetMalaysiaWeatherCard @key="@(queryKey + "-met-outlook")" Options="_options.MetMalaysia" Query="query"
-                                        Label="Outlook" FetchOutlook="true" />
+                <MetMalaysiaWeatherCard Options="_options.MetMalaysia" Query="query" Label="Outlook" FetchOutlook="true" />
               }
               @if (_options.OpenMeteo.Enabled)
               {
-                <OpenMeteoWeatherCard @key="@(queryKey + "-open-outlook")" Options="_options.OpenMeteo" Query="query"
-                                      Label="Outlook" FetchOutlook="true" />
+                <OpenMeteoWeatherCard Options="_options.OpenMeteo" Query="query" Label="Outlook" FetchOutlook="true" />
               }
               @if (_options.SingaporeNEA.Enabled && IsNearSingapore(query.Latitude, query.Longitude))
               {
-                <SingaporeNeaWeatherCard @key="@(queryKey + "-nea-outlook")" Options="_options.SingaporeNEA" Query="query"
-                                         Label="Outlook" FetchOutlook="true" />
+                <SingaporeNeaWeatherCard Options="_options.SingaporeNEA" Query="query" Label="Outlook" FetchOutlook="true" />
               }
             </div>
           }
@@ -156,7 +152,6 @@
   private DateTime? departureDate = DateTime.Today;
   private DateTime? returnDate = DateTime.Today.AddDays(3);
   private bool isLoading, isFetched;
-  private string queryKey = Guid.NewGuid().ToString();
   private string? errorMessage;
 
   private async Task ShowHelpDialog()
@@ -173,6 +168,9 @@
   {
     Language.OnLanguageChanged += StateHasChanged;
     _options = Config.GetSection("WeatherProviders").Get<WeatherOptions>() ?? new();
+    query.Latitude = Config.GetValue<double?>("DefaultLocation:Latitude") ?? 3.1390;
+    query.Longitude = Config.GetValue<double?>("DefaultLocation:Longitude") ?? 101.6869;
+    await ResolveNearestMetLocationAsync(updatePlaceName: true);
   }
 
   private async Task HandleSuggestionSelected((double Lat, double Lng, string FormattedAddress, string Name) suggestion)
@@ -196,20 +194,31 @@
   {
     if (isLoading) return;
 
+    errorMessage = null;
+
+    if (query.Latitude is < -90 or > 90 || query.Longitude is < -180 or > 180)
+    {
+      errorMessage = "Enter a valid latitude (-90 to 90) and longitude (-180 to 180).";
+      return;
+    }
+
+    if (departureDate.HasValue && returnDate.HasValue && returnDate.Value < departureDate.Value)
+    {
+      errorMessage = "Return date must be on or after the departure date.";
+      return;
+    }
+
     isLoading = true;
     StateHasChanged();
 
     try
     {
+      await ResolveNearestMetLocationAsync(updatePlaceName: string.IsNullOrWhiteSpace(query.PlaceName));
       query.Departure = departureDate.HasValue ? new DateTimeOffset(departureDate.Value) : null;
       query.Return = returnDate.HasValue ? new DateTimeOffset(returnDate.Value) : null;
 
-      // Update key to force re-render of components
-      queryKey = Guid.NewGuid().ToString();
+      // Query parameters updated. Child components will trigger OnParametersSetAsync natively
       isFetched = true;
-
-      // Small delay to allow UI to render skeletons/spinners
-      await Task.Delay(50);
     }
     catch (Exception ex)
     {
@@ -222,6 +231,12 @@
     }
   }
 
+  private void ClearSelectedPlace()
+  {
+    query.PlaceName = null;
+    query.LocationId = null;
+  }
+
   private async Task ResetToLocalLocation()
   {
     errorMessage = null;
@@ -232,6 +247,7 @@
       query.Longitude = pos.Longitude;
       var address = await GeocodingService.ReverseGeocodeAsync(pos.Latitude, pos.Longitude);
       query.PlaceName = string.IsNullOrWhiteSpace(address) ? "Current Location" : address;
+      await ResolveNearestMetLocationAsync(updatePlaceName: false);
     }
     else
     {
@@ -239,6 +255,33 @@
       return;
     }
     await LoadPlanAsync();
+  }
+
+  private async Task ResolveNearestMetLocationAsync(bool updatePlaceName)
+  {
+    var locations = await GeocodingService.GetAllLocationsAsync();
+    var nearest = locations
+      .Where(location => !string.IsNullOrWhiteSpace(location.LocationId))
+      .MinBy(location => DistanceSquared(
+        query.Latitude,
+        query.Longitude,
+        location.Latitude,
+        location.Longitude));
+
+    query.LocationId = nearest?.LocationId;
+
+    if (updatePlaceName && !string.IsNullOrWhiteSpace(nearest?.LocationName))
+    {
+      query.PlaceName = nearest.LocationName;
+    }
+  }
+
+  private static double DistanceSquared(double lat1, double lon1, double lat2, double lon2)
+  {
+    var latitudeScale = Math.Cos((lat1 + lat2) * Math.PI / 360);
+    var latitudeDelta = lat2 - lat1;
+    var longitudeDelta = (lon2 - lon1) * latitudeScale;
+    return latitudeDelta * latitudeDelta + longitudeDelta * longitudeDelta;
   }
 
   private static string DisplayLocation(WeatherQuery value)

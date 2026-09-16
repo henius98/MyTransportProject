@@ -5,6 +5,7 @@ namespace MyTransportAppWASM.Services.Interfaces
   public interface ILocationService
   {
     Task<Location?> GetCurrentLocationAsync(bool forceRefresh = false);
+    void UpdateLocation(double latitude, double longitude, double? accuracy = null);
     event Action<Location>? OnLocationChanged;
     Location? LastKnownLocation { get; }
   }

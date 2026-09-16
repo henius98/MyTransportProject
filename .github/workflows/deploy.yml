@@ -21,7 +21,6 @@ jobs:
 
       - name: Inject Secrets into appsettings.json
         run: |
-          sed -i 's/__GOOGLE_CLIENT_ID__/${{ secrets.GOOGLE_CLIENT_ID }}/g' MyTransportAppWASM/wwwroot/appsettings.json
           sed -i 's/__GOOGLE_MAPS_API_KEY__/${{ secrets.GOOGLE_MAPS_API_KEY }}/g' MyTransportAppWASM/wwwroot/appsettings.json
 
       - name: Setup Node.js
@@ -34,14 +33,38 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
+      - name: Configure Firebase web app
+        env:
+          FIREBASE_CONFIG_JSON: ${{ vars.FIREBASE_CONFIG_JSON }}
+        run: node scripts/configure-firebase.mjs
+
       - name: Install .NET WASM Build Tools
         run: dotnet workload install wasm-tools
 
       - name: Restore dependencies
-        run: dotnet restore MyTransportAppWASM/MyTransportAppWASM.csproj
+        run: dotnet restore MyTransportApp.slnx
+
+      - name: Run tests
+        run: dotnet test MyTransportApp.slnx -c Release --no-restore --nologo
+
+      - name: Run Firebase configuration tests
+        run: node --experimental-vm-modules --test tests/firebase-config/*.test.mjs
+
+      - name: Setup Java for Firebase tests
+        # The Firestore emulator requires Java 21 or later.
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Run Firebase rule tests
+        working-directory: tests/firebase
+        run: |
+          npm ci
+          npm test
 
       - name: Build and Publish
-        run: dotnet publish MyTransportAppWASM/MyTransportAppWASM.csproj -c Release -o release --nologo
+        run: dotnet publish MyTransportAppWASM/MyTransportAppWASM.csproj -c Release -o release --no-restore --nologo
 
       - name: Prepare for GitHub Pages
         run: |

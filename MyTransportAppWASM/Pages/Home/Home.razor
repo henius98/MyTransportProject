@@ -3,8 +3,9 @@
 @using MyTransportAppWASM.Services
 @using MyTransportAppWASM.Services.Interfaces
 @inject IFormFactor FormFactor
-@inject NavigationManager Navigation
-@inject IJSRuntime JS
+@inject IUserSettingsService UserSettings
+@inject AuthenticationStateProvider AuthStateProvider
+@implements IDisposable
 
 <PageTitle>Home - MyTransportApp</PageTitle>
 
@@ -15,9 +16,7 @@
             Malaysia.</p>
 
             <div class="dashboard">
-                <div class="card card-map" role="button" tabindex="0"
-                     @onclick='() => Navigation.NavigateTo("map")'
-                     @onkeydown='(e) => { if (e.Key == "Enter" || e.Key == " ") Navigation.NavigateTo("map"); }'>
+                <a class="card card-map dashboard__link" href="map">
                     <div class="dashboard__icon">📍</div>
                     <h3>Live Bus Map</h3>
                     <p>Track rapid bus positions in real-time on our interactive map.</p>
@@ -25,11 +24,9 @@
                         <span class="dash-link">Open Map</span>
                         <span class="arrow">&rarr;</span>
                     </div>
-                </div>
+                </a>
 
-                <div class="card card-weather" role="button" tabindex="0"
-                     @onclick='() => Navigation.NavigateTo("weather")'
-                     @onkeydown='(e) => { if (e.Key == "Enter" || e.Key == " ") Navigation.NavigateTo("weather"); }'>
+                <a class="card card-weather dashboard__link" href="weather">
                     <div class="dashboard__icon">🌦️</div>
                     <h3>Weather Planner</h3>
                     <p>Get precise weather forecasts for your departure and return.</p>
@@ -37,7 +34,7 @@
                         <span class="dash-link">Plan Trip</span>
                         <span class="arrow">&rarr;</span>
                     </div>
-                </div>
+                </a>
             </div>
         </div>
     </div>
@@ -46,7 +43,7 @@
     {
         <div class="modal__backdrop" @onclick="CloseWelcome">
             <div class="modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title" @onclick:stopPropagation="true">
-                <button type="button" class="modal__close" @onclick="CloseWelcome">&times;</button>
+                <button type="button" class="modal__close" aria-label="Close welcome" @onclick="CloseWelcome">&times;</button>
                 <div class="modal__icon">👋</div>
                 <h2 id="welcome-title" class="fw-bold">Welcome to MyTransportApp!</h2>
                 <p>Your ultimate companion for navigating public transport in Malaysia, Singapore. We've combined real-time GTFS
@@ -76,23 +73,41 @@
     private string platform => FormFactor.GetPlatform();
 
     private bool showWelcome;
+    private int welcomeVersion;
+    private bool disposed;
+
+    protected override void OnInitialized() =>
+        AuthStateProvider.AuthenticationStateChanged += HandleAuthenticationChanged;
+
+    private void HandleAuthenticationChanged(Task<AuthenticationState> state) =>
+        _ = InvokeAsync(RefreshWelcomeAsync);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
         {
-            var hasSeen = await JS.InvokeAsync<bool>("welcomeManager.hasSeen");
-            if (!hasSeen)
-            {
-                showWelcome = true;
-                StateHasChanged();
-            }
+            await RefreshWelcomeAsync();
         }
+    }
+
+    private async Task RefreshWelcomeAsync()
+    {
+        var version = ++welcomeVersion;
+        var settings = await UserSettings.GetSettingsAsync();
+        if (disposed || version != welcomeVersion) return;
+        showWelcome = settings.HasSeenWelcome != true;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        disposed = true;
+        AuthStateProvider.AuthenticationStateChanged -= HandleAuthenticationChanged;
     }
 
     private async Task CloseWelcome()
     {
         showWelcome = false;
-        await JS.InvokeVoidAsync("welcomeManager.setSeen");
+        await UserSettings.UpdateHasSeenWelcomeAsync(true);
     }
 }
