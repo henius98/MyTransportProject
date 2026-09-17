@@ -1,0 +1,15 @@
+meta {
+  name: MetMalaysia forecast by location
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{data_gov_base}}/weather/forecast/?contains={{met_location_id}}@location__location_id&date_start={{date_start}}@date&date_end={{date_end}}@date&exclude=summary_forecast,summary_when
+  body: none
+  auth: none
+}
+
+docs {
+  Matches the app forecast template. Set met_location_id from recreation_centres.json and edit the date range.
+}

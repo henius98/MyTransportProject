@@ -1,0 +1,15 @@
+meta {
+  name: Open-Meteo current and hourly
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{open_meteo_base}}/v1/forecast?latitude={{latitude}}&longitude={{longitude}}&current_weather=true&hourly=temperature_2m,precipitation_probability,precipitation,weather_code&forecast_hours=1&timezone=UTC
+  body: none
+  auth: none
+}
+
+docs {
+  Matches the Baseline endpoint. The app fixes forecast_hours to 1.
+}

@@ -1,0 +1,26 @@
+meta {
+  name: Update user theme
+  type: http
+  seq: 2
+}
+
+patch {
+  url: https://firestore.googleapis.com/v1/projects/{{firebase_project_id}}/databases/(default)/documents/users/{{firebase_uid}}/data/settings?updateMask.fieldPaths=theme
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{firebase_id_token}}
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {"fields":{"theme":{"stringValue":"dark"}}}
+}
+
+docs {
+  REST equivalent of the app's setDoc merge for a single edited theme field. It leaves other preference fields untouched.
+  Use a Firebase ID token for firebase_uid. This changes the stored theme to dark.
+}

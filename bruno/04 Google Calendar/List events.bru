@@ -1,0 +1,20 @@
+meta {
+  name: List events
+  type: http
+  seq: 2
+}
+
+get {
+  url: https://www.googleapis.com/calendar/v3/calendars/{{calendar_id}}/events?timeMin={{time_min}}&timeMax={{time_max}}&singleEvents=true&orderBy=startTime&maxResults=250
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{google_workspace_access_token}}
+  Accept: application/json
+}
+
+docs {
+  The app follows nextPageToken. URL encode calendar_id when it contains reserved characters.
+}

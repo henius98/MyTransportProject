@@ -1,0 +1,20 @@
+meta {
+  name: Get profile
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{bazi_base_url}}/api/v1/profile
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{bazi_api_key}}
+  Accept: application/json
+}
+
+docs {
+  Matches BaziFlowService.GetProfileAsync. Requires a running BaziFlow service and its API key.
+}

@@ -1,0 +1,21 @@
+meta {
+  name: Read user settings
+  type: http
+  seq: 1
+}
+
+get {
+  url: https://firestore.googleapis.com/v1/projects/{{firebase_project_id}}/databases/(default)/documents/users/{{firebase_uid}}/data/settings
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{firebase_id_token}}
+  Accept: application/json
+}
+
+docs {
+  REST equivalent of firebaseFirestoreInterop.getUserSettings. Use a Firebase ID token for firebase_uid; Firestore owner rules apply.
+  The app itself calls the Firebase Web SDK rather than constructing this REST URL.
+}

@@ -1,0 +1,21 @@
+meta {
+  name: Delete event
+  type: http
+  seq: 5
+}
+
+delete {
+  url: https://www.googleapis.com/calendar/v3/calendars/{{calendar_id}}/events/{{event_id}}
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{google_workspace_access_token}}
+  Accept: application/json
+  If-Match: {{event_etag}}
+}
+
+docs {
+  Deletes the selected event. Set event_id and its ETag first.
+}

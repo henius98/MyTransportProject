@@ -1,0 +1,26 @@
+meta {
+  name: Update event
+  type: http
+  seq: 4
+}
+
+patch {
+  url: https://www.googleapis.com/calendar/v3/calendars/{{calendar_id}}/events/{{event_id}}
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{google_workspace_access_token}}
+  Accept: application/json
+  Content-Type: application/json
+  If-Match: {{event_etag}}
+}
+
+body:json {
+  {"summary":"{{event_summary}}","description":null,"location":null,"start":{"dateTime":"{{event_start}}"},"end":{"dateTime":"{{event_end}}"}}
+}
+
+docs {
+  Set event_id and the ETag from a list response. The app sends If-Match to reject stale edits.
+}

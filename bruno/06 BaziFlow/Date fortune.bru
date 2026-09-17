@@ -1,0 +1,25 @@
+meta {
+  name: Date fortune
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{bazi_base_url}}/api/v1/date-fortune
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{bazi_api_key}}
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {"date":"{{date_start}}"}
+}
+
+docs {
+  Matches BaziFlowService.GetDateFortuneAsync. Requires a profile.
+}

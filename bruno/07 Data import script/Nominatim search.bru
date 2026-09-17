@@ -1,0 +1,20 @@
+meta {
+  name: Nominatim search
+  type: http
+  seq: 2
+}
+
+get {
+  url: https://nominatim.openstreetmap.org/search?q={{nominatim_query}}&format=json&limit=1
+  body: none
+  auth: none
+}
+
+headers {
+  User-Agent: MyTransportAppWASM Bruno collection (manual geocoding)
+  Referer: https://data.gov.my
+}
+
+docs {
+  Matches scripts/fetch_rc_data.py query fields. Run sparingly; the script waits 1.5 seconds between calls.
+}

@@ -1,0 +1,25 @@
+meta {
+  name: Create task
+  type: http
+  seq: 3
+}
+
+post {
+  url: https://tasks.googleapis.com/tasks/v1/lists/{{task_list_id}}/tasks
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{google_workspace_access_token}}
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {"title":"{{task_title}}","notes":null,"due":null,"status":"needsAction","completed":null}
+}
+
+docs {
+  Creates a task in task_list_id. Matches the fields sent by GoogleTaskEdit.
+}

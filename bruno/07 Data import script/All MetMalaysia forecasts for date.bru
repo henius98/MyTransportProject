@@ -1,0 +1,20 @@
+meta {
+  name: All MetMalaysia forecasts for date
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{data_gov_base}}/weather/forecast?date={{date_start}}
+  body: none
+  auth: none
+}
+
+headers {
+  User-Agent: Mozilla/5.0
+  Referer: https://data.gov.my
+}
+
+docs {
+  Matches scripts/fetch_rc_data.py. The script extracts unique forecast locations for recreation_centres.json.
+}

@@ -1,0 +1,25 @@
+meta {
+  name: Create event
+  type: http
+  seq: 3
+}
+
+post {
+  url: https://www.googleapis.com/calendar/v3/calendars/{{calendar_id}}/events
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{google_workspace_access_token}}
+  Accept: application/json
+  Content-Type: application/json
+}
+
+body:json {
+  {"summary":"{{event_summary}}","description":null,"location":null,"start":{"dateTime":"{{event_start}}"},"end":{"dateTime":"{{event_end}}"}}
+}
+
+docs {
+  Creates an event in the selected calendar. Requires calendar.events scope.
+}

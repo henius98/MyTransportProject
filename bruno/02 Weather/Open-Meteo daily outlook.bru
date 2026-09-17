@@ -1,0 +1,15 @@
+meta {
+  name: Open-Meteo daily outlook
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{open_meteo_base}}/v1/forecast?latitude={{latitude}}&longitude={{longitude}}&daily=temperature_2m_max,precipitation_probability_max,weather_code&forecast_days={{forecast_days}}&timezone=UTC
+  body: none
+  auth: none
+}
+
+docs {
+  Matches the Outlook endpoint. The app computes forecast_days from the return date, clamped to 1-16.
+}

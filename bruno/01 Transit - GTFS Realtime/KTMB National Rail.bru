@@ -1,0 +1,16 @@
+meta {
+  name: KTMB National Rail
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{data_gov_base}}/gtfs-realtime/vehicle-position/ktmb/
+  body: none
+  auth: none
+}
+
+docs {
+  Vehicle positions from appsettings.json. Response is binary GTFS Realtime Protocol Buffers; use Download in Bruno to save it.
+  The app polls with conditional If-None-Match and If-Modified-Since after receiving validators.
+}

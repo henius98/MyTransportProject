@@ -1,0 +1,26 @@
+meta {
+  name: Update task
+  type: http
+  seq: 4
+}
+
+patch {
+  url: https://tasks.googleapis.com/tasks/v1/lists/{{task_list_id}}/tasks/{{task_id}}
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{google_workspace_access_token}}
+  Accept: application/json
+  Content-Type: application/json
+  If-Match: {{task_etag}}
+}
+
+body:json {
+  {"title":"{{task_title}}","notes":null,"due":null,"status":"needsAction","completed":null}
+}
+
+docs {
+  Set task_id and ETag from a list response. Null optional values clear them, as in the app.
+}

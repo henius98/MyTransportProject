@@ -1,0 +1,21 @@
+meta {
+  name: Delete task
+  type: http
+  seq: 5
+}
+
+delete {
+  url: https://tasks.googleapis.com/tasks/v1/lists/{{task_list_id}}/tasks/{{task_id}}
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{google_workspace_access_token}}
+  Accept: application/json
+  If-Match: {{task_etag}}
+}
+
+docs {
+  Deletes the selected task. Set task_id and its ETag first.
+}

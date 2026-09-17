@@ -1,0 +1,20 @@
+meta {
+  name: List calendars
+  type: http
+  seq: 1
+}
+
+get {
+  url: https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{google_workspace_access_token}}
+  Accept: application/json
+}
+
+docs {
+  The app follows nextPageToken. Add pageToken manually to inspect later pages. Requires calendar.calendarlist.readonly scope.
+}

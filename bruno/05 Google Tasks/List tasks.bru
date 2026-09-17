@@ -1,0 +1,20 @@
+meta {
+  name: List tasks
+  type: http
+  seq: 2
+}
+
+get {
+  url: https://tasks.googleapis.com/tasks/v1/lists/{{task_list_id}}/tasks?maxResults=100&showCompleted=true&showHidden=true&showAssigned=true
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{google_workspace_access_token}}
+  Accept: application/json
+}
+
+docs {
+  The app follows nextPageToken. Set task_list_id from List task lists.
+}

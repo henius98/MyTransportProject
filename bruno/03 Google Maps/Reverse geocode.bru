@@ -1,0 +1,15 @@
+meta {
+  name: Reverse geocode
+  type: http
+  seq: 2
+}
+
+get {
+  url: https://maps.googleapis.com/maps/api/geocode/json?latlng={{latitude}},{{longitude}}&key={{google_maps_api_key}}
+  body: none
+  auth: none
+}
+
+docs {
+  Matches GeocodingService.ReverseGeocodeAsync. Enable Geocoding API for the key.
+}

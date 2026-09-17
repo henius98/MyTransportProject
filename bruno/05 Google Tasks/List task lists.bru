@@ -1,0 +1,20 @@
+meta {
+  name: List task lists
+  type: http
+  seq: 1
+}
+
+get {
+  url: https://tasks.googleapis.com/tasks/v1/users/@me/lists?maxResults=100
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{google_workspace_access_token}}
+  Accept: application/json
+}
+
+docs {
+  The app follows nextPageToken. Requires tasks scope.
+}

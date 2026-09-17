@@ -1,0 +1,15 @@
+meta {
+  name: Maps JavaScript API loader
+  type: http
+  seq: 3
+}
+
+get {
+  url: https://maps.googleapis.com/maps/api/js?key={{google_maps_api_key}}&v=weekly&libraries=places&loading=async
+  body: none
+  auth: none
+}
+
+docs {
+  Script loaded by googleMap.js. Routes, autocomplete and map rendering are JavaScript SDK operations, not direct app HTTP calls.
+}

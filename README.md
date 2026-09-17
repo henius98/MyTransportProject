@@ -36,6 +36,7 @@ A unified dashboard for public transit tracking and weather-aware trip planning 
 - `MyTransportAppWASM/Utils`: Shared data-shaping utilities for runtime hot paths.
 - `MyTransportAppWASM/wwwroot/js`: JavaScript modules for direct Google Maps manipulation and geolocation.
 - `benchmarks`: Repeatable host and browser-native Mono/WASM performance harnesses.
+- `bruno`: Ready-to-open requests for the app's external APIs; see [collection setup](bruno/README.md).
 
 ## ⚙️ Configuration
 
