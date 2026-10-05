@@ -3,20 +3,22 @@
 @using MyTransportAppWASM.Models
 @using MyTransportAppWASM.Services
 
-<PageTitle>Live Bus Map - MyTransportApp</PageTitle>
+<PageTitle>Transit Map - MyTransportApp</PageTitle>
 
 <div id="map-container" class="@MapContainerClass">
     <div id="map"></div>
 
     <div class="@MapOverlayClass glass-panel">
-        <button type="button" class="overlay-header d-flex justify-content-between align-items-center w-100"
+        <button type="button" class="overlay-header"
              @onclick="ToggleCollapse" 
-             aria-expanded="@((!isCollapsed).ToString().ToLower())" aria-label="Toggle tracker panel">
+             aria-expanded="@((!isCollapsed).ToString().ToLower())"
+             aria-label="@(isCollapsed ? "Expand tracker panel" : "Collapse tracker panel")"
+             title="@(isCollapsed ? "Expand tracker panel" : "Collapse tracker panel")">
             <div class="d-flex align-items-center gap-2">
                 <span class="collapsed-icon" aria-hidden="true">📍</span>
                 @if (!isCollapsed)
                 {
-                    <h2 class="m-0 fs-5">Rapid Bus Tracker</h2>
+                    <h2 class="m-0 fs-5">Transit Map</h2>
                 }
             </div>
         </button>
@@ -65,6 +67,44 @@
                     <span class="pulse-dot" aria-hidden="true"></span>
                     <span>@(string.IsNullOrEmpty(locationStatus) ? "Ready" : locationStatus)</span>
                 </div>
+
+                @if (_transportProviders.Any(provider => provider.StaticData != null))
+                {
+                    <div class="static-routes mt-3">
+                        <h3 class="fs-6 mb-2">Routes and estimated departures</h3>
+                        <label class="form-label" for="static-provider-select">Provider</label>
+                        <select id="static-provider-select" class="form-input" value="@_selectedStaticProviderIndex" @onchange="SelectStaticProvider">
+                            <option value="-1">Choose a provider</option>
+                            @for (var index = 0; index < _transportProviders.Count; index++)
+                            {
+                                if (_transportProviders[index].StaticData != null)
+                                {
+                                    <option value="@index">@_transportProviders[index].Name</option>
+                                }
+                            }
+                        </select>
+                        @if (SelectedStaticData != null)
+                        {
+                            <label class="form-label mt-2" for="static-route-select">Route</label>
+                            <select id="static-route-select" class="form-input" value="@_selectedStaticRouteId" @onchange="SelectStaticRoute" disabled="@(_staticRoutes.Count == 0)">
+                                <option value="">Choose a route</option>
+                                @foreach (var route in _staticRoutes)
+                                {
+                                    <option value="@route.Id">@route.Name (@route.Id)</option>
+                                }
+                            </select>
+                            <div class="small mt-2" role="status">@_staticStatus</div>
+                            @if (!string.IsNullOrEmpty(_staticStopName))
+                            {
+                                <h4 class="fs-6 mt-3">@_staticStopName</h4>
+                                @foreach (var departure in _staticDepartures)
+                                {
+                                    <div class="small">@MalaysiaTime.Convert(departure.DepartureAt).ToString("HH:mm") · @(departure.Headsign ?? departure.RouteId)</div>
+                                }
+                            }
+                        }
+                    </div>
+                }
 
                 @if (_routeOptions != null && _routeOptions.Any())
                 {

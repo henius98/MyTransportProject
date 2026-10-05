@@ -37,6 +37,8 @@
              Link="Production/Services/LiveRoutingService.cs" />
     <Compile Include="../../MyTransportAppWASM/Utils/WeatherShaper.cs"
              Link="Production/Utils/WeatherShaper.cs" />
+    <Compile Include="../../MyTransportAppWASM/Utils/MalaysiaTime.cs"
+             Link="Production/Utils/MalaysiaTime.cs" />
   </ItemGroup>
 
 </Project>

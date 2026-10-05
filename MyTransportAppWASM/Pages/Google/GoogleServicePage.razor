@@ -4,19 +4,20 @@
 
 <PageTitle>@Title · MyTransportApp</PageTitle>
 
-<section class="google-workspace">
-    <header class="google-heading">
-        <p class="google-eyebrow">Your Google account</p>
-        <h1>@Title</h1>
-        <p class="google-muted">@Description</p>
-    </header>
+<section class="google-workspace @(IsTasksDashboard ? "google-workspace--tasks" : IsCalendarDashboard ? "google-workspace--calendar" : "")">
+    @if (!IsTasksDashboard && !IsCalendarDashboard)
+    {
+        <header class="google-heading">
+            <p class="google-eyebrow">Your Google account</p>
+            <h1>@Title</h1>
+            <p class="google-muted">@Description</p>
+        </header>
 
-    <nav class="google-tabs" aria-label="Google services">
-        <NavLink href="google" Match="NavLinkMatch.All">Overview</NavLink>
-        <NavLink href="google/calendar">Calendar</NavLink>
-        <NavLink href="google/tasks">Tasks</NavLink>
-        <NavLink href="google/notes">Keep notes</NavLink>
-    </nav>
+        <nav class="google-tabs" aria-label="Google services">
+            <NavLink href="google" Match="NavLinkMatch.All">Overview</NavLink>
+            <NavLink href="google/notes">Keep notes</NavLink>
+        </nav>
+    }
 
     <AuthorizeView>
         <Authorizing>
@@ -25,10 +26,13 @@
         <Authorized>
             @if (context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value is { Length: > 0 } uid)
             {
-                <div class="google-account-line">
-                    <span class="bi bi-person-circle" aria-hidden="true"></span>
-                    <span>@(context.User.FindFirst(ClaimTypes.Email)?.Value ?? context.User.Identity?.Name)</span>
-                </div>
+                @if (!IsTasksDashboard && !IsCalendarDashboard)
+                {
+                    <div class="google-account-line">
+                        <span class="bi bi-person-circle" aria-hidden="true"></span>
+                        <span>@(context.User.FindFirst(ClaimTypes.Email)?.Value ?? context.User.Identity?.Name)</span>
+                    </div>
+                }
                 @if (string.IsNullOrEmpty(Service))
                 {
                     <div @key="uid">@ChildContent(uid)</div>
@@ -57,6 +61,9 @@
     [Parameter] public string Description { get; set; } = "";
     [Parameter] public string? Service { get; set; }
     [Parameter, EditorRequired] public RenderFragment<string> ChildContent { get; set; } = default!;
+
+    private bool IsTasksDashboard => Service == "tasks";
+    private bool IsCalendarDashboard => Service == "calendar";
 
     private void SignIn()
     {

@@ -7,7 +7,7 @@ Edit the example coordinates, location ID, dates, calendar and task IDs before s
 | Folder | Requests | Setup |
 | --- | --- | --- |
 | 01 Transit | Every GTFS vehicle-position endpoint configured in `MyTransportAppWASM/wwwroot/appsettings.json` | None |
-| 02 Weather | MetMalaysia/data.gov.my, Open-Meteo baseline and outlook, Singapore NEA baseline and outlook | Current dates and forecast location |
+| 02 Weather | MetMalaysia/data.gov.my, Open-Meteo realtime and outlook, Singapore NEA realtime and outlook | Current dates and forecast location |
 | 03 Google Maps | Places text search, reverse geocoding, JavaScript API loader | Google Maps key with the corresponding APIs enabled |
 | 04 Google Calendar | List calendars/events, create/update/delete events | Google OAuth access token with the Calendar scopes used by the app |
 | 05 Google Tasks | List task lists/tasks, create/update/delete tasks | Google OAuth access token with the Tasks scope used by the app |

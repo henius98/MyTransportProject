@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Options;
 
 namespace MyTransportAppWASM.Services
 {
@@ -8,48 +9,76 @@ namespace MyTransportAppWASM.Services
 
     private readonly HttpClient _httpClient;
     private readonly IMemoryCache _cache;
+    private readonly TimeSpan _liveCacheExpiration;
+    private readonly TimeSpan _outlookCacheExpiration;
+    private readonly TimeSpan _fallbackCacheExpiration;
 
-    public WeatherPlannerService(HttpClient httpClient, IMemoryCache cache)
+    public WeatherPlannerService(
+      HttpClient httpClient,
+      IMemoryCache cache,
+      IOptions<CacheExpirationOptions> cacheExpiration)
     {
       _httpClient = httpClient;
       _cache = cache;
+      _liveCacheExpiration = GetPositiveDuration(
+        cacheExpiration.Value.Weather.LiveSeconds,
+        $"{nameof(CacheExpirationOptions.Weather)}:{nameof(WeatherCacheExpirationOptions.LiveSeconds)}");
+      _outlookCacheExpiration = GetPositiveDuration(
+        cacheExpiration.Value.Weather.OutlookSeconds,
+        $"{nameof(CacheExpirationOptions.Weather)}:{nameof(WeatherCacheExpirationOptions.OutlookSeconds)}");
+      _fallbackCacheExpiration = GetPositiveDuration(
+        cacheExpiration.Value.Weather.FallbackSeconds,
+        $"{nameof(CacheExpirationOptions.Weather)}:{nameof(WeatherCacheExpirationOptions.FallbackSeconds)}");
     }
 
 
-    public async Task<WeatherProviderResult> FetchProviderDataAsync(WeatherProviderOptions provider, Uri endpoint, string label, CancellationToken cancellationToken = default)
+    public async Task<WeatherProviderResult> FetchProviderDataAsync(
+      WeatherProviderOptions provider,
+      Uri endpoint,
+      string label,
+      CancellationToken cancellationToken = default,
+      bool forceRefresh = false)
     {
       var fallback = CreatePlaceholder();
       if (!provider.Enabled) return BuildSample(provider, "Disabled", fallback, endpoint);
 
-      string cacheKey = $"weather_api_{endpoint.AbsoluteUri}";
+      var isOutlook = IsOutlook(label);
+      string cacheKey = $"weather_api_{(isOutlook ? "outlook" : "current")}_{endpoint.AbsoluteUri}";
+
+      if (forceRefresh)
+      {
+        _cache.Remove(cacheKey);
+      }
 
       try
       {
-        var lazyTask = _cache.GetOrCreate(cacheKey, entry =>
+        var wasCached = _cache.TryGetValue(cacheKey, out Lazy<Task<WeatherProviderResult>>? cachedTask);
+        var lazyTask = cachedTask ?? _cache.GetOrCreate(cacheKey, entry =>
         {
-            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(10);
-            return new Lazy<Task<WeatherProviderResult>>(
-              () => FetchProviderDataCoreAsync(provider, endpoint, label, fallback),
-              LazyThreadSafetyMode.ExecutionAndPublication);
-        });
+          entry.AbsoluteExpirationRelativeToNow = isOutlook
+            ? _outlookCacheExpiration
+            : _liveCacheExpiration;
+          return new Lazy<Task<WeatherProviderResult>>(
+            () => FetchProviderDataCoreAsync(provider, endpoint, label, fallback),
+            LazyThreadSafetyMode.ExecutionAndPublication);
+        })!;
 
-        var cachedResult = await lazyTask!.Value.WaitAsync(cancellationToken);
+        var cachedResult = await lazyTask.Value.WaitAsync(cancellationToken);
+        var labeledResult = RelabelIfRequired(cachedResult, label);
 
-        if (!string.Equals(cachedResult.Status, "Live", StringComparison.Ordinal))
+        if (!string.Equals(cachedResult.Status, "LIVE", StringComparison.Ordinal))
         {
           // MemoryCacheEntryOptions cannot be changed after the factory returns.
-          // Replace the entry explicitly so transient failures do not persist for 10 minutes.
-          _cache.Set(cacheKey, lazyTask, TimeSpan.FromSeconds(30));
-          return RelabelIfRequired(cachedResult, label);
+          // Replace the entry explicitly so transient failures use the shorter fallback lifetime.
+          _cache.Set(cacheKey, lazyTask, _fallbackCacheExpiration);
+          return wasCached
+            ? labeledResult with { Status = $"{labeledResult.Status} (Cached)", IsCached = true }
+            : labeledResult;
         }
 
-        var status = (DateTimeOffset.UtcNow - cachedResult.RetrievedAt).TotalSeconds > 2
-          ? "Live (Cached)"
-          : "Live";
-        var labeledResult = RelabelIfRequired(cachedResult, label);
-        return string.Equals(labeledResult.Status, status, StringComparison.Ordinal)
-          ? labeledResult
-          : labeledResult with { Status = status };
+        var status = GetStatus(label, endpoint);
+        if (wasCached) status += " (Cached)";
+        return labeledResult with { Status = status, IsCached = wasCached };
       }
       catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
       {
@@ -63,6 +92,14 @@ namespace MyTransportAppWASM.Services
         return BuildSample(provider, "Unavailable", fallback, endpoint);
       }
     }
+
+    private static TimeSpan GetPositiveDuration(int seconds, string name) =>
+      seconds > 0
+        ? TimeSpan.FromSeconds(seconds)
+        : throw new InvalidOperationException($"Cache expiration setting '{name}' must be greater than zero.");
+
+    private static bool IsOutlook(string label) =>
+      string.Equals(label, "Outlook", StringComparison.OrdinalIgnoreCase);
 
     private async Task<WeatherProviderResult> FetchProviderDataCoreAsync(
       WeatherProviderOptions provider,
@@ -100,23 +137,35 @@ namespace MyTransportAppWASM.Services
       {
         Provider = provider.Name,
         Source = provider.Source,
-        Status = "Live",
+        Status = "LIVE",
         RetrievedAt = DateTimeOffset.UtcNow,
         Periods = WeatherShaper.ShapeSlices(document, fallback, label),
         Endpoint = endpoint
       };
     }
 
+    private static string GetStatus(string label, Uri endpoint)
+    {
+      if (IsOutlook(label)) return "FORECAST";
+      if (label.Contains("real", StringComparison.OrdinalIgnoreCase) ||
+          endpoint.AbsoluteUri.Contains("real-time", StringComparison.OrdinalIgnoreCase) ||
+          endpoint.Query.Contains("current_weather", StringComparison.OrdinalIgnoreCase)) return "LIVE";
+      return "TODAY";
+    }
+
     private static WeatherProviderResult RelabelIfRequired(WeatherProviderResult result, string label)
     {
       for (var index = 0; index < result.Periods.Count; index++)
       {
-        if (!string.Equals(result.Periods[index].Label, label, StringComparison.Ordinal))
+        if (IsProviderLabel(result.Periods[index].Label) &&
+            !string.Equals(result.Periods[index].Label, label, StringComparison.Ordinal))
         {
           var relabeledPeriods = new List<WeatherTimeSlice>(result.Periods.Count);
           foreach (var period in result.Periods)
           {
-            relabeledPeriods.Add(period with { Label = label });
+            relabeledPeriods.Add(IsProviderLabel(period.Label)
+              ? period with { Label = label }
+              : period);
           }
 
           return result with { Periods = relabeledPeriods };
@@ -125,6 +174,10 @@ namespace MyTransportAppWASM.Services
 
       return result;
     }
+
+    private static bool IsProviderLabel(string label) =>
+      string.Equals(label, "Realtime", StringComparison.OrdinalIgnoreCase) ||
+      string.Equals(label, "Outlook", StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<WeatherTimeSlice> CreatePlaceholder() =>
     [

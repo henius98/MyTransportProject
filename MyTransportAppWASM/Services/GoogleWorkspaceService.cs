@@ -4,9 +4,15 @@ using MyTransportAppWASM.Models;
 
 namespace MyTransportAppWASM.Services;
 
-public sealed class GoogleWorkspaceService(IJSRuntime jsRuntime) : IAsyncDisposable
+public sealed class GoogleWorkspaceService : IAsyncDisposable
 {
+    private readonly IJSRuntime _jsRuntime;
     private Task<IJSObjectReference>? _moduleTask;
+
+    public GoogleWorkspaceService(IJSRuntime jsRuntime)
+    {
+        _jsRuntime = jsRuntime;
+    }
 
     public Task ConnectAsync(string uid, string service) =>
         InvokeVoidAsync("connect", uid, service);
@@ -41,12 +47,26 @@ public sealed class GoogleWorkspaceService(IJSRuntime jsRuntime) : IAsyncDisposa
     public Task DeleteTaskAsync(string uid, string listId, string taskId, string? etag = null) =>
         InvokeVoidAsync("deleteTask", uid, listId, taskId, etag);
 
+    public Task<GoogleTaskExtension[]> ListTaskExtensionsAsync(string uid) =>
+        InvokeAsync<GoogleTaskExtension[]>("listTaskExtensions", uid);
+
+    public Task SaveTaskExtensionAsync(string uid, GoogleTaskExtension extension) =>
+        InvokeVoidAsync("saveTaskExtension", uid, extension);
+
+    public Task DeleteTaskExtensionsAsync(string uid, GoogleTaskReference[] deleted) =>
+        InvokeVoidAsync("deleteTaskExtensions", uid, deleted);
+
     private Task<IJSObjectReference> GetModuleAsync()
     {
         if (_moduleTask is null || _moduleTask.IsFaulted || _moduleTask.IsCanceled)
-            _moduleTask = jsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/google-services.js").AsTask();
+            _moduleTask = LoadModuleAsync();
 
         return _moduleTask;
+    }
+
+    private async Task<IJSObjectReference> LoadModuleAsync()
+    {
+        return await _jsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/google-services.js");
     }
 
     private async Task<T> InvokeAsync<

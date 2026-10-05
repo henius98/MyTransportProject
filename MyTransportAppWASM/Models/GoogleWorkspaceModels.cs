@@ -9,10 +9,17 @@ public sealed class GoogleCalendar
     public string AccessRole { get; set; } = "";
     public bool Primary { get; set; }
     public string TimeZone { get; set; } = "";
+    public string? BackgroundColor { get; set; }
+    public string? ForegroundColor { get; set; }
+    public bool Selected { get; set; } = true;
 }
 
 public sealed class GoogleCalendarEvent
 {
+    // The API returns events per calendar; retain their source when combining calendars.
+    [JsonIgnore]
+    public string CalendarId { get; set; } = "";
+
     public string Id { get; set; } = "";
     public string Summary { get; set; } = "";
     public string? Description { get; set; }
@@ -64,6 +71,10 @@ public sealed class GoogleTask
     public string Title { get; set; } = "";
     public string? Notes { get; set; }
     public string? Due { get; set; }
+    [JsonIgnore]
+    public DateTime? DueDate => Due?.Length >= 10 && DateTime.TryParseExact(Due[..10], "yyyy-MM-dd",
+        System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var date) ? date : null;
+
     public string Status { get; set; } = "needsAction";
     public string? Completed { get; set; }
     public string Etag { get; set; } = "";
@@ -93,4 +104,19 @@ public sealed class GoogleTaskEdit
 
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? Completed { get; set; }
+}
+
+public sealed class GoogleTaskReference
+{
+    public string TaskListId { get; set; } = "";
+    public string TaskId { get; set; } = "";
+}
+
+public sealed class GoogleTaskExtension
+{
+    public string TaskListId { get; set; } = "";
+    public string TaskId { get; set; } = "";
+    public int? EstimatedMinutes { get; set; }
+    public List<GoogleTaskReference> DependsOn { get; set; } = [];
+    public string? StartedAt { get; set; }
 }

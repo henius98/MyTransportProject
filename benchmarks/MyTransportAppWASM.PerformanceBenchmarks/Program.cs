@@ -52,7 +52,7 @@ Run(
 Run(
     "WeatherShaper/generic-14",
     iterations: 300,
-    () => WeatherShaper.ShapeSlices(typicalWeather, fallback, "Baseline").Count);
+    () => WeatherShaper.ShapeSlices(typicalWeather, fallback, "Realtime").Count);
 
 Run(
     "WeatherShaper/generic-500",

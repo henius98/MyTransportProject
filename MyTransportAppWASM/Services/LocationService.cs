@@ -1,16 +1,24 @@
 
+using Microsoft.Extensions.Options;
+
 namespace MyTransportAppWASM.Services
 {
   public class LocationService : ILocationService, IAsyncDisposable
   {
     private readonly IJSRuntime _js;
+    private readonly long _cacheMaxAgeMilliseconds;
     private IJSObjectReference? _geoModule;
     public Location? LastKnownLocation { get; private set; }
     public event Action<Location>? OnLocationChanged;
 
-    public LocationService(IJSRuntime js)
+    public LocationService(IJSRuntime js, IOptions<CacheExpirationOptions> cacheExpiration)
     {
       _js = js;
+      var cacheSeconds = cacheExpiration.Value.Map.GeolocationSeconds;
+      _cacheMaxAgeMilliseconds = cacheSeconds > 0
+        ? checked((long)cacheSeconds * 1000)
+        : throw new InvalidOperationException(
+          $"Cache expiration setting '{nameof(CacheExpirationOptions.Map)}:{nameof(MapCacheExpirationOptions.GeolocationSeconds)}' must be greater than zero.");
     }
 
     public async Task<Location?> GetCurrentLocationAsync(bool forceRefresh = false)
@@ -27,7 +35,7 @@ namespace MyTransportAppWASM.Services
           _geoModule = await _js.InvokeAsync<IJSObjectReference>("import", "./js/geolocation.js");
         }
 
-        var location = await _geoModule.InvokeAsync<Location?>("getUserLocation");
+        var location = await _geoModule.InvokeAsync<Location?>("getUserLocation", new { cacheMaxAge = _cacheMaxAgeMilliseconds });
         if (location != null)
         {
           UpdateLocation(location.Latitude, location.Longitude, location.Accuracy);

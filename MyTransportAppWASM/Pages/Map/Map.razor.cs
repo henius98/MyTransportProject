@@ -5,6 +5,7 @@ public partial class Map : IAsyncDisposable
 {
   [Inject] private IJSRuntime JS { get; set; } = default!;
   [Inject] private IGtfsService GtfsService { get; set; } = default!;
+  [Inject] private ITransportStaticDataService StaticDataService { get; set; } = default!;
   [Inject] private IConfiguration Config { get; set; } = default!;
   [Inject] private ThemeService Theme { get; set; } = default!;
   [Inject] private ILocationService LocationService { get; set; } = default!;
@@ -17,7 +18,7 @@ public partial class Map : IAsyncDisposable
 
   private IJSObjectReference? mapModule;
   private DotNetObjectReference<Map>? objRef;
-  private DateTime lastUpdated;
+  private DateTimeOffset? lastUpdated;
   private CancellationTokenSource _cts = new();
   private string origin = "";
   private string destination = "";
@@ -26,6 +27,13 @@ public partial class Map : IAsyncDisposable
   private string locationStatus = "Initializing...";
   private bool isCollapsed = false;
   private IReadOnlyList<TransportProvider> _transportProviders = Array.Empty<TransportProvider>();
+  private int _selectedStaticProviderIndex = -1;
+  private string _selectedStaticRouteId = "";
+  private List<StaticRoute> _staticRoutes = [];
+  private List<StaticDeparture> _staticDepartures = [];
+  private string _selectedStaticStopId = "";
+  private string _staticStopName = "";
+  private string _staticStatus = "";
   private List<MyTransportAppWASM.Models.BusLocation> _cachedVehicles = [];
   private TimeSpan _pollingInterval = TimeSpan.FromSeconds(15);
   private TransitRefreshCoordinator _transitRefresh = new(
@@ -43,6 +51,97 @@ public partial class Map : IAsyncDisposable
   private string MapOverlayClass => $"map-overlay {(isCollapsed ? "collapsed" : "")}".Trim();
 
   private void ToggleCollapse() => isCollapsed = !isCollapsed;
+
+  private TransportStaticData? SelectedStaticData =>
+    _selectedStaticProviderIndex >= 0 && _selectedStaticProviderIndex < _transportProviders.Count
+      ? _transportProviders[_selectedStaticProviderIndex].StaticData : null;
+
+  private async Task SelectStaticProvider(ChangeEventArgs args)
+  {
+    _selectedStaticProviderIndex = int.TryParse(args.Value?.ToString(), out var index) ? index : -1;
+    _selectedStaticRouteId = "";
+    _staticRoutes = [];
+    _staticDepartures = [];
+    _selectedStaticStopId = "";
+    _staticStopName = "";
+    if (mapModule != null) await mapModule.InvokeVoidAsync("clearStaticRoute");
+    var source = SelectedStaticData;
+    if (source == null) { _staticStatus = ""; return; }
+
+    _staticStatus = "Loading routes...";
+    try
+    {
+      var routes = await StaticDataService.GetRoutesAsync(source, _cts.Token);
+      if (_isDisposed || SelectedStaticData != source) return;
+      _staticRoutes = routes;
+      _staticStatus = routes.Count == 0 ? "No routes available." : "Choose a route.";
+    }
+    catch (OperationCanceledException) { }
+    catch (Exception ex)
+    {
+      if (_isDisposed || SelectedStaticData != source) return;
+      _staticStatus = "Static routes unavailable.";
+      Console.Error.WriteLine($"Static route list failed: {ex.Message}");
+    }
+  }
+
+  private async Task SelectStaticRoute(ChangeEventArgs args)
+  {
+    _selectedStaticRouteId = args.Value?.ToString() ?? "";
+    _staticDepartures = [];
+    _selectedStaticStopId = "";
+    _staticStopName = "";
+    if (mapModule == null) return;
+    await mapModule.InvokeVoidAsync("clearStaticRoute");
+    var source = SelectedStaticData;
+    var routeId = _selectedStaticRouteId;
+    if (source == null || string.IsNullOrEmpty(routeId)) { _staticStatus = "Choose a route."; return; }
+
+    _staticStatus = "Loading route map...";
+    try
+    {
+      var geoJson = await StaticDataService.GetMapAsync(source, routeId, _cts.Token);
+      if (_isDisposed || SelectedStaticData != source || _selectedStaticRouteId != routeId) return;
+      await mapModule.InvokeVoidAsync("showStaticRoute", geoJson, objRef);
+      _staticStatus = "Select a stop on the map for departures.";
+    }
+    catch (OperationCanceledException) { }
+    catch (Exception ex)
+    {
+      if (_isDisposed || SelectedStaticData != source || _selectedStaticRouteId != routeId) return;
+      _staticStatus = "Static route map unavailable.";
+      Console.Error.WriteLine($"Static route map failed: {ex.Message}");
+    }
+  }
+
+  [JSInvokable]
+  public async Task OnStaticStopSelected(string stopId, string stopName)
+  {
+    var source = SelectedStaticData;
+    var routeId = _selectedStaticRouteId;
+    if (_isDisposed || source == null || string.IsNullOrEmpty(routeId)) return;
+    _selectedStaticStopId = stopId;
+    _staticStopName = string.IsNullOrWhiteSpace(stopName) ? stopId : stopName;
+    _staticDepartures = [];
+    _staticStatus = "Loading estimated departures...";
+    StateHasChanged();
+    try
+    {
+      var departures = await StaticDataService.GetDeparturesAsync(source, routeId, stopId, _cts.Token);
+      if (_isDisposed || SelectedStaticData != source || _selectedStaticRouteId != routeId || _selectedStaticStopId != stopId) return;
+      _staticDepartures = departures;
+      _staticStatus = departures.Count == 0 ? "No upcoming departures for this route." : "Scheduled estimates, not live arrivals.";
+      StateHasChanged();
+    }
+    catch (OperationCanceledException) { }
+    catch (Exception ex)
+    {
+      if (_isDisposed || SelectedStaticData != source || _selectedStaticRouteId != routeId || _selectedStaticStopId != stopId) return;
+      _staticStatus = "Departures unavailable.";
+      Console.Error.WriteLine($"Static departures failed: {ex.Message}");
+      StateHasChanged();
+    }
+  }
 
   protected override Task OnInitializedAsync()
   {
@@ -81,7 +180,7 @@ public partial class Map : IAsyncDisposable
         return;
       }
 
-      TodayFortune = await BaziFlowService.GetDateFortuneAsync(DateTime.Now.ToString("yyyy-MM-dd"));
+      TodayFortune = await BaziFlowService.GetDateFortuneAsync(MalaysiaTime.Now.ToString("yyyy-MM-dd"));
     }
     catch (Exception ex)
     {
@@ -164,7 +263,8 @@ public partial class Map : IAsyncDisposable
       var initialLat = LocationService.LastKnownLocation?.Latitude ?? Latitude;
       var initialLng = LocationService.LastKnownLocation?.Longitude ?? Longitude;
 
-      await mapModule.InvokeVoidAsync("initGoogleMaps", "map", initialLat, initialLng, 14, apiKey, objRef, Theme.IsDarkMode ? "DARK" : "LIGHT");
+      await mapModule.InvokeVoidAsync("initGoogleMaps", "map", initialLat, initialLng, 14, apiKey, objRef,
+        Theme.IsDarkMode ? "DARK" : "LIGHT", MalaysiaTime.IanaTimeZone);
 
       locationStatus = "Loading GPS...";
       StateHasChanged();
@@ -291,6 +391,7 @@ public partial class Map : IAsyncDisposable
     try
     {
       var nearbyProviders = _transportProviders.Where(p =>
+          p.HasRealtimeFeed &&
           CalculateDistance(pos.Latitude, pos.Longitude, p.CenterLat, p.CenterLng) <= p.RadiusKm
       ).ToList();
 
@@ -299,7 +400,7 @@ public partial class Map : IAsyncDisposable
         _transitRefresh.Clear();
         _cachedVehicles = [];
         await mapModule.InvokeVoidAsync("syncMarkers", Array.Empty<MyTransportAppWASM.Models.BusLocation>());
-        locationStatus = "No bus providers found nearby.";
+        locationStatus = "No live vehicle feeds nearby. Scheduled routes are available below.";
         StateHasChanged();
         return;
       }
@@ -331,7 +432,7 @@ public partial class Map : IAsyncDisposable
       var successfulRefreshCount = outcome.AttemptedProviderCount - outcome.FailedProviderCount;
       if (successfulRefreshCount > 0)
       {
-        lastUpdated = DateTime.Now;
+        lastUpdated = MalaysiaTime.Now;
       }
 
       locationStatus = BuildTransitStatus(outcome, nearbyProviders.Count);
@@ -403,7 +504,7 @@ public partial class Map : IAsyncDisposable
       ? $", {outcome.ExpiredProviderCount} expired"
       : string.Empty;
 
-    if (lastUpdated == default)
+    if (!lastUpdated.HasValue)
     {
       return $"Showing {_cachedVehicles.Count} buses ({nearbyProviderCount} source(s){staleSuffix}{expiredSuffix})";
     }
@@ -463,7 +564,7 @@ public partial class Map : IAsyncDisposable
 
       if (TodayFortune != null)
       {
-          int currentHour = DateTime.Now.Hour;
+          int currentHour = MalaysiaTime.Now.Hour;
           bool isLuckyHour = TodayFortune.LuckyHours.Contains(currentHour);
           for (int i = 0; i < _routeOptions.Count; i++)
           {

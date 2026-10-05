@@ -1,6 +1,17 @@
 namespace MyTransportAppWASM.Models
 {
-  public record TransportProvider(string Name, string Endpoint, double CenterLat, double CenterLng, double RadiusKm, string TransportType = "Bus");
+  public record TransportProvider(string Name, string Endpoint, double CenterLat, double CenterLng, double RadiusKm, string TransportType = "Bus", TransportStaticData? StaticData = null)
+  {
+    public TransportProvider() : this("", "", 0, 0, 0) { }
+
+    public bool HasRealtimeFeed => !string.IsNullOrWhiteSpace(Endpoint);
+  }
+
+  public record TransportStaticData(string BaseUrl, string RouteInfoPath, string GeoJSONUrlPath, string DeparturePath);
+
+  public record StaticRoute(string Id, string Name);
+
+  public record StaticDeparture(string RouteId, string? Headsign, DateTimeOffset DepartureAt);
 
   // Models for Live Routing Service
   public record GoogleRoute

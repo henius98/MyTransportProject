@@ -1,6 +1,14 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Push targets are managed only by authenticated backend functions.
+    match /pushDevices/{deviceId} {
+      allow read, write: if false;
+    }
+    // Google access and refresh tokens are managed only by the authenticated backend.
+    match /users/{uid}/googleConnections/{connectionId} {
+      allow read, write: if false;
+    }
     match /users/{uid}/data/settings {
       function isOwner() {
         return request.auth != null && request.auth.uid == uid;
@@ -22,6 +30,27 @@ service cloud.firestore {
 
       allow read, delete: if isOwner();
       allow create, update: if isOwner() && validSettings();
+    }
+    match /users/{uid}/taskExtensions/{extensionId} {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+
+      function validExtension() {
+        let data = request.resource.data;
+        let minutes = data.estimatedMinutes;
+        let started = data.startedAt;
+        return data.keys().hasOnly(['taskListId', 'taskId', 'estimatedMinutes', 'dependsOn', 'startedAt'])
+          && data.keys().hasAll(['taskListId', 'taskId', 'estimatedMinutes', 'dependsOn', 'startedAt'])
+          && data.taskListId is string && data.taskListId.size() > 0 && data.taskListId.size() <= 1024
+          && data.taskId is string && data.taskId.size() > 0 && data.taskId.size() <= 1024
+          && (minutes == null || (minutes is int && minutes > 0 && minutes <= 1440))
+          && data.dependsOn is list && data.dependsOn.size() <= 100
+          && (started == null || (started is string && started.size() <= 40));
+      }
+
+      allow read, delete: if isOwner();
+      allow create, update: if isOwner() && validExtension();
     }
   }
 }

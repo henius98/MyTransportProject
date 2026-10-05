@@ -104,4 +104,5 @@ public class GoogleWorkspaceServiceTests
     {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
+
 }

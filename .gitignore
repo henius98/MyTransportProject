@@ -366,3 +366,5 @@ FodyWeavers.xsd
 **/wwwroot/appsettings.Development.json
 
 .codex
+functions/.env*
+functions/.secret.local

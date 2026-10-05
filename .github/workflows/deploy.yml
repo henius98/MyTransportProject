@@ -35,7 +35,7 @@ jobs:
 
       - name: Configure Firebase web app
         env:
-          FIREBASE_CONFIG_JSON: ${{ vars.FIREBASE_CONFIG_JSON }}
+          FIREBASE_CONFIG_JSON: ${{ vars.FIREBASE_CONFIG_JSON }}\
         run: node scripts/configure-firebase.mjs
 
       - name: Install .NET WASM Build Tools
@@ -48,14 +48,23 @@ jobs:
         run: dotnet test MyTransportApp.slnx -c Release --no-restore --nologo
 
       - name: Run Firebase configuration tests
-        run: node --experimental-vm-modules --test tests/firebase-config/*.test.mjs
+        run: |
+          node --experimental-vm-modules --test tests/firebase-config/*.test.mjs
+          node --test tests/push/*.test.mjs
+
+      - name: Run Google connection tests
+        run: |
+          node --experimental-vm-modules --test tests/google-services/*.test.mjs
+          corepack enable
+          pnpm --prefix functions install --frozen-lockfile
+          pnpm --prefix functions test
 
       - name: Setup Java for Firebase tests
         # The Firestore emulator requires Java 21 or later.
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: "21"
 
       - name: Run Firebase rule tests
         working-directory: tests/firebase

@@ -18,7 +18,7 @@ A unified dashboard for public transit tracking and weather-aware trip planning 
 - **Modern UI/UX**:
   - Dynamic **Light/Dark mode** support via a dedicated `ThemeService`.
   - Responsive design optimized for both desktop and mobile form factors.
-  - Progressive Web App (PWA) support for offline capability and "Add to Home Screen".
+  - Installable PWA manifest and opt-in Web Push notifications on supported browsers.
 
 ## 🛠️ Technical Stack
 
@@ -51,12 +51,43 @@ The application requires several API keys and configurations in `wwwroot/appsett
     "apiKey": "YOUR_FIREBASE_API_KEY",
     "authDomain": "YOUR_PROJECT_ID.firebaseapp.com",
     "projectId": "YOUR_PROJECT_ID",
-    "appId": "YOUR_FIREBASE_APP_ID"
+    "appId": "YOUR_FIREBASE_APP_ID",
+    "messagingSenderId": "YOUR_MESSAGING_SENDER_ID",
+    "webPushVapidKey": "YOUR_PUBLIC_WEB_PUSH_VAPID_KEY"
   }
 }
 ```
 
 Transit and weather providers are also configured in `appsettings.json`, allowing for easy extension to new regions or data sources.
+
+### Android notifications from a Cloudflare Worker
+
+Web Push uses the existing Firebase project. In **Firebase console → Project settings → Cloud Messaging → Web Push certificates**, generate a key pair. Put the public key in `Firebase.webPushVapidKey` and include it with `messagingSenderId` in `FIREBASE_CONFIG_JSON` for GitHub Pages deployment. Enable the FCM Registration API if the Firebase project requires it. The private VAPID key stays in Firebase.
+
+Deploy `pushRegistration`, `pushWebhook`, and the Firestore rules. Set a long random `PUSH_WEBHOOK_SECRET` with `firebase functions:secrets:set PUSH_WEBHOOK_SECRET --project YOUR_PROJECT_ID`, then run `firebase deploy --only functions:pushRegistration,functions:pushWebhook,firestore:rules --project YOUR_PROJECT_ID`. Put the same secret and the deployed `pushWebhook` URL in the Cloudflare Worker's secrets/configuration. Do not put this secret in `wwwroot` or the Worker source. The web deployment workflow does not deploy Firebase Functions or rules.
+
+On Android Chrome, open the HTTPS app, sign in, open the profile menu, and choose **Enable notifications**. Accept the browser permission prompt. The service worker can then display notifications when the tab is closed. Browser and Android notification settings still control delivery; force-stopping the browser or disabling notifications can prevent it. The app does not poll third-party APIs while closed. A Cloudflare Worker must send each alert when its event occurs.
+
+From a trusted Cloudflare Worker handler, send a POST to the Firebase Function with the Firebase user's UID and a relative app path:
+
+```js
+const pushResponse = await fetch(env.PUSH_WEBHOOK_URL, {
+  method: "POST",
+  headers: {
+    Authorization: `Bearer ${env.PUSH_WEBHOOK_SECRET}`,
+    "Content-Type": "application/json"
+  },
+  body: JSON.stringify({
+    uid: firebaseUserUid,
+    title: "Transit update",
+    body: "Your service has an update.",
+    url: "map"
+  })
+});
+if (!pushResponse.ok) throw new Error(`Push relay failed: ${pushResponse.status}`);
+```
+
+The Worker must obtain `firebaseUserUid` from its trusted event or account mapping. Do not expose an unauthenticated public endpoint that lets callers pick any UID and message. The webhook returns `{ "sent": 0, "failed": 0 }` when a user has no opted-in devices. Users can turn notifications off in the same menu; signing out removes the current device registration. Test on a real Android phone by sending an alert, closing the app tab, sending another alert, and tapping the notification to reopen the app.
 
 ### Optional Google sign-in and preferences
 
@@ -66,6 +97,10 @@ Transit and weather providers are also configured in `appsettings.json`, allowin
 4. Publish the app. For rules deployment with the Firebase CLI, authenticate to the intended project and run `firebase deploy --only firestore:rules --project YOUR_PROJECT_ID` from the repository root. App deployment does not publish database rules automatically.
 
 `firebase-config.js` loads the `Firebase` object from `appsettings.json` and overlays any `Firebase` keys in the optional `appsettings.{Environment}.json`, using the active Blazor environment. For example, put development overrides in `wwwroot/appsettings.Development.json`; omitted keys retain their base values.
+
+Google One Tap prompts signed-out visitors after Firebase restores its saved session. Set `Firebase.googleClientId` to the Google OAuth **Web client ID** associated with this Firebase project (ending in `.apps.googleusercontent.com`), available under **Authentication → Sign-in method → Google → Web SDK configuration**. Include `googleClientId` in `FIREBASE_CONFIG_JSON` for deployment. In Google Cloud's **Google Auth Platform → Clients**, add the deployed origin (scheme and hostname, without a path) and your localhost development origins (including the port) to that client's **Authorized JavaScript origins**. Use HTTPS in production. The client ID is public; do not add a client secret.
+
+One Tap loads on demand, prompts at most once per page load, and is skipped when `googleClientId` is empty or the visitor is already signed in. Opening the login dialog or signing out cancels it for the current page load. Its Google ID token is exchanged through Firebase, which updates the existing Blazor authentication state. The regular sign-in button remains available if the Google script is blocked, the prompt is dismissed, or the browser suppresses it. The browser controls the prompt's position and appearance when using FedCM. See [Google One Tap setup](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid).
 
 The web config is public by design. Never put service-account keys, OAuth client secrets, or Admin SDK credentials in this WASM application. Google manages Google credentials, Firebase Authentication manages the app session, and application preferences live in your Firebase project.
 
@@ -91,18 +126,31 @@ Enable **Google Calendar API** and **Google Tasks API** in the Google Cloud proj
 | Calendar | `https://www.googleapis.com/auth/calendar.calendarlist.readonly`, `https://www.googleapis.com/auth/calendar.events` |
 | Tasks | `https://www.googleapis.com/auth/tasks` |
 
-While the OAuth app is in testing, add the intended Google accounts as test users. Complete Google's applicable consent-screen verification before making these scopes available publicly. These integrations use the existing Firebase Google provider; no client secret, service account, or additional browser API key is needed. The Maps API key does not grant Calendar or Tasks access.
+While the OAuth app is in testing, add the intended Google accounts as test users. Complete Google's applicable consent-screen verification before making these scopes available publicly. Use the same OAuth Web client as Firebase sign-in. Its client secret belongs only in Firebase Secret Manager, never in the WASM app. The Maps API key does not grant Calendar or Tasks access.
 
-Connecting a service opens Google's permission window and reauthenticates the current Firebase user. Tokens stay in JavaScript memory, are cleared on sign-out/account changes, and must be renewed with **Reconnect** after expiry or a page reload. Failed saves are not replayed automatically. Updates use PATCH with the item's ETag to detect changes made elsewhere. Google service data is fetched directly from Google and is not copied into Firestore or browser storage.
+Connecting a service uses Google's authorization-code flow. The `googleConnection` callable Firebase Function verifies the Firebase user, allowed browser origin, granted scopes, and Google account identity before saving credentials in `users/{uid}/googleConnections/{service}`. Each record contains `accessToken`, `expiresAt`, `refreshToken`, `googleSubject`, and `scopes`. Firestore rules deny all browser access to these records, including access by their owner; only the backend reads or writes them. User preferences remain in `users/{uid}/data/settings`.
 
-Run the Google API boundary tests with `node --experimental-vm-modules --test tests/google-services/*.test.mjs`, and the .NET tests with `dotnet test tests/MyTransportAppWASM.Tests`. Before release, test with an authorized account: connect each service, cancel or deny a permission request, create/edit/delete a test event, complete/reopen a test task, and sign out during loading. Check that an account switch clears the previous user's content. Actual Google access requires the Cloud configuration above and real user consent.
+The backend uses Google's `expires_in` value (normally about one hour) as the expiry source. It refreshes within one minute of expiry, or after a Google API 401, and stores the new access token and any rotated refresh token. There is no application expiry for refresh tokens. An `invalid_grant` refresh response removes the unusable connection; network failures, rate limits, and server/configuration errors retain it for a later retry. Missing service permissions mark the connection as requiring consent. A Google API request is retried once after a 401; other failures and ambiguous failed saves are not replayed. Updates use PATCH with the item's ETag to detect changes made elsewhere.
+
+Only the short-lived access token is returned to the browser and cached locally. Signing out clears this browser cache; signing in again or opening the app on another device restores the account's connection from Firestore. Refresh tokens never enter browser storage or Blazor interop. Calendar and task data continues to be fetched directly from Google, without being copied into Firestore. Existing connections created before the backend was added require **Reconnect** once to obtain offline access. Google can still revoke or expire refresh tokens; external OAuth apps in Testing generally receive refresh tokens that expire after seven days for these scopes.
+
+#### Deploy automatic token renewal
+
+1. Enable the Firebase project's Blaze plan for Cloud Functions, and enable the Calendar and Tasks APIs. Use Node.js 24 for the `functions` package. From the repository root, run `pnpm --prefix functions install`.
+2. Configure that OAuth Web client's **Authorized JavaScript origins** with the exact production and development origins, including ports, without paths or trailing slashes. For GIS popup code exchange, also register these exact origins as **Authorized redirect URIs**. A site at `https://example.com/MyTransportApp/` uses `https://example.com` for both settings.
+3. Run `firebase functions:secrets:set GOOGLE_OAUTH_CLIENT_SECRET --project YOUR_PROJECT_ID` and enter the OAuth Web client secret when prompted. Do not paste it into `wwwroot/appsettings.json` or source control.
+4. Run `firebase deploy --only functions:googleConnection,firestore:rules --project YOUR_PROJECT_ID`. The CLI prompts for `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_ALLOWED_ORIGINS` (a comma-separated list of the same exact origins). It saves these non-secret parameters in an ignored `functions/.env.YOUR_PROJECT_ID` file. The function and browser SDK use Firebase's default `us-central1` region.
+5. Publish the WASM app and reconnect Calendar and Tasks once. Verify reopening after an hour, signing out and back in, and signing in on another device. If Google does not issue a refresh token, remove this app's connection in Google Account permissions and reconnect the services.
+
+The existing web deployment workflow tests the backend but does not deploy functions or secrets. Deploy the function before publishing the updated web app. See [Google's authorization-code flow](https://developers.google.com/identity/oauth2/web/guides/use-code-model), [refresh-token expiration](https://developers.google.com/identity/protocols/oauth2#expiration), and [Firebase function secrets](https://firebase.google.com/docs/functions/config-env#secret_parameters).
+
+Run the Google API boundary tests with `node --experimental-vm-modules --test tests/google-services/*.test.mjs`, backend tests with `pnpm --prefix functions test`, and the .NET tests with `dotnet test tests/MyTransportAppWASM.Tests`. Before release, test with an authorized account: connect each service, cancel or deny a permission request, create/edit/delete a test event, complete/reopen a test task, and sign out during loading. Check that an account switch clears the previous user's content. Actual Google access requires the Cloud configuration above and real user consent.
 
 References: [Calendar scopes](https://developers.google.com/workspace/calendar/api/auth), [Tasks scopes](https://developers.google.com/workspace/tasks/auth), [Keep API overview](https://developers.google.com/workspace/keep/api/guides).
 
 ### Authentication verification
 
 Run the .NET regression tests with `dotnet test tests/MyTransportAppWASM.Tests`.
-For Firestore rules, install Node.js and Java 21+, then run `npm ci` and `npm test` from `tests/firebase`. These tests use the local emulator with a demo project; they do not touch production data.
 
 Before enabling sign-in for users, check with two real Google accounts:
 
@@ -110,6 +158,7 @@ Before enabling sign-in for users, check with two real Google accounts:
 - Sign in, change theme/language, refresh, and sign in from another browser: saved preferences return.
 - Sign out while remaining on the current page: guest preferences return. Sign in as a second account: the first account's preferences are not copied.
 - Cancel the Google popup, block popups, or go offline: public pages remain usable and login can be retried.
+- With One Tap configured, open a signed-out page and choose a Google account: the profile and preferences update. Refresh while signed in: no prompt appears. Dismiss the prompt, open manual sign-in, or sign out: it does not reopen on route changes. Test script blocking and a rejected credential: the regular sign-in button still works.
 - A failed cloud save displays a notice; reconnecting and repeating the change saves it successfully.
 
 ## 📊 Data Sources

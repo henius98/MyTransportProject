@@ -4,41 +4,8 @@
 <CascadingAuthenticationState>
     <Router AppAssembly="@typeof(App).Assembly" OnNavigateAsync="PrepareRouteAsync">
         <Found Context="routeData">
-            <AuthorizeRouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)">
-                <Authorizing>
-                    <!-- Deliberately left empty to hide the default "Authorizing..." text -->
-                </Authorizing>
-                <NotAuthorized>
-                    @if (context.User.Identity?.IsAuthenticated != true)
-                    {
-                        <RedirectToLogin />
-                    }
-                    else
-                    {
-                        <div class="modal__backdrop" style="position: fixed; z-index: 3000; top: 0; left: 0; width: 100%; height: 100%;">
-                            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="access-denied-title">
-                                <div class="modal__icon">🔒</div>
-                                <h2 id="access-denied-title" class="fw-bold">Access Denied</h2>
-                                <p>You do not have the necessary permissions to view this page. Please contact your administrator if you believe this is an error.</p>
-                                
-                                <div class="stats mb-3">
-                                    <div class="stats__item">
-                                        <span class="stats__value">403</span>
-                                        <span class="stats__label">Forbidden</span>
-                                    </div>
-                                    <div class="stats__divider"></div>
-                                    <div class="stats__item">
-                                        <span class="stats__value">Private</span>
-                                        <span class="stats__label">Area</span>
-                                    </div>
-                                </div>
-
-                                <a class="btn btn--primary w-100" href="">Return to Home Page</a>
-                            </div>
-                        </div>
-                    }
-                </NotAuthorized>
-            </AuthorizeRouteView>
+            <!-- All routes are public, so no Authorizing message is shown; Firebase sign-in stays in the account UI. -->
+            <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
             <FocusOnNavigate RouteData="@routeData" Selector="h1" />
         </Found>
         <NotFound>

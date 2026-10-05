@@ -4,6 +4,8 @@
 @inject LanguageService Language
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IUserSettingsService UserSettings
+@inject IConfiguration Configuration
+@inject IJSRuntime JS
 @implements IDisposable
 
 <div class="page" style="@SidebarStyle">
@@ -58,6 +60,21 @@
 
     private void HandleAuthenticationChanged(Task<AuthenticationState> state) =>
         _ = InvokeAsync(ApplyPreferencesAsync);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("window.firebaseAuthInterop.initializeOneTap", Configuration["Firebase:googleClientId"]);
+            }
+            catch (JSException ex)
+            {
+                Console.Error.WriteLine($"Google One Tap could not start: {ex.Message}");
+            }
+        }
+    }
 
     private async Task ApplyPreferencesAsync()
     {

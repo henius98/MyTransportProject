@@ -7,14 +7,17 @@
 }
 else
 {
-    <div class="google-panel google-connection">
+    <div class="google-panel google-connection @(connected && Service == "calendar" ? "gcal-connected" : connected && Service == "tasks" ? "gtasks-connected" : "")">
+        @if (!(connected && (Service == "calendar" || Service == "tasks")))
+        {
         <div>
             <h2>@(connected ? $"Google {ServiceName}" : $"Connect Google {ServiceName}")</h2>
             <p class="google-muted">@(connected
-                ? "Access lasts for this browser session. Reconnect if Google asks you to renew it."
+                ? "Access is saved to your account and renewed automatically. Reconnect if Google asks you to grant permission again."
                 : $"Allow this app to view and edit your {PermissionDescription}. You choose whether to grant access in Google's window.")</p>
         </div>
-        <button type="button" class="btn btn--secondary" disabled="@connecting" @onclick="ConnectAsync">
+        }
+        <button type="button" class="btn btn--secondary @(connected && Service == "calendar" ? "gcal-reconnect" : connected && Service == "tasks" ? "gtasks-reconnect" : "")" disabled="@connecting" @onclick="ConnectAsync">
             @(connecting ? "Connecting…" : connected ? "Reconnect" : $"Connect {ServiceName}")
         </button>
     </div>
@@ -49,9 +52,9 @@ else
             var hasAccess = await Google.IsConnectedAsync(UserId, Service);
             if (!disposed) connected = hasAccess;
         }
-        catch (JSException)
+        catch (JSException ex)
         {
-            if (!disposed) error = "Could not check Google access. Try connecting again.";
+            if (!disposed) error = ex.Message.Split('\n')[0];
         }
         finally
         {

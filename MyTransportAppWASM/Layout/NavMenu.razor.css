@@ -138,6 +138,14 @@
   display: none;
 }
 
+.nav-scrollable nav {
+  min-height: 100%;
+}
+
+.nav-item--keep {
+  margin-top: auto;
+}
+
 .navbar-toggler:checked ~ .nav-scrollable {
   display: block;
 }

@@ -1,6 +1,11 @@
 
 namespace MyTransportAppWASM.Models
 {
+  public static class WeatherForecastLimits
+  {
+    public const int OpenMeteoForecastDays = 16;
+  }
+
   public record WeatherQuery
   {
     public double Latitude { get; set; }
@@ -21,6 +26,9 @@ namespace MyTransportAppWASM.Models
     public double? PrecipitationMm { get; init; }
     public double? ProbabilityOfRain { get; init; }
     public string? Wind { get; init; }
+    public double? UvIndex { get; init; }
+    public DateTimeOffset? Sunrise { get; init; }
+    public DateTimeOffset? Sunset { get; init; }
     public string? Summary { get; init; }
     public string? Icon { get; init; }
     public bool IsPlaceholder { get; init; } = false;
@@ -31,6 +39,7 @@ namespace MyTransportAppWASM.Models
     public string Provider { get; init; } = string.Empty;
     public string Source { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
+    public bool IsCached { get; init; }
     public DateTimeOffset RetrievedAt { get; init; } = DateTimeOffset.UtcNow;
     public IReadOnlyList<WeatherTimeSlice> Periods { get; init; } = Array.Empty<WeatherTimeSlice>();
     public Uri? Endpoint { get; init; }
@@ -39,7 +48,7 @@ namespace MyTransportAppWASM.Models
   public record WeatherPlanResult
   {
     public required WeatherQuery Query { get; init; }
-    public required IReadOnlyList<WeatherProviderResult> Baselines { get; init; }
+    public required IReadOnlyList<WeatherProviderResult> Realtime { get; init; }
     public required IReadOnlyList<WeatherProviderResult> Outlooks { get; init; }
     public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
   }
@@ -49,15 +58,24 @@ namespace MyTransportAppWASM.Models
     public string Name { get; set; } = string.Empty;
     public string Source { get; set; } = string.Empty;
     public string BaseUrl { get; set; } = string.Empty;
-    public Dictionary<string, string> Endpoints { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public string? ApiKey { get; set; }
     public bool Enabled { get; set; }
   }
 
+  public record MetMalaysiaWeatherProviderOptions : WeatherProviderOptions
+  {
+    public string Endpoints { get; set; } = string.Empty;
+  }
+
+  public record KeyedWeatherProviderOptions : WeatherProviderOptions
+  {
+    public Dictionary<string, string> Endpoints { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+  }
+
   public class WeatherOptions
   {
-    public WeatherProviderOptions MetMalaysia { get; set; } = new();
-    public WeatherProviderOptions OpenMeteo { get; set; } = new();
-    public WeatherProviderOptions SingaporeNEA { get; set; } = new();
+    public MetMalaysiaWeatherProviderOptions MetMalaysia { get; set; } = new();
+    public KeyedWeatherProviderOptions OpenMeteo { get; set; } = new();
+    public KeyedWeatherProviderOptions SingaporeNEA { get; set; } = new();
   }
 }

@@ -3,202 +3,439 @@
 @using System.Globalization
 @inject MyTransportAppWASM.Services.LanguageService Language
 @inject IWeatherPlannerService WeatherPlannerService
+@inject IJSRuntime JS
 
 <div class="card h-100">
-    <div class="d-flex align-items-center justify-content-between mb-3 border-bottom border-secondary border-opacity-10 pb-3">
-        <div>
-            <h3 class="m-0 fw-semibold" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(Options.Name ?? "Open-Meteo")</h3>
-            <div class="text-dim mt-1" style="font-size: 0.75rem;">
-                <i class="bi bi-box-arrow-up-right me-1"></i>@(Options.Source ?? "open-meteo.com")
-            </div>
-        </div>
-        <span class="badge @MyTransportAppWASM.Utils.WeatherUIHelper.GetStatusClass(Provider?.Status ?? "Loading")">@(Provider?.Status ?? "Loading")</span>
+  <div
+    class="d-flex align-items-center justify-content-between mb-3 border-bottom border-secondary border-opacity-10 pb-3">
+    <div>
+      <h3 class="m-0 fw-semibold" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(Options.Name ?? "Open-Meteo")
+      </h3>
+      <a class="text-dim mt-1 d-inline-block" style="font-size: 0.75rem;" href="@($"https://{SourceDomain}")"
+         target="_blank" rel="noopener noreferrer">
+        <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>@SourceDomain
+      </a>
     </div>
+    <WeatherStatusBadge Status="@(Provider?.Status ?? "Loading")" ProviderName="@(Options.Name ?? "Open-Meteo")"
+                        IsCached="@(Provider?.IsCached == true)" IsRefreshing="isLoading" OnRefresh="RefreshAsync" />
+  </div>
 
-    @if (isLoading)
-    {
-        <div class="d-flex justify-content-center p-4">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
-            </div>
-        </div>
-    }
-    else if (Provider?.Periods != null && Provider.Periods.Count > 1)
-    {
-        <div class="table-responsive mt-2 bg-secondary bg-opacity-10 rounded p-2">
-            <table class="table table-sm table-borderless align-middle mb-0" style="font-size: 0.95rem;">
-                <thead class="text-dim border-bottom border-secondary border-opacity-25" style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;">
-                    <tr>
-                        <th class="fw-semibold pb-2 ps-2">Date</th>
-                        <th class="fw-semibold pb-2 text-center"><i class="bi bi-thermometer-half me-1"></i>Temp</th>
-                        <th class="fw-semibold pb-2 text-center"><i class="bi bi-cloud-rain me-1"></i>Rain %</th>
-                        <th class="fw-semibold pb-2 text-end pe-2"><i class="bi bi-droplet me-1"></i>Precip</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var slice in Provider.Periods)
-                    {
-                        <tr class="border-bottom border-secondary border-opacity-10">
-                            <td class="py-2 ps-2">
-                                <div class="fw-semibold text-nowrap">
-                                    <i class="@slice.Icon me-1"></i>@(Language[slice.Summary ?? "N/A"])
-                                </div>
-                                <div class="text-dim" style="font-size: 0.75rem;">@slice.Time.ToLocalTime().ToString("ddd, dd MMM")</div>
-                            </td>
-                            <td class="py-2 text-center fw-medium text-danger">
-                                @(slice.TemperatureC.HasValue ? $"{slice.TemperatureC:0.#}°C" : "-")
-                            </td>
-                            <td class="py-2 text-center fw-medium">
-                                @if (slice.ProbabilityOfRain.HasValue)
-                                {
-                                    <span class="@(slice.ProbabilityOfRain > 0.4 ? "text-primary fw-bold" : "")">
-                                        @($"{slice.ProbabilityOfRain * 100:0}%")
-                                    </span>
-                                }
-                                else
-                                {
-                                    <span class="text-muted">-</span>
-                                }
-                            </td>
-                            <td class="py-2 text-end fw-medium text-info pe-2">
-                                @(slice.PrecipitationMm.HasValue ? $"{slice.PrecipitationMm:0.#} mm" : "-")
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
-    }
-    else if (Provider?.Periods != null && Provider.Periods.Count == 1)
-    {
-        var slice = Provider.Periods[0];
-        <div class="d-flex align-items-center p-3 rounded mb-2 mt-2 shadow-sm" style="background: var(--bs-body-bg); border: 1px solid var(--bs-border-color-translucent);">
-            <div class="me-4 fs-1">
-                <i class="@slice.Icon"></i>
-            </div>
-            <div class="flex-grow-1">
-                <div class="d-flex justify-content-end align-items-center mb-1">
-                    <span class="text-dim" style="font-size: 0.85rem;">@slice.Time.ToLocalTime().ToString("ddd, dd MMM HH:mm")</span>
+  @if (isLoading)
+  {
+    <div class="d-flex justify-content-center p-4">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+    </div>
+  }
+  else if (Provider?.Periods != null && (Provider.Periods.Count > 1 || FetchOutlook && Provider.Periods.Count > 0))
+  {
+    <div class="table-responsive mt-2 bg-secondary bg-opacity-10 rounded p-2">
+      <table class="table table-sm table-borderless align-middle mb-0" style="font-size: 0.95rem;">
+        <thead class="text-dim border-bottom border-secondary border-opacity-25"
+               style="font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em;">
+          <tr>
+            <th class="fw-semibold pb-2 ps-2">Date</th>
+            <th class="fw-semibold pb-2 text-center"><i class="bi bi-thermometer-half me-1"></i>@(FetchOutlook ? "High / low" : "Temp")</th>
+            <th class="fw-semibold pb-2 text-center" title="@(FetchOutlook ? "Highest hourly rain chance for the day" : "Hourly rain chance")"><i class="bi bi-cloud-rain me-1"></i>Rain chance</th>
+            <th class="fw-semibold pb-2 text-end pe-2" title="@(FetchOutlook ? "Estimated precipitation for the whole day" : "Hourly precipitation")"><i class="bi bi-droplet me-1"></i>@(FetchOutlook ? "Precip total" : "Precip")</th>
+          </tr>
+        </thead>
+        <tbody>
+          @foreach (var slice in Provider.Periods)
+          {
+            <tr
+              class="border-bottom border-secondary border-opacity-10 @(FetchOutlook && !slice.IsPlaceholder ? "forecast-day" : "")"
+              @onclick="() => ShowHourlyForecastAsync(slice)">
+              <td class="py-2 ps-2">
+                <div class="fw-semibold text-nowrap">
+                  <i class="@slice.Icon me-1"></i>@(Language[slice.Summary ?? "N/A"])
                 </div>
-                
-                <div class="fw-medium mb-2 fs-5" style="letter-spacing: -0.01em;">@(Language[slice.Summary ?? "N/A"])</div>
-                
-                <div class="d-flex flex-wrap gap-3 text-dim fw-medium" style="font-size: 0.9rem;">
-                    @if (slice.TemperatureC.HasValue)
-                    {
-                        <span class="text-danger"><i class="bi bi-thermometer-half me-1"></i>@($"{slice.TemperatureC:0.#}°C")</span>
-                    }
-                    @if (slice.ProbabilityOfRain.HasValue)
-                    {
-                        <span class="@(slice.ProbabilityOfRain > 0.4 ? "text-primary fw-bold" : "")">
-                            <i class="bi bi-cloud-rain me-1"></i>@($"{slice.ProbabilityOfRain * 100:0}%")
-                        </span>
-                    }
-                    @if (slice.PrecipitationMm.HasValue)
-                    {
-                        <span class="text-info"><i class="bi bi-droplet me-1"></i>@($"{slice.PrecipitationMm:0.#} mm")</span>
-                    }
+                @if (FetchOutlook && !slice.IsPlaceholder)
+                {
+                  <button type="button" class="forecast-day-button text-dim" aria-haspopup="dialog"
+                          aria-controls="@hourlyDialogId"
+                          aria-label="@($"View hourly forecast for {MalaysiaTime.Convert(slice.Time):dddd, dd MMMM yyyy}")"
+                          @onclick="() => ShowHourlyForecastAsync(slice)" @onclick:stopPropagation="true">
+                    @MalaysiaTime.Convert(slice.Time).ToString("ddd, dd MMM")
+                    <i class="bi bi-chevron-right ms-1" aria-hidden="true"></i>
+                  </button>
+                }
+                else
+                {
+                  <div class="text-dim" style="font-size: 0.75rem;">@MalaysiaTime.Convert(slice.Time).ToString("ddd, dd MMM")
+                  </div>
+                }
+                @if (FetchOutlook && (!string.IsNullOrWhiteSpace(slice.Wind) || slice.UvIndex.HasValue))
+                {
+                  <div class="forecast-metrics" aria-label="Daily conditions">
                     @if (!string.IsNullOrWhiteSpace(slice.Wind))
                     {
-                        <span><i class="bi bi-wind me-1"></i>@slice.Wind</span>
+                      <span class="forecast-metric forecast-wind">
+                        <i class="bi bi-wind" aria-hidden="true"></i>
+                        <span class="forecast-metric-label">Wind max</span>
+                        <strong>@slice.Wind</strong>
+                      </span>
                     }
-                </div>
-            </div>
+                    @if (slice.UvIndex.HasValue)
+                    {
+                      <span class="forecast-metric forecast-uv">
+                        <i class="bi bi-sun" aria-hidden="true"></i>
+                        <span class="forecast-metric-label">UV max</span>
+                        <strong>@($"{slice.UvIndex:0.#}")</strong>
+                      </span>
+                    }
+                  </div>
+                }
+              </td>
+              <td class="py-2 text-center fw-medium text-danger">
+                @if (FetchOutlook && slice.MinTemperatureC.HasValue)
+                {
+                  <div>@(slice.MaxTemperatureC.HasValue ? $"{slice.MaxTemperatureC:0.#}°C" : "-")</div>
+                  <div class="text-dim small">Low @($"{slice.MinTemperatureC:0.#}°C")</div>
+                }
+                else
+                {
+                  @(slice.TemperatureC.HasValue ? $"{slice.TemperatureC:0.#}°C" : "-")
+                }
+              </td>
+              <td class="py-2 text-center fw-medium">
+                @if (slice.ProbabilityOfRain.HasValue)
+                {
+                  <span class="@(slice.ProbabilityOfRain > 0.4 ? "text-primary fw-bold" : "")">
+                    @($"{slice.ProbabilityOfRain * 100:0}%")
+                  </span>
+                }
+                else
+                {
+                  <span class="text-muted">-</span>
+                }
+              </td>
+              <td class="py-2 text-end fw-medium text-info pe-2">
+                @(slice.PrecipitationMm.HasValue ? $"{slice.PrecipitationMm:0.#} mm" : "-")
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  }
+  else if (Provider?.Periods != null && Provider.Periods.Count == 1)
+  {
+    var slice = Provider.Periods[0];
+    <div class="d-flex align-items-center p-3 rounded mb-2 mt-2 shadow-sm"
+         style="background: var(--bs-body-bg); border: 1px solid var(--bs-border-color-translucent);">
+      <div class="me-4 fs-1">
+        <i class="@slice.Icon"></i>
+      </div>
+      <div class="flex-grow-1">
+        <div class="d-flex justify-content-end align-items-center mb-1">
+          <span class="text-dim" style="font-size: 0.85rem;">@MalaysiaTime.Convert(slice.Time).ToString("ddd, dd MMM HH:mm")</span>
         </div>
-    }
+
+        <div class="fw-medium mb-2 fs-5" style="letter-spacing: -0.01em;">@(Language[slice.Summary ?? "N/A"])</div>
+
+        <div class="d-flex flex-wrap gap-3 text-dim fw-medium" style="font-size: 0.9rem;">
+          @if (slice.TemperatureC.HasValue)
+          {
+            <span class="text-danger"><i class="bi bi-thermometer-half me-1"></i>@($"{slice.TemperatureC:0.#}°C")</span>
+          }
+          @if (slice.ProbabilityOfRain.HasValue)
+          {
+            <span class="@(slice.ProbabilityOfRain > 0.4 ? "text-primary fw-bold" : "")">
+              <i class="bi bi-cloud-rain me-1"></i>@($"{slice.ProbabilityOfRain * 100:0}%")
+            </span>
+          }
+          @if (slice.PrecipitationMm.HasValue)
+          {
+            <span class="text-info"><i class="bi bi-droplet me-1"></i>@($"{slice.PrecipitationMm:0.#} mm")</span>
+          }
+          @if (!string.IsNullOrWhiteSpace(slice.Wind))
+          {
+            <span><i class="bi bi-wind me-1"></i>@slice.Wind</span>
+          }
+        </div>
+      </div>
+    </div>
+  }
 </div>
 
+@if (FetchOutlook)
+{
+  <dialog id="@hourlyDialogId" class="hourly-forecast-dialog" closedby="any"
+          aria-labelledby="@(hourlyDialogId + "-title")">
+    <div class="d-flex justify-content-between align-items-start gap-3 p-3 border-bottom">
+      <div>
+        <h4 id="@(hourlyDialogId + "-title")" class="fs-5 mb-1">Hourly forecast · @selectedDate?.ToString("dddd, dd MMMM yyyy")</h4>
+        <div class="small text-dim">@Query.PlaceName · @MalaysiaTime.DisplayName</div>
+        @if (isHourlyCached && !isHourlyLoading)
+        {
+          <span class="badge bg-secondary mt-2">Cached forecast</span>
+        }
+      </div>
+      <div class="d-flex align-items-center gap-2 flex-shrink-0">
+        <button type="button" class="btn btn-sm btn-outline-primary" disabled="@isHourlyLoading"
+                title="Fetch latest hourly forecast from Open-Meteo" @onclick="RefreshHourlyForecastAsync">
+          <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>Refresh
+        </button>
+        <form method="dialog">
+          <button type="submit" class="btn btn-sm btn-outline-secondary fs-5 lh-1" aria-label="Close hourly forecast"
+                  autofocus>
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </form>
+      </div>
+    </div>
+    @if (selectedDay is { } day && (day.Sunrise.HasValue || day.Sunset.HasValue))
+    {
+      <div class="d-flex flex-wrap gap-3 px-3 py-2 border-bottom small text-dim">
+        @if (day.Sunrise.HasValue)
+        {
+          <span><i class="bi bi-sunrise me-1" aria-hidden="true"></i>Sunrise @MalaysiaTime.Convert(day.Sunrise.Value).ToString("HH:mm")</span>
+        }
+        @if (day.Sunset.HasValue)
+        {
+          <span><i class="bi bi-sunset me-1" aria-hidden="true"></i>Sunset @MalaysiaTime.Convert(day.Sunset.Value).ToString("HH:mm")</span>
+        }
+        <span>@MalaysiaTime.DisplayName</span>
+      </div>
+    }
+    <div class="hourly-forecast-body p-3" aria-busy="@isHourlyLoading.ToString().ToLowerInvariant()">
+      @if (isHourlyLoading)
+      {
+        <div class="d-flex align-items-center justify-content-center gap-2 p-4" role="status">
+          <span class="spinner-border spinner-border-sm text-primary" aria-hidden="true"></span>
+          Loading hourly forecast…
+        </div>
+      }
+      else if (hourlyPeriods.Count == 0)
+      {
+        <div role="status">
+          <p>Hourly forecast is unavailable for this date. Please try again.</p>
+          <button type="button" class="btn btn-outline-primary btn-sm" @onclick="RefreshHourlyForecastAsync">Retry</button>
+        </div>
+      }
+      else
+      {
+        <div class="table-responsive">
+          <table class="table table-sm align-middle mb-0 hourly-forecast-table">
+            <caption class="visually-hidden">Open-Meteo hourly forecast in @MalaysiaTime.DisplayName</caption>
+            <thead>
+              <tr>
+                <th scope="col">Time</th>
+                <th scope="col">Weather</th>
+                <th scope="col" class="text-end">Temp</th>
+                <th scope="col" class="text-end">Rain chance</th>
+                <th scope="col" class="text-end">Precip</th>
+                <th scope="col" class="text-end">Wind</th>
+              </tr>
+            </thead>
+            <tbody>
+              @foreach (var hour in hourlyPeriods)
+              {
+                <tr>
+                  <th scope="row">@MalaysiaTime.Convert(hour.Time).ToString("HH:mm")</th>
+                  <td><i class="@hour.Icon me-1" aria-hidden="true"></i>@Language[hour.Summary ?? "N/A"]</td>
+                  <td class="text-end text-danger">@(hour.TemperatureC.HasValue ? $"{hour.TemperatureC:0.#}°C" : "-")</td>
+                  <td class="text-end">@(hour.ProbabilityOfRain.HasValue ? $"{hour.ProbabilityOfRain * 100:0}%" : "-")</td>
+                  <td class="text-end text-info">@(hour.PrecipitationMm.HasValue ? $"{hour.PrecipitationMm:0.#} mm" : "-")
+                  </td>
+                  <td class="text-end">@(hour.Wind ?? "-")</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </div>
+  </dialog>
+}
+
 @code {
-    [Parameter, EditorRequired]
-    public required WeatherProviderOptions Options { get; set; }
+  [Parameter, EditorRequired]
+  public required KeyedWeatherProviderOptions Options { get; set; }
 
-    [Parameter, EditorRequired]
-    public required WeatherQuery Query { get; set; }
+  [Parameter, EditorRequired]
+  public required WeatherQuery Query { get; set; }
 
-    [Parameter]
-    public string Label { get; set; } = "Baseline";
+  [Parameter]
+  public string Label { get; set; } = "Realtime";
 
-    [Parameter]
-    public bool FetchOutlook { get; set; } = false;
+  [Parameter]
+  public bool FetchOutlook { get; set; } = false;
 
-    private WeatherProviderResult? Provider;
-    private bool isLoading = true;
-    private string? lastUrl;
+  private WeatherProviderResult? Provider;
+  private bool isLoading = true;
+  private string? lastUrl;
+  private string SourceDomain => string.IsNullOrWhiteSpace(Options.Source) ? "open-meteo.com" : Options.Source;
+  private readonly string hourlyDialogId = $"open-meteo-hourly-{Guid.NewGuid():N}";
+  private DateTime? selectedDate;
+  private WeatherTimeSlice? selectedDay;
+  private IReadOnlyList<WeatherTimeSlice> hourlyPeriods = Array.Empty<WeatherTimeSlice>();
+  private bool isHourlyLoading;
+  private bool isHourlyCached;
+  private int hourlyRequestId;
 
-    protected override async Task OnParametersSetAsync()
+  protected override async Task OnParametersSetAsync()
+  {
+    try
     {
-        try
+      if (Options.Enabled && !string.IsNullOrWhiteSpace(Options.BaseUrl))
+      {
+        string endpointPath = string.Empty;
+        if (FetchOutlook && Options.Endpoints != null && Options.Endpoints.TryGetValue("Outlook", out string? outlookPath))
         {
-            if (Options.Enabled && !string.IsNullOrWhiteSpace(Options.BaseUrl))
-            {
-                string endpointPath = string.Empty;
-                if (FetchOutlook && Options.Endpoints != null && Options.Endpoints.TryGetValue("Outlook", out string? outlookPath))
-                {
-                    endpointPath = outlookPath;
-                }
-                else if (Options.Endpoints != null && Options.Endpoints.TryGetValue("Baseline", out string? baselinePath))
-                {
-                    endpointPath = baselinePath;
-                }
-
-                string fullUrl = Options.BaseUrl + endpointPath;
-                Uri uri = BuildUri(fullUrl, Query);
-                
-                if (lastUrl == uri.AbsoluteUri)
-                    return; // Prevent duplicate fetches on parent re-render
-                
-                lastUrl = uri.AbsoluteUri;
-                isLoading = true;
-
-                Provider = await WeatherPlannerService.FetchProviderDataAsync(Options, uri, Label);
-
-                // Filter logic
-                if (!FetchOutlook && Provider.Periods.Count > 1)
-                {
-                    var now = DateTimeOffset.UtcNow;
-                    var closest = Provider.Periods.MinBy(p => Math.Abs((p.Time - now).Ticks));
-                    if (closest != null)
-                        Provider = Provider with { Periods = new List<WeatherTimeSlice> { closest } };
-                }
-                else if (FetchOutlook && Provider.Periods.Count > 0)
-                {
-                    var now = DateTimeOffset.UtcNow;
-                    var sortedPeriods = Provider.Periods.Where(p => p.Time.Date >= now.Date).OrderBy(p => p.Time).Take(14).ToList();
-                    Provider = Provider with { Periods = sortedPeriods };
-                }
-            }
+          endpointPath = outlookPath;
         }
-        finally
+        else if (Options.Endpoints != null && Options.Endpoints.TryGetValue("Realtime", out string? realtimePath))
         {
-            isLoading = false;
+          endpointPath = realtimePath;
         }
+
+        string fullUrl = Options.BaseUrl + endpointPath;
+        Uri uri = BuildUri(fullUrl, Query);
+
+        if (lastUrl == uri.AbsoluteUri)
+          return; // Prevent duplicate fetches on parent re-render
+
+        lastUrl = uri.AbsoluteUri;
+        isLoading = true;
+        hourlyRequestId++;
+        if (selectedDate.HasValue)
+        {
+          selectedDate = null;
+          selectedDay = null;
+          await JS.InvokeVoidAsync("dialogHelper.close", hourlyDialogId);
+        }
+
+        await LoadProviderAsync(uri);
+      }
+    }
+    finally
+    {
+      isLoading = false;
+    }
+  }
+
+  private async Task ShowHourlyForecastAsync(WeatherTimeSlice slice)
+  {
+    if (!FetchOutlook || slice.IsPlaceholder)
+      return;
+
+    selectedDate = MalaysiaTime.Convert(slice.Time).Date;
+    selectedDay = slice;
+    hourlyPeriods = Array.Empty<WeatherTimeSlice>();
+    isHourlyCached = false;
+    isHourlyLoading = true;
+    await JS.InvokeVoidAsync("dialogHelper.showModal", hourlyDialogId);
+    await LoadHourlyForecastAsync();
+  }
+
+  private Task RefreshHourlyForecastAsync() => LoadHourlyForecastAsync(forceRefresh: true);
+
+  private async Task LoadHourlyForecastAsync(bool forceRefresh = false)
+  {
+    if (!selectedDate.HasValue)
+      return;
+
+    var date = selectedDate.Value;
+    var requestId = ++hourlyRequestId;
+    isHourlyLoading = true;
+    hourlyPeriods = Array.Empty<WeatherTimeSlice>();
+    isHourlyCached = false;
+    try
+    {
+      if (!Options.Endpoints.TryGetValue("Hourly", out var hourlyPath))
+        return;
+
+      var template = (Options.BaseUrl + hourlyPath)
+        .Replace("{date}", date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
+        .Replace("{timezone}", Uri.EscapeDataString(MalaysiaTime.IanaTimeZone), StringComparison.OrdinalIgnoreCase);
+      var result = await WeatherPlannerService.FetchProviderDataAsync(
+        Options, BuildUri(template, Query), "Outlook", forceRefresh: forceRefresh);
+
+      if (requestId == hourlyRequestId)
+      {
+        isHourlyCached = result.IsCached;
+        hourlyPeriods = result.Periods
+          .Where(p => !p.IsPlaceholder && MalaysiaTime.Convert(p.Time).Date == date)
+          .OrderBy(p => p.Time).ToList();
+      }
+    }
+    finally
+    {
+      if (requestId == hourlyRequestId)
+        isHourlyLoading = false;
+    }
+  }
+
+  private async Task RefreshAsync()
+  {
+    if (Provider?.IsCached != true || lastUrl == null || isLoading)
+      return;
+
+    isLoading = true;
+    try
+    {
+      await LoadProviderAsync(new Uri(lastUrl, UriKind.Absolute), forceRefresh: true);
+    }
+    finally
+    {
+      isLoading = false;
+    }
+  }
+
+  private async Task LoadProviderAsync(Uri uri, bool forceRefresh = false)
+  {
+    Provider = await WeatherPlannerService.FetchProviderDataAsync(
+        Options,
+        uri,
+        Label,
+        forceRefresh: forceRefresh);
+
+    // Filter logic
+    if (!FetchOutlook && Provider.Periods.Count > 1)
+    {
+      var now = MalaysiaTime.Now;
+      var closest = Provider.Periods.MinBy(p => Math.Abs((p.Time - now).Ticks));
+      if (closest != null)
+        Provider = Provider with { Periods = new List<WeatherTimeSlice> { closest } };
+    }
+    else if (FetchOutlook && Provider.Periods.Count > 0)
+    {
+      var now = MalaysiaTime.Now;
+      var sortedPeriods = Provider.Periods.Where(p => MalaysiaTime.Convert(p.Time).Date >= now.Date).OrderBy(p => p.Time)
+        .Take(WeatherForecastLimits.OpenMeteoForecastDays).ToList();
+      Provider = Provider with { Periods = sortedPeriods };
+    }
+  }
+
+  private Uri BuildUri(string template, WeatherQuery query)
+  {
+    var formatted = template
+        .Replace("{lat}", query.Latitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
+        .Replace("{lon}", query.Longitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
+
+    if (formatted.Contains("{forecast_hours}", StringComparison.OrdinalIgnoreCase))
+    {
+      formatted = formatted.Replace("{forecast_hours}", "1", StringComparison.OrdinalIgnoreCase);
     }
 
-    private Uri BuildUri(string template, WeatherQuery query)
+    if (formatted.Contains("{forecast_days}", StringComparison.OrdinalIgnoreCase))
     {
-        var formatted = template
-            .Replace("{lat}", query.Latitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
-            .Replace("{lon}", query.Longitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
-
-        if (formatted.Contains("{forecast_hours}", StringComparison.OrdinalIgnoreCase))
-        {
-            formatted = formatted.Replace("{forecast_hours}", "1", StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (formatted.Contains("{forecast_days}", StringComparison.OrdinalIgnoreCase))
-        {
-            int days = 7;
-            if (query.Return.HasValue)
-            {
-                var timeSpan = query.Return.Value.Date - DateTimeOffset.UtcNow.Date;
-                days = Math.Max(1, Math.Min(16, timeSpan.Days + 2));
-            }
-            formatted = formatted.Replace("{forecast_days}", days.ToString(), StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (!string.IsNullOrWhiteSpace(Options.ApiKey))
-            formatted = formatted.Replace("{key}", Options.ApiKey, StringComparison.OrdinalIgnoreCase).Replace("{apiKey}", Options.ApiKey, StringComparison.OrdinalIgnoreCase);
-
-        return new Uri(formatted, UriKind.Absolute);
+      int days = 7;
+      if (query.Return.HasValue)
+      {
+        var timeSpan = MalaysiaTime.Convert(query.Return.Value).Date - MalaysiaTime.Today;
+        days = Math.Max(1, Math.Min(WeatherForecastLimits.OpenMeteoForecastDays, timeSpan.Days + 2));
+      }
+      formatted = formatted.Replace("{forecast_days}", days.ToString(), StringComparison.OrdinalIgnoreCase);
     }
+
+    if (!string.IsNullOrWhiteSpace(Options.ApiKey))
+      formatted = formatted.Replace("{key}", Options.ApiKey, StringComparison.OrdinalIgnoreCase).Replace("{apiKey}",
+Options.ApiKey, StringComparison.OrdinalIgnoreCase);
+
+    return new Uri(formatted, UriKind.Absolute);
+  }
 }

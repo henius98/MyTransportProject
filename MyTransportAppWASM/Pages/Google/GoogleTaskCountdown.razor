@@ -1,0 +1,130 @@
+@using System.Globalization
+@implements IDisposable
+@inject GoogleWorkspaceService Workspace
+
+<section class="task-countdown" aria-labelledby="today-countdown-title">
+  <h3 id="today-countdown-title"><span class="bi bi-clock" aria-hidden="true"></span> End of today</h3>
+  @{
+    var untilMidnight = now.Date.AddDays(1) - now;
+  }
+  <div class="task-countdown-clock task-countdown-clock--today" role="timer" aria-label="Time until midnight in Malaysia">
+    <span><strong>@untilMidnight.Hours.ToString("D2")</strong><small>hrs</small></span>
+    <span><strong>@untilMidnight.Minutes.ToString("D2")</strong><small>min</small></span>
+    <span><strong>@untilMidnight.Seconds.ToString("D2")</strong><small>sec</small></span>
+  </div>
+  <p>End of Today · @MalaysiaTime.DisplayName</p>
+</section>
+
+<section class="task-countdown" aria-labelledby="task-countdown-title" aria-busy="@loading">
+  <h3 id="task-countdown-title"><span class="bi bi-hourglass-split" aria-hidden="true"></span> Next task</h3>
+  @if (loading)
+  {
+    <p role="status">Loading tasks…</p>
+  }
+  else if (error != null)
+  {
+    <p role="status">@error</p>
+  }
+  else if (!connected)
+  {
+    <p>Connect Google Tasks to see your next due task.</p>
+  }
+  else if (NextTask is { } task)
+  {
+    var remaining = task.DueDate!.Value - now;
+    <strong class="task-countdown-name">@(string.IsNullOrWhiteSpace(task.Title) ? "Untitled task" : task.Title)</strong>
+    @if (remaining <= TimeSpan.Zero)
+    {
+      <div class="task-countdown-today">Due today</div>
+    }
+    else
+    {
+      <div class="task-countdown-clock" role="timer" aria-label="Time until task due date">
+        <span><strong>@remaining.Days</strong><small>days</small></span>
+        <span><strong>@remaining.Hours.ToString("D2")</strong><small>hrs</small></span>
+        <span><strong>@remaining.Minutes.ToString("D2")</strong><small>min</small></span>
+        <span><strong>@remaining.Seconds.ToString("D2")</strong><small>sec</small></span>
+      </div>
+    }
+    <p>Due <time
+      datetime="@task.DueDate.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)">@task.DueDate.Value.ToString("ddd, MMM d, yyyy", CultureInfo.CurrentCulture)</time></p>
+    }
+    else
+    {
+      <p>No upcoming tasks. Add a due date to a task to start a countdown.</p>
+    }
+    <a href="/google/tasks">@(connected ? "View tasks" : "Connect Google Tasks") <span class="bi bi-arrow-right"
+                                                                                         aria-hidden="true"></span></a>
+    </section>
+
+@code {
+  [Parameter, EditorRequired] public string UserId { get; set; } = string.Empty;
+  [Parameter] public int RefreshVersion { get; set; }
+
+  private GoogleTask[] tasks = [];
+  private DateTime now = MalaysiaTime.Now.DateTime;
+  private bool loading = true;
+  private bool connected;
+  private string? error;
+  private readonly CancellationTokenSource lifetime = new();
+
+  private GoogleTask? NextTask => tasks.Where(task => task.Status != "completed" && task.DueDate >= now.Date)
+      .OrderBy(task => task.DueDate).FirstOrDefault();
+
+  protected override async Task OnParametersSetAsync()
+  {
+    loading = true;
+    error = null;
+    tasks = [];
+    try
+    {
+      connected = await Workspace.IsConnectedAsync(UserId, "tasks");
+      if (!connected || lifetime.IsCancellationRequested) return;
+      var lists = await Workspace.ListTaskListsAsync(UserId);
+      var loaded = await Task.WhenAll(lists.Select(list => Workspace.ListTasksAsync(UserId, list.Id)));
+      if (!lifetime.IsCancellationRequested) tasks = loaded.SelectMany(list => list).ToArray();
+    }
+    catch (Exception)
+    {
+      error = "Could not load tasks. Refresh the calendar or reconnect Google Tasks to try again.";
+    }
+    finally
+    {
+      now = MalaysiaTime.Now.DateTime;
+      loading = false;
+    }
+  }
+
+  protected override void OnAfterRender(bool firstRender)
+  {
+    if (firstRender) _ = RunClockAsync();
+  }
+
+  private async Task RunClockAsync()
+  {
+    var cancellationToken = lifetime.Token;
+    using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+    try
+    {
+      while (await timer.WaitForNextTickAsync(cancellationToken))
+      {
+        await InvokeAsync(() =>
+        {
+          if (lifetime.IsCancellationRequested) return;
+          now = MalaysiaTime.Now.DateTime;
+          StateHasChanged();
+        });
+      }
+    }
+    catch (OperationCanceledException)
+    {
+      // Stop the clock when the calendar sidebar is closed or the page is left.
+    }
+  }
+
+  public void Dispose()
+  {
+    lifetime.Cancel();
+    lifetime.Dispose();
+  }
+}

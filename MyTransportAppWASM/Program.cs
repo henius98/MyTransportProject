@@ -19,6 +19,7 @@ namespace MyTransportAppWASM
       builder.Services.AddScoped<IBrowserStorageService, BrowserStorageService>();
 
       builder.Services.Configure<WeatherOptions>(builder.Configuration.GetSection("WeatherProviders"));
+      builder.Services.Configure<CacheExpirationOptions>(builder.Configuration.GetSection(CacheExpirationOptions.SectionName));
       builder.Services.AddMemoryCache();
 
       builder.Services.AddSingleton<IFormFactor, FormFactor>();
@@ -29,6 +30,7 @@ namespace MyTransportAppWASM
         client.Timeout = TimeSpan.FromSeconds(15);
 
       builder.Services.AddHttpClient<IGtfsService, GtfsService>(ConfigureExternalApiClient);
+      builder.Services.AddHttpClient<ITransportStaticDataService, TransportStaticDataService>(ConfigureExternalApiClient);
 
       builder.Services.AddTransient<WeatherRateLimitingHandler>();
       builder.Services.AddHttpClient<IWeatherPlannerService, WeatherPlannerService>(ConfigureExternalApiClient)

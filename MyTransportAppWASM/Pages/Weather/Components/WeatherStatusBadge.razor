@@ -1,0 +1,33 @@
+@if (IsCached)
+{
+  <button type="button"
+          class="badge badge--action @WeatherUIHelper.GetStatusClass(Status)"
+          disabled="@IsRefreshing"
+          title="Refresh latest data from @ProviderName"
+          aria-label="Refresh latest data from @ProviderName"
+          aria-live="polite"
+          @onclick="OnRefresh">
+    <i class="bi bi-arrow-clockwise me-1" aria-hidden="true"></i>@Status
+  </button>
+}
+else
+{
+  <span class="badge @WeatherUIHelper.GetStatusClass(Status)" aria-live="polite">@Status</span>
+}
+
+@code {
+  [Parameter]
+  public string Status { get; set; } = "Loading";
+
+  [Parameter]
+  public string ProviderName { get; set; } = "weather provider";
+
+  [Parameter]
+  public bool IsCached { get; set; }
+
+  [Parameter]
+  public bool IsRefreshing { get; set; }
+
+  [Parameter]
+  public EventCallback OnRefresh { get; set; }
+}

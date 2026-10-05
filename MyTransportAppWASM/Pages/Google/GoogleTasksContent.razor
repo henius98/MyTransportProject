@@ -2,152 +2,272 @@
 @implements IDisposable
 @inject GoogleWorkspaceService Workspace
 
-<div class="google-toolbar">
-    <div class="google-field">
-        <label for="google-task-list-choice">Task list</label>
-        <select id="google-task-list-choice" class="form-select" @bind:get="listId" @bind:set="ChangeListAsync" disabled="@(busy || taskLists.Count == 0)">
-            @foreach (var list in taskLists)
-            {
-                <option value="@list.Id">@list.Title</option>
-            }
-        </select>
-    </div>
-    <button type="button" class="btn btn--secondary" @onclick="RefreshAsync" disabled="@busy">@(busy ? "Loading…" : "Refresh tasks")</button>
-    <a href="https://tasks.google.com/" target="_blank" rel="noopener noreferrer">Open Google Tasks ↗</a>
-</div>
-<p class="google-muted">Refreshing reloads the selected task's details.</p>
-@if (!string.IsNullOrEmpty(error))
-{
-    <p class="google-error" role="alert">@error</p>
-}
-@if (!string.IsNullOrEmpty(status))
-{
-    <p class="google-status" role="status">@status</p>
-}
-
-<div class="google-grid" aria-busy="@busy">
-    <section class="google-panel" aria-labelledby="google-tasks-title">
-        <div class="google-toolbar">
-            <h2 id="google-tasks-title">Your tasks</h2>
-            <button type="button" class="btn btn--primary" @onclick="NewTask" disabled="@(busy || string.IsNullOrEmpty(listId))">New task</button>
+<div class="google-tasks-dashboard" aria-busy="@busy">
+    <header class="tasks-topbar">
+        <div class="tasks-brand">
+            <span class="tasks-brand-icon bi bi-check2-circle" aria-hidden="true"></span>
+            <span>Tasks</span>
         </div>
-        @if (busy && tasks.Count == 0)
-        {
-            <p class="google-empty" role="status">Loading your tasks…</p>
-        }
-        else if (taskLists.Count == 0)
-        {
-            <p class="google-empty">No task lists are available. Create a list in Google Tasks, then refresh here.</p>
-        }
-        else if (tasks.Count == 0)
-        {
-            <p class="google-empty">This list has no tasks yet.</p>
-        }
-        else
-        {
-            <ul class="google-list">
-                @foreach (var task in tasks)
-                {
-                    <li class="google-list-item" @key="task.Id">
-                        <button type="button" class="btn btn--secondary" @onclick="() => SelectTask(task)" disabled="@busy" aria-pressed="@(selectedTask?.Id == task.Id)">@(string.IsNullOrWhiteSpace(task.Title) ? "Untitled task" : task.Title)</button>
-                        <p class="google-muted">
-                            @(task.Status == "completed" ? "Completed" : "To do")
-                            @if (DueDate(task.Due) is DateTime date)
-                            {
-                                <span> · Due @date.ToString("d")</span>
-                            }
-                            @if (!string.IsNullOrEmpty(task.Parent))
-                            {
-                                <span> · Subtask</span>
-                            }
-                            @if (task.AssignmentInfo != null)
-                            {
-                                <span> · Assigned task</span>
-                            }
-                        </p>
-                    </li>
-                }
-            </ul>
-        }
-    </section>
+        <div class="tasks-topbar-actions">
+            <button type="button" class="tasks-icon-button bi bi-arrow-clockwise" title="Refresh tasks" aria-label="Refresh tasks" @onclick="RefreshAsync" disabled="@busy"></button>
+            <a class="tasks-icon-button bi bi-box-arrow-up-right" href="https://tasks.google.com/" target="_blank" rel="noopener noreferrer" title="Open Google Tasks" aria-label="Open Google Tasks"></a>
+            <a class="tasks-back-link" href="/google">Google services</a>
+        </div>
+    </header>
 
-    <section class="google-panel" aria-labelledby="google-task-editor-title">
-        <h2 id="google-task-editor-title">@(selectedTask == null ? "New task" : "Task details")</h2>
-        @if (selectedTask?.AssignmentInfo != null)
-        {
-            <p class="google-muted">Manage this assigned task in Google Tasks or the app where it was assigned.</p>
-        }
-        @if (!string.IsNullOrEmpty(selectedTask?.WebViewLink))
-        {
-            <p><a href="@selectedTask.WebViewLink" target="_blank" rel="noopener noreferrer">Open this task in Google ↗</a></p>
-        }
-        <form @onsubmit="SaveAsync" @onsubmit:preventDefault>
-            <fieldset class="google-editor" disabled="@(busy || !CanEdit)">
-                <div class="google-field">
-                    <label for="google-task-title">Title</label>
-                    <input id="google-task-title" class="form-control" @bind="title" maxlength="1024" required />
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <p class="tasks-message tasks-message--error" role="alert">@error</p>
+    }
+    @if (!string.IsNullOrEmpty(status))
+    {
+        <p class="tasks-message" role="status">@status</p>
+    }
+
+    <div class="tasks-layout">
+        <aside class="tasks-sidebar" aria-label="Task navigation">
+            <button type="button" class="tasks-create" @onclick="() => NewTask(activeListId ?? taskLists.FirstOrDefault()?.Id)" disabled="@(busy || taskLists.Count == 0)">
+                <span class="bi bi-plus-lg" aria-hidden="true"></span>
+                Create
+            </button>
+            <nav aria-label="Task views">
+                <button type="button" class="tasks-nav-item @(activeListId == null ? "is-active" : "")" aria-current="@(activeListId == null ? "page" : null)" @onclick="() => ShowList(null)">
+                    <span class="bi bi-list-task" aria-hidden="true"></span>
+                    All tasks
+                </button>
+                <span class="tasks-nav-item tasks-nav-item--unavailable" title="Starred tasks are not available through the Google Tasks API">
+                    <span class="bi bi-star" aria-hidden="true"></span>
+                    Starred
+                </span>
+                <div class="tasks-nav-label">Lists</div>
+                @foreach (var list in taskLists)
+                {
+                    <button type="button" class="tasks-nav-item @(activeListId == list.Id ? "is-active" : "")" aria-current="@(activeListId == list.Id ? "page" : null)" @key="list.Id" @onclick="() => ShowList(list.Id)">
+                        <span class="bi bi-list-ul" aria-hidden="true"></span>
+                        <span class="tasks-nav-title">@list.Title</span>
+                    </button>
+                }
+            </nav>
+        </aside>
+
+        <div class="tasks-main">
+            <div class="tasks-main-heading">
+                <h1>@(activeListId == null ? "All tasks" : taskLists.FirstOrDefault(list => list.Id == activeListId)?.Title ?? "Tasks")</h1>
+            </div>
+            @if (busy && taskLists.Count == 0)
+            {
+                <p class="tasks-loading" role="status">Loading your tasks…</p>
+            }
+            else if (taskLists.Count == 0)
+            {
+                <div class="tasks-no-lists">
+                    <span class="bi bi-list-check" aria-hidden="true"></span>
+                    <h2>No task lists yet</h2>
+                    <p>Create a list in Google Tasks, then refresh this page.</p>
                 </div>
-                <div class="google-field">
-                    <label for="google-task-notes">Notes</label>
-                    <textarea id="google-task-notes" class="form-control" rows="5" @bind="notes" maxlength="8192"></textarea>
-                </div>
-                <div class="google-field">
-                    <label for="google-task-due">Due date (optional)</label>
-                    <input id="google-task-due" class="form-control" type="date" @bind="dueDate" aria-describedby="google-task-due-help" />
-                    <span id="google-task-due-help" class="google-muted">Google Tasks stores a date without a time.</span>
-                </div>
-                <label><input type="checkbox" @bind="completed" /> Completed</label>
-                <div class="google-actions">
-                    <button type="submit" class="btn btn--primary">@(busy ? "Please wait…" : selectedTask == null ? "Create task" : "Save changes")</button>
-                    @if (selectedTask != null)
+            }
+            else
+            {
+                <div class="tasks-board">
+                    @foreach (var list in VisibleLists)
                     {
-                        <button type="button" class="btn btn--secondary" @onclick="() => confirmDelete = true">Delete</button>
+                        var activeTasks = TasksFor(list.Id).Where(task => task.Status != "completed").ToArray();
+                        var completedTasks = TasksFor(list.Id).Where(task => task.Status == "completed").ToArray();
+                        <section class="tasks-list-card" aria-label="@list.Title" @key="list.Id">
+                            <div class="tasks-list-heading">
+                                <h2>@list.Title</h2>
+                            </div>
+                            <button type="button" class="tasks-add" @onclick="() => NewTask(list.Id)" disabled="@busy">
+                                <span class="bi bi-plus-lg" aria-hidden="true"></span>
+                                Add a task
+                            </button>
+
+                            @if (editorOpen && editingListId == list.Id)
+                            {
+                                <div class="tasks-editor" aria-label="@(selectedTask == null ? "New task" : "Edit task")">
+                                    <div class="tasks-editor-heading">
+                                        <h3>@(selectedTask == null ? "New task" : "Task details")</h3>
+                                        <button type="button" class="tasks-icon-button bi bi-x-lg" aria-label="Close task details" @onclick="CloseEditor" disabled="@busy"></button>
+                                    </div>
+                                    @if (selectedTask?.AssignmentInfo != null)
+                                    {
+                                        <p class="tasks-editor-note">Manage this assigned task in Google Tasks or the app where it was assigned.</p>
+                                    }
+                                    @if (!string.IsNullOrEmpty(selectedTask?.WebViewLink))
+                                    {
+                                        <a class="tasks-editor-link" href="@selectedTask.WebViewLink" target="_blank" rel="noopener noreferrer">Open this task in Google ↗</a>
+                                    }
+                                    <form @onsubmit="SaveAsync" @onsubmit:preventDefault>
+                                        <fieldset disabled="@(busy || !CanEdit)">
+                                            <label for="google-task-title">Title</label>
+                                            <input id="google-task-title" class="tasks-input" @bind="title" maxlength="1024" required />
+                                            <label for="google-task-notes">Details</label>
+                                            <textarea id="google-task-notes" class="tasks-input" rows="3" @bind="notes" maxlength="8192"></textarea>
+                                            <label for="google-task-due">Date</label>
+                                            <input id="google-task-due" class="tasks-input" type="date" @bind="dueDate" />
+                                            <label class="tasks-completed-field"><input type="checkbox" @bind="completed" /> Completed</label>
+                                            <label for="google-task-duration">Estimated duration</label>
+                                            <input id="google-task-duration" class="tasks-input" type="number" min="1" max="1440" step="1" placeholder="Minutes (optional)" @bind="estimatedMinutes" />
+                                            <div class="tasks-dependencies-label">Depends on</div>
+                                            <div class="tasks-dependencies" aria-label="Dependency tasks">
+                                                @foreach (var candidate in AllTaskReferences.Where(item => selectedTask?.Id != item.Task.Id || editingListId != item.ListId))
+                                                {
+                                                    var dependencyKey = GoogleTaskWorkflow.Key(candidate.ListId, candidate.Task.Id);
+                                                    <label class="tasks-dependency-option" @key="dependencyKey">
+                                                        <input type="checkbox" checked="@editingDependencies.Contains(dependencyKey)" @onchange="args => SetDependency(dependencyKey, args.Value is true)" />
+                                                        <span>@candidate.Task.Title <small>(@candidate.ListTitle)</small></span>
+                                                    </label>
+                                                }
+                                            </div>
+                                            @if (selectedTask != null)
+                                            {
+                                                <div class="tasks-workflow-details">
+                                                    <span class="tasks-state">@WorkflowState(editingListId!, selectedTask)</span>
+                                                    @if (BlockingTasks(editingListId!, selectedTask).Count > 0)
+                                                    {
+                                                        <div>Waiting for: @string.Join(", ", BlockingTasks(editingListId!, selectedTask).Select(DependencyTitle))</div>
+                                                    }
+                                                </div>
+                                            }
+                                            <div class="tasks-editor-actions">
+                                                <button type="submit" class="tasks-save">@(selectedTask == null ? "Create task" : "Save")</button>
+                                                @if (selectedTask != null)
+                                                {
+                                                    <button type="button" class="tasks-text-button" @onclick="() => NewTask(editingListId, selectedTask)">Add Next Task</button>
+                                                    <button type="button" class="tasks-text-button" @onclick="StartTaskAsync" disabled="@(WorkflowState(editingListId!, selectedTask) != GoogleTaskWorkflowState.Ready || EditorHasChanges)" title="@(EditorHasChanges ? "Save changes before starting" : null)">Start Task</button>
+                                                    <button type="button" class="tasks-text-button" @onclick="() => confirmDelete = true">Delete</button>
+                                                }
+                                            </div>
+                                            @if (confirmDelete)
+                                            {
+                                                <div class="tasks-delete-confirm" role="alert">
+                                                    <p>Delete this task and any subtasks from Google Tasks?</p>
+                                                    <button type="button" class="tasks-text-button" @onclick="DeleteAsync">Yes, delete</button>
+                                                    <button type="button" class="tasks-text-button" @onclick="() => confirmDelete = false">Keep task</button>
+                                                </div>
+                                            }
+                                        </fieldset>
+                                    </form>
+                                </div>
+                            }
+
+                            @if (activeTasks.Length == 0 && !(editorOpen && editingListId == list.Id))
+                            {
+                                <div class="tasks-list-empty">
+                                    <span class="bi bi-check2-circle" aria-hidden="true"></span>
+                                    <p>All tasks complete</p>
+                                </div>
+                            }
+                            <ul class="tasks-items">
+                                @foreach (var task in activeTasks)
+                                {
+                                    <li class="tasks-item @(task.Parent != null ? "tasks-item--subtask" : "")" @key="task.Id">
+                                        <button type="button" class="tasks-check" aria-label="Complete @(string.IsNullOrWhiteSpace(task.Title) ? "untitled task" : task.Title)" @onclick="() => ToggleCompleteAsync(list.Id, task)" disabled="@(busy || task.AssignmentInfo != null)"></button>
+                                        <button type="button" class="tasks-item-content" @onclick="() => SelectTask(list.Id, task)" disabled="@busy" aria-pressed="@(selectedTask?.Id == task.Id && editingListId == list.Id)">
+                                            <span class="tasks-item-title">@(string.IsNullOrWhiteSpace(task.Title) ? "Untitled task" : task.Title)</span>
+                                            @if (!string.IsNullOrWhiteSpace(task.Notes))
+                                            {
+                                                <span class="tasks-item-notes">@task.Notes</span>
+                                            }
+                                            @if (task.DueDate is DateTime date)
+                                            {
+                                                <span class="tasks-item-date"><span class="bi bi-calendar3" aria-hidden="true"></span> @date.ToString("ddd, MMM d", CultureInfo.CurrentCulture)</span>
+                                            }
+                                            @if (task.AssignmentInfo != null)
+                                            {
+                                                <span class="tasks-item-notes">Assigned task</span>
+                                            }
+                                            <span class="tasks-item-meta"><span class="tasks-state">@WorkflowState(list.Id, task)</span>
+                                                @if (ExtensionFor(list.Id, task.Id)?.EstimatedMinutes is int minutes)
+                                                {
+                                                    <span>@GoogleTaskWorkflow.FormatDuration(minutes)</span>
+                                                }
+                                            </span>
+                                        </button>
+                                    </li>
+                                }
+                            </ul>
+                            @if (completedTasks.Length > 0)
+                            {
+                                <button type="button" class="tasks-completed-toggle" aria-expanded="@expandedCompleted.Contains(list.Id)" @onclick="() => ToggleCompleted(list.Id)">
+                                    <span class="bi @(expandedCompleted.Contains(list.Id) ? "bi-chevron-down" : "bi-chevron-right")" aria-hidden="true"></span>
+                                    Completed (@completedTasks.Length)
+                                </button>
+                                @if (expandedCompleted.Contains(list.Id))
+                                {
+                                    <ul class="tasks-items tasks-items--completed">
+                                        @foreach (var task in completedTasks)
+                                        {
+                                            <li class="tasks-item @(task.Parent != null ? "tasks-item--subtask" : "")" @key="task.Id">
+                                                <button type="button" class="tasks-check is-complete bi bi-check" aria-label="Mark @(string.IsNullOrWhiteSpace(task.Title) ? "untitled task" : task.Title) incomplete" @onclick="() => ToggleCompleteAsync(list.Id, task)" disabled="@(busy || task.AssignmentInfo != null)"></button>
+                                                <button type="button" class="tasks-item-content" @onclick="() => SelectTask(list.Id, task)" disabled="@busy">
+                                                    <span class="tasks-item-title">@(string.IsNullOrWhiteSpace(task.Title) ? "Untitled task" : task.Title)</span>
+                                                    <span class="tasks-item-meta"><span class="tasks-state">Completed</span>
+                                                        @if (ExtensionFor(list.Id, task.Id)?.EstimatedMinutes is int minutes)
+                                                        {
+                                                            <span>@GoogleTaskWorkflow.FormatDuration(minutes)</span>
+                                                        }
+                                                    </span>
+                                                </button>
+                                            </li>
+                                        }
+                                    </ul>
+                                }
+                            }
+                        </section>
                     }
                 </div>
-                @if (confirmDelete)
-                {
-                    <div class="google-status" role="alert">
-                        <p>Delete this task and any subtasks from Google Tasks?</p>
-                        <div class="google-actions">
-                            <button type="button" class="btn btn--secondary" @onclick="DeleteAsync">Yes, delete</button>
-                            <button type="button" class="btn btn--secondary" @onclick="() => confirmDelete = false">Keep task</button>
-                        </div>
-                    </div>
-                }
-            </fieldset>
-        </form>
-    </section>
+            }
+        </div>
+    </div>
 </div>
 
 @code {
     [Parameter, EditorRequired] public string UserId { get; set; } = string.Empty;
 
     private List<GoogleTaskList> taskLists = [];
-    private List<GoogleTask> tasks = [];
-    private string listId = string.Empty;
+    private Dictionary<string, List<GoogleTask>> tasksByList = [];
+    private Dictionary<string, GoogleTask> taskLookup = [];
+    private Dictionary<string, GoogleTaskExtension> extensions = [];
+    private HashSet<string> expandedCompleted = [];
+    private string? activeListId;
+    private string? editingListId;
     private GoogleTask? selectedTask;
     private string title = string.Empty;
     private string notes = string.Empty;
     private DateTime? dueDate;
     private bool completed;
+    private int? estimatedMinutes;
+    private HashSet<string> editingDependencies = [];
+    private bool editorOpen;
     private bool busy;
     private bool disposed;
     private bool confirmDelete;
     private string? error;
     private string? status;
 
-    private bool CanEdit => !string.IsNullOrEmpty(listId) && selectedTask?.AssignmentInfo == null;
+    private IEnumerable<GoogleTaskList> VisibleLists => activeListId == null ? taskLists : taskLists.Where(list => list.Id == activeListId);
+    private bool CanEdit => editingListId != null && selectedTask?.AssignmentInfo == null;
+    private List<GoogleTask> TasksFor(string targetListId) => tasksByList.GetValueOrDefault(targetListId) ?? [];
+    private IEnumerable<(string ListId, string ListTitle, GoogleTask Task)> AllTaskReferences =>
+        taskLists.SelectMany(list => TasksFor(list.Id).Select(task => (list.Id, list.Title, task)));
+    private Dictionary<string, GoogleTask> TaskLookup => taskLookup;
+    private GoogleTaskExtension? ExtensionFor(string listId, string taskId) =>
+        extensions.GetValueOrDefault(GoogleTaskWorkflow.Key(listId, taskId));
+    private GoogleTaskWorkflowState WorkflowState(string listId, GoogleTask task) =>
+        GoogleTaskWorkflow.State(task, ExtensionFor(listId, task.Id), TaskLookup);
+    private IReadOnlyList<GoogleTaskReference> BlockingTasks(string listId, GoogleTask task) =>
+        GoogleTaskWorkflow.BlockingTasks(ExtensionFor(listId, task.Id), TaskLookup);
+    private string DependencyTitle(GoogleTaskReference reference) =>
+        TaskLookup.TryGetValue(GoogleTaskWorkflow.Key(reference), out var task) ? task.Title : "Deleted task";
+    private bool EditorHasChanges => selectedTask != null && editingListId != null &&
+        (title != selectedTask.Title || notes != (selectedTask.Notes ?? string.Empty) || dueDate != selectedTask.DueDate ||
+         completed != (selectedTask.Status == "completed") ||
+         estimatedMinutes != ExtensionFor(editingListId, selectedTask.Id)?.EstimatedMinutes ||
+         !editingDependencies.SetEquals((ExtensionFor(editingListId, selectedTask.Id)?.DependsOn ?? [])
+             .Select(GoogleTaskWorkflow.Key)));
 
     protected override Task OnInitializedAsync() => RefreshAsync();
-
-    private async Task ChangeListAsync(string value)
-    {
-        if (busy || disposed) return;
-        listId = value;
-        tasks.Clear();
-        NewTask();
-        await RefreshAsync();
-    }
 
     private async Task RefreshAsync()
     {
@@ -156,31 +276,38 @@
         error = status = null;
         try
         {
-            if (taskLists.Count == 0)
+            var lists = await Workspace.ListTaskListsAsync(UserId);
+            var loaded = await Task.WhenAll(lists.Select(async list => (list.Id, Tasks: (await Workspace.ListTasksAsync(UserId, list.Id)).ToList())));
+            var loadedExtensions = await Workspace.ListTaskExtensionsAsync(UserId);
+            if (disposed) return;
+            taskLists = lists.ToList();
+            tasksByList = loaded.ToDictionary(result => result.Id, result => result.Tasks);
+            taskLookup = AllTaskReferences.ToDictionary(item => GoogleTaskWorkflow.Key(item.ListId, item.Task.Id), item => item.Task);
+            extensions = loadedExtensions.ToDictionary(extension => GoogleTaskWorkflow.Key(extension.TaskListId, extension.TaskId));
+            var knownTasks = TaskLookup;
+            var missing = loadedExtensions
+                .Select(extension => new GoogleTaskReference { TaskListId = extension.TaskListId, TaskId = extension.TaskId })
+                .Concat(loadedExtensions.SelectMany(extension => extension.DependsOn))
+                .Where(reference => !knownTasks.ContainsKey(GoogleTaskWorkflow.Key(reference)))
+                .DistinctBy(GoogleTaskWorkflow.Key).ToArray();
+            if (missing.Length > 0)
             {
-                var result = await Workspace.ListTaskListsAsync(UserId);
-                if (disposed) return;
-                taskLists = result.ToList();
-                listId = taskLists.FirstOrDefault()?.Id ?? string.Empty;
+                await Workspace.DeleteTaskExtensionsAsync(UserId, missing);
+                RemoveExtensionReferences(missing);
             }
-            if (!string.IsNullOrEmpty(listId))
+            if (activeListId != null && !tasksByList.ContainsKey(activeListId)) activeListId = null;
+            if (editorOpen && editingListId != null)
             {
-                var result = await Workspace.ListTasksAsync(UserId, listId);
-                if (disposed) return;
-                tasks = result.ToList();
-                if (selectedTask != null)
+                if (!tasksByList.ContainsKey(editingListId)) CloseEditor();
+                else if (selectedTask != null)
                 {
-                    var refreshed = tasks.FirstOrDefault(task => task.Id == selectedTask.Id);
+                    var refreshed = TasksFor(editingListId).FirstOrDefault(task => task.Id == selectedTask.Id);
                     if (refreshed == null)
                     {
-                        NewTask();
+                        CloseEditor();
                         status = "The selected task is no longer in this list.";
                     }
-                    else
-                    {
-                        SelectTask(refreshed);
-                        status = "Task details refreshed from Google Tasks.";
-                    }
+                    else SelectTask(editingListId, refreshed);
                 }
             }
         }
@@ -194,39 +321,146 @@
         }
     }
 
-    private void NewTask()
+    private void ShowList(string? targetListId)
     {
+        if (busy) return;
+        activeListId = targetListId;
+        CloseEditor();
+    }
+
+    private void NewTask(string? targetListId, GoogleTask? predecessor = null)
+    {
+        if (busy || targetListId == null) return;
+        editingListId = targetListId;
+        editorOpen = true;
         selectedTask = null;
         title = notes = string.Empty;
         dueDate = null;
+        estimatedMinutes = null;
+        editingDependencies = [];
+        if (predecessor != null) editingDependencies.Add(GoogleTaskWorkflow.Key(targetListId, predecessor.Id));
         completed = confirmDelete = false;
         error = status = null;
     }
 
-    private void SelectTask(GoogleTask task)
+    private void SelectTask(string targetListId, GoogleTask task)
     {
+        editingListId = targetListId;
+        editorOpen = true;
         selectedTask = task;
         title = task.Title;
         notes = task.Notes ?? string.Empty;
-        dueDate = DueDate(task.Due);
+        dueDate = task.DueDate;
         completed = task.Status == "completed";
+        var extension = ExtensionFor(targetListId, task.Id);
+        estimatedMinutes = extension?.EstimatedMinutes;
+        editingDependencies = (extension?.DependsOn ?? []).Select(GoogleTaskWorkflow.Key).ToHashSet();
         confirmDelete = false;
         error = status = null;
     }
 
+    private void CloseEditor()
+    {
+        editorOpen = false;
+        editingListId = null;
+        selectedTask = null;
+        confirmDelete = false;
+    }
+
+    private void ToggleCompleted(string targetListId)
+    {
+        if (!expandedCompleted.Add(targetListId)) expandedCompleted.Remove(targetListId);
+    }
+
+    private void SetDependency(string key, bool selected)
+    {
+        if (selected) editingDependencies.Add(key);
+        else editingDependencies.Remove(key);
+    }
+
+    private void RemoveExtensionReferences(IEnumerable<GoogleTaskReference> deleted)
+    {
+        var keys = deleted.Select(GoogleTaskWorkflow.Key).ToHashSet();
+        foreach (var key in keys) extensions.Remove(key);
+        foreach (var extension in extensions.Values.ToArray())
+        {
+            extension.DependsOn.RemoveAll(reference => keys.Contains(GoogleTaskWorkflow.Key(reference)));
+            if (extension.DependsOn.Count == 0 && extension.EstimatedMinutes == null && extension.StartedAt == null)
+                extensions.Remove(GoogleTaskWorkflow.Key(extension.TaskListId, extension.TaskId));
+        }
+    }
+
+    private async Task ToggleCompleteAsync(string targetListId, GoogleTask task)
+    {
+        if (busy || disposed || task.AssignmentInfo != null) return;
+        busy = true;
+        error = status = null;
+        try
+        {
+            var isComplete = task.Status != "completed";
+            var body = new GoogleTaskEdit
+            {
+                Title = task.Title, Notes = task.Notes, Due = task.Due,
+                Status = isComplete ? "completed" : "needsAction",
+                Completed = isComplete ? DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture) : null
+            };
+            var saved = await Workspace.SaveTaskAsync(UserId, targetListId, task.Id, body, task.Etag);
+            if (disposed) return;
+            ReplaceTask(targetListId, saved);
+            if (selectedTask?.Id == saved.Id && editingListId == targetListId) SelectTask(targetListId, saved);
+        }
+        catch (Exception ex)
+        {
+            if (!disposed) error = ErrorMessage(ex);
+        }
+        finally
+        {
+            if (!disposed) busy = false;
+        }
+    }
+
     private async Task SaveAsync()
     {
-        if (busy || disposed || !CanEdit) return;
+        if (busy || disposed || !CanEdit || editingListId == null) return;
         error = status = null;
         if (string.IsNullOrWhiteSpace(title))
         {
             error = "Enter a task title.";
             return;
         }
+        if (estimatedMinutes is < 1 or > 1440)
+        {
+            error = "Enter an estimated duration between 1 and 1440 minutes.";
+            return;
+        }
+
+        var dependencies = AllTaskReferences
+            .Where(item => editingDependencies.Contains(GoogleTaskWorkflow.Key(item.ListId, item.Task.Id)))
+            .Select(item => new GoogleTaskReference { TaskListId = item.ListId, TaskId = item.Task.Id }).ToList();
+        if (dependencies.Count != editingDependencies.Count ||
+            dependencies.Any(reference => reference.TaskListId == editingListId && reference.TaskId == selectedTask?.Id))
+        {
+            error = "Choose existing tasks other than this task as dependencies.";
+            return;
+        }
+        if (dependencies.Count > 100)
+        {
+            error = "Choose at most 100 dependency tasks.";
+            return;
+        }
 
         busy = true;
+        var googleSaved = false;
         try
         {
+            var latest = (await Workspace.ListTaskExtensionsAsync(UserId))
+                .ToDictionary(extension => GoogleTaskWorkflow.Key(extension.TaskListId, extension.TaskId));
+            if (selectedTask != null && GoogleTaskWorkflow.CreatesCycle(
+                GoogleTaskWorkflow.Key(editingListId, selectedTask.Id), dependencies, latest))
+            {
+                error = "These dependencies would create a circular task chain.";
+                return;
+            }
             var body = new GoogleTaskEdit
             {
                 Title = title.Trim(), Notes = notes,
@@ -234,17 +468,34 @@
                 Status = completed ? "completed" : "needsAction",
                 Completed = completed ? selectedTask?.Completed ?? DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture) : null
             };
-            var saved = await Workspace.SaveTaskAsync(UserId, listId, selectedTask?.Id, body, selectedTask?.Etag);
+            var saved = await Workspace.SaveTaskAsync(UserId, editingListId, selectedTask?.Id, body, selectedTask?.Etag);
+            googleSaved = true;
             if (disposed) return;
-            var index = tasks.FindIndex(task => task.Id == saved.Id);
-            if (index < 0) tasks.Insert(0, saved);
-            else tasks[index] = saved;
-            SelectTask(saved);
-            status = "Task saved to Google Tasks.";
+            ReplaceTask(editingListId, saved);
+            selectedTask = saved;
+            var key = GoogleTaskWorkflow.Key(editingListId, saved.Id);
+            var extension = new GoogleTaskExtension
+            {
+                TaskListId = editingListId, TaskId = saved.Id,
+                EstimatedMinutes = estimatedMinutes, DependsOn = dependencies,
+                StartedAt = latest.GetValueOrDefault(key)?.StartedAt
+            };
+            if (extension.EstimatedMinutes != null || extension.DependsOn.Count > 0 ||
+                extension.StartedAt != null || latest.ContainsKey(key))
+            {
+                await Workspace.SaveTaskExtensionAsync(UserId, extension);
+                if (extension.EstimatedMinutes == null && extension.DependsOn.Count == 0 && extension.StartedAt == null)
+                    extensions.Remove(key);
+                else extensions[key] = extension;
+            }
+            CloseEditor();
+            status = "Task saved.";
         }
         catch (Exception ex)
         {
-            if (!disposed) error = ErrorMessage(ex);
+            if (!disposed) error = googleSaved
+                ? "Task saved to Google Tasks, but its extension details did not sync. Retry Save."
+                : ErrorMessage(ex);
         }
         finally
         {
@@ -254,17 +505,80 @@
 
     private async Task DeleteAsync()
     {
-        if (busy || disposed || selectedTask == null || !CanEdit || !confirmDelete) return;
+        if (busy || disposed || selectedTask == null || !CanEdit || !confirmDelete || editingListId == null) return;
         busy = true;
         error = status = null;
+        var googleDeleted = false;
         try
         {
             var deletedId = selectedTask.Id;
-            await Workspace.DeleteTaskAsync(UserId, listId, deletedId, selectedTask.Etag);
+            var previousTasks = TasksFor(editingListId).ToArray();
+            await Workspace.DeleteTaskAsync(UserId, editingListId, deletedId, selectedTask.Etag);
+            googleDeleted = true;
             if (disposed) return;
-            tasks.RemoveAll(task => task.Id == deletedId || task.Parent == deletedId);
-            NewTask();
+            var remaining = (await Workspace.ListTasksAsync(UserId, editingListId)).ToList();
+            remaining.RemoveAll(task => task.Id == deletedId);
+            var remainingIds = remaining.Select(task => task.Id).ToHashSet();
+            var deleted = previousTasks.Where(task => !remainingIds.Contains(task.Id))
+                .Select(task => new GoogleTaskReference { TaskListId = editingListId, TaskId = task.Id })
+                .Append(new GoogleTaskReference { TaskListId = editingListId, TaskId = deletedId })
+                .DistinctBy(GoogleTaskWorkflow.Key).ToArray();
+            tasksByList[editingListId] = remaining;
+            taskLookup = AllTaskReferences.ToDictionary(item => GoogleTaskWorkflow.Key(item.ListId, item.Task.Id), item => item.Task);
+            CloseEditor();
+            await Workspace.DeleteTaskExtensionsAsync(UserId, deleted);
+            RemoveExtensionReferences(deleted);
             status = "Task deleted from Google Tasks.";
+        }
+        catch (Exception ex)
+        {
+            if (!disposed) error = googleDeleted
+                ? "Task deleted from Google Tasks, but extension cleanup did not sync. Refresh to retry."
+                : ErrorMessage(ex);
+        }
+        finally
+        {
+            if (!disposed) busy = false;
+        }
+    }
+
+    private void ReplaceTask(string targetListId, GoogleTask task)
+    {
+        var listTasks = TasksFor(targetListId);
+        var index = listTasks.FindIndex(existing => existing.Id == task.Id);
+        if (index < 0) listTasks.Insert(0, task);
+        else listTasks[index] = task;
+        taskLookup[GoogleTaskWorkflow.Key(targetListId, task.Id)] = task;
+    }
+
+    private async Task StartTaskAsync()
+    {
+        if (busy || disposed || selectedTask == null || editingListId == null || EditorHasChanges) return;
+        var listId = editingListId;
+        var taskId = selectedTask.Id;
+        await RefreshAsync();
+        if (disposed || error != null) return;
+        var task = TasksFor(listId).FirstOrDefault(item => item.Id == taskId);
+        if (task == null || WorkflowState(listId, task) != GoogleTaskWorkflowState.Ready)
+        {
+            error = "This task is no longer ready. Complete its prerequisites and refresh.";
+            return;
+        }
+        busy = true;
+        try
+        {
+            var current = ExtensionFor(listId, taskId);
+            var extension = new GoogleTaskExtension
+            {
+                TaskListId = listId, TaskId = taskId,
+                EstimatedMinutes = current?.EstimatedMinutes,
+                DependsOn = current?.DependsOn.ToList() ?? [],
+                StartedAt = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)
+            };
+            await Workspace.SaveTaskExtensionAsync(UserId, extension);
+            if (disposed) return;
+            extensions[GoogleTaskWorkflow.Key(listId, taskId)] = extension;
+            status = "Task started.";
         }
         catch (Exception ex)
         {
@@ -275,8 +589,6 @@
             if (!disposed) busy = false;
         }
     }
-
-    private static DateTime? DueDate(string? value) => value?.Length >= 10 && DateTime.TryParseExact(value[..10], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) ? date : null;
 
     private static string ErrorMessage(Exception exception) => exception is JSException
         ? exception.Message.Split('\n')[0]

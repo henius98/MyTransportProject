@@ -45,7 +45,7 @@ public static class BrowserBenchmarkRunner
       Measure(
         "WeatherShaper/generic-14",
         iterations: 300,
-        () => WeatherShaper.ShapeSlices(typicalWeather, fallback, "Baseline").Count),
+        () => WeatherShaper.ShapeSlices(typicalWeather, fallback, "Realtime").Count),
       Measure(
         "WeatherShaper/generic-500",
         iterations: 30,

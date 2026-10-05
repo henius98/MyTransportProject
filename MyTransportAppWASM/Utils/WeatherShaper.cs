@@ -11,14 +11,13 @@ namespace MyTransportAppWASM.Utils
     private const int MaxTraversalDepth = 10;
 
     private static readonly string[] ParallelTemperatureNames = ["temperature_2m_max", "temperature_2m", "temperature"];
-    private static readonly string[] ParallelPrecipitationNames = ["precipitation_probability_max", "precipitation_probability", "precipitation", "rain"];
     private static readonly string[] WeatherCodeNames = ["weather_code", "weathercode"];
     private static readonly string[] TemperatureNames = ["temperature", "temperature_2m", "temp"];
     private static readonly string[] MaximumTemperatureNames = ["temperature_2m_max", "max_temp"];
     private static readonly string[] MinimumTemperatureNames = ["temperature_2m_min", "min_temp"];
-    private static readonly string[] PrecipitationNames = ["precipitation", "rain", "precip_mm", "precip"];
+    private static readonly string[] PrecipitationNames = ["precipitation", "precipitation_sum", "rain", "precip_mm", "precip"];
     private static readonly string[] ProbabilityNames = ["probability", "precipitation_probability", "precipitation_probability_max", "pop"];
-    private static readonly string[] WindNames = ["wind", "wind_speed", "wind_speed_10m"];
+    private static readonly string[] WindNames = ["wind", "wind_speed", "wind_speed_10m", "wind_speed_10m_max"];
     private static readonly string[] TimeNames = ["time", "datetime", "ob_time", "ts", "date"];
     private static readonly string[] MorningForecastNames = ["morning_forecast"];
     private static readonly string[] AfternoonForecastNames = ["afternoon_forecast"];
@@ -33,7 +32,8 @@ namespace MyTransportAppWASM.Utils
       if (root.ValueKind == JsonValueKind.Object)
       {
         JsonElement? parallelNode = null;
-        if (root.TryGetProperty("daily", out var daily)) parallelNode = daily;
+        bool isDaily = root.TryGetProperty("daily", out var daily);
+        if (isDaily) parallelNode = daily;
         else if (root.TryGetProperty("hourly", out var hourly)) parallelNode = hourly;
 
         if (parallelNode.HasValue && parallelNode.Value.ValueKind == JsonValueKind.Object)
@@ -41,13 +41,20 @@ namespace MyTransportAppWASM.Utils
           var node = parallelNode.Value;
           if (node.TryGetProperty("time", out var timeArray) && timeArray.ValueKind == JsonValueKind.Array)
           {
+            TimeSpan? utcOffset = GetUtcOffset(root);
             int count = timeArray.GetArrayLength();
             JsonElement? tempArray = GetPropertyAnyName(node, ParallelTemperatureNames);
-            JsonElement? precipArray = GetPropertyAnyName(node, ParallelPrecipitationNames);
+            JsonElement? minTempArray = isDaily ? GetPropertyAnyName(node, MinimumTemperatureNames) : null;
+            JsonElement? probabilityArray = GetPropertyAnyName(node, ProbabilityNames);
+            JsonElement? precipArray = GetPropertyAnyName(node, PrecipitationNames);
+            JsonElement? windArray = GetPropertyAnyName(node, WindNames);
+            JsonElement? uvArray = isDaily && node.TryGetProperty("uv_index_max", out var uvValues) ? uvValues : null;
+            JsonElement? sunriseArray = isDaily && node.TryGetProperty("sunrise", out var sunriseValues) ? sunriseValues : null;
+            JsonElement? sunsetArray = isDaily && node.TryGetProperty("sunset", out var sunsetValues) ? sunsetValues : null;
             JsonElement? weatherCodeArray = GetPropertyAnyName(node, WeatherCodeNames);
-            int tempCount = GetArrayLength(tempArray);
-            int precipCount = GetArrayLength(precipArray);
-            int weatherCodeCount = GetArrayLength(weatherCodeArray);
+            string windUnit = root.TryGetProperty(isDaily ? "daily_units" : "hourly_units", out var units) && units.ValueKind == JsonValueKind.Object
+              && units.TryGetProperty(isDaily ? "wind_speed_10m_max" : "wind_speed_10m", out var unit) && unit.ValueKind == JsonValueKind.String
+                ? unit.GetString()! : "km/h";
             var fallbackTime = DateTimeOffset.UtcNow;
 
             results.EnsureCapacity(count);
@@ -55,17 +62,18 @@ namespace MyTransportAppWASM.Utils
             for (int i = 0; i < count; i++)
             {
               DateTimeOffset time = fallbackTime;
-              if (TryGetDate(timeArray[i], out var parsedTime)) time = parsedTime;
+              if (TryGetDate(timeArray[i], utcOffset, out var parsedTime)) time = parsedTime;
 
-              double? temp = tempArray.HasValue && tempCount > i && tempArray.Value[i].ValueKind == JsonValueKind.Number ? tempArray.Value[i].GetDouble() : null;
-              double? precip = precipArray.HasValue && precipCount > i && precipArray.Value[i].ValueKind == JsonValueKind.Number ? precipArray.Value[i].GetDouble() : null;
-              double? weatherCodeDouble = weatherCodeArray.HasValue && weatherCodeCount > i && weatherCodeArray.Value[i].ValueKind == JsonValueKind.Number ? weatherCodeArray.Value[i].GetDouble() : null;
+              double? temp = GetArrayNumber(tempArray, i);
+              double? precip = GetArrayNumber(precipArray, i);
+              double? wind = GetArrayNumber(windArray, i);
+              double? weatherCodeDouble = GetArrayNumber(weatherCodeArray, i);
 
               string? summary = null;
               string? icon = null;
               if (weatherCodeDouble.HasValue)
               {
-                var localTime = time.ToOffset(TimeSpan.FromHours(8));
+                var localTime = MalaysiaTime.Convert(time);
                 bool isNight = localTime.Hour < 7 || localTime.Hour > 19;
                 (summary, icon) = MapWmoCode(weatherCodeDouble.Value, isNight);
               }
@@ -75,7 +83,14 @@ namespace MyTransportAppWASM.Utils
                 Label = label,
                 Time = time,
                 TemperatureC = temp,
-                ProbabilityOfRain = NormalizeProbability(precip),
+                MaxTemperatureC = isDaily ? temp : null,
+                MinTemperatureC = GetArrayNumber(minTempArray, i),
+                ProbabilityOfRain = GetArrayNumber(probabilityArray, i) / 100d,
+                PrecipitationMm = precip,
+                Wind = wind.HasValue ? $"{wind:0.#} {windUnit}" : null,
+                UvIndex = GetArrayNumber(uvArray, i),
+                Sunrise = GetArrayDate(sunriseArray, i, utcOffset),
+                Sunset = GetArrayDate(sunsetArray, i, utcOffset),
                 Summary = summary,
                 Icon = icon
               });
@@ -108,6 +123,16 @@ namespace MyTransportAppWASM.Utils
       element.HasValue && element.Value.ValueKind == JsonValueKind.Array
         ? element.Value.GetArrayLength()
         : 0;
+
+    private static double? GetArrayNumber(JsonElement? array, int index) =>
+      GetArrayLength(array) > index && array!.Value[index].ValueKind == JsonValueKind.Number
+        ? array.Value[index].GetDouble()
+        : null;
+
+    private static DateTimeOffset? GetArrayDate(JsonElement? array, int index, TimeSpan? utcOffset) =>
+      GetArrayLength(array) > index && TryGetDate(array!.Value[index], utcOffset, out var value)
+        ? value
+        : null;
 
     private static JsonElement? GetPropertyAnyName(JsonElement element, string[] names)
     {
@@ -197,7 +222,7 @@ namespace MyTransportAppWASM.Utils
       {
         if (fields.WeatherCode.HasValue)
         {
-          var localTime = time.ToOffset(TimeSpan.FromHours(8));
+          var localTime = MalaysiaTime.Convert(time);
           bool isNight = localTime.Hour < 7 || localTime.Hour > 19;
           (summary, icon) = MapWmoCode(fields.WeatherCode.Value, isNight);
         }
@@ -320,11 +345,25 @@ namespace MyTransportAppWASM.Utils
     }
 
     private static bool TryGetDate(JsonElement element, out DateTimeOffset value)
+      => TryGetDate(element, null, out value);
+
+    private static bool TryGetDate(JsonElement element, TimeSpan? utcOffset, out DateTimeOffset value)
     {
-      if (element.ValueKind == JsonValueKind.String &&
-          DateTimeOffset.TryParse(element.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out value))
+      if (element.ValueKind == JsonValueKind.String)
       {
-        return true;
+        string? text = element.GetString();
+        if (utcOffset.HasValue &&
+            DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.None, out var localTime) &&
+            localTime.Kind == DateTimeKind.Unspecified)
+        {
+          value = new DateTimeOffset(localTime, utcOffset.Value);
+          return true;
+        }
+
+        if (DateTimeOffset.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out value))
+        {
+          return true;
+        }
       }
 
       if (element.ValueKind == JsonValueKind.Number && element.TryGetInt64(out long epoch))
@@ -342,6 +381,19 @@ namespace MyTransportAppWASM.Utils
 
       value = default;
       return false;
+    }
+
+    private static TimeSpan? GetUtcOffset(JsonElement root)
+    {
+      if (root.TryGetProperty("utc_offset_seconds", out var offsetElement) &&
+          offsetElement.TryGetInt32(out int offsetSeconds) &&
+          offsetSeconds % 60 == 0 &&
+          offsetSeconds is >= -50400 and <= 50400)
+      {
+        return TimeSpan.FromSeconds(offsetSeconds);
+      }
+
+      return null;
     }
 
     private struct WeatherFields
@@ -414,7 +466,7 @@ namespace MyTransportAppWASM.Utils
     {
         if (string.IsNullOrWhiteSpace(summary)) return "bi-cloud text-secondary";
         
-        var localTime = time.ToOffset(TimeSpan.FromHours(8));
+        var localTime = MalaysiaTime.Convert(time);
         bool isNight = localTime.Hour < 7 || localTime.Hour > 19;
 
         if (ContainsIgnoreCase(summary, "ribut petir") || ContainsIgnoreCase(summary, "thunder") || ContainsIgnoreCase(summary, "lightning") || ContainsIgnoreCase(summary, "squall"))

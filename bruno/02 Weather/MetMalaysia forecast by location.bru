@@ -5,9 +5,30 @@ meta {
 }
 
 get {
-  url: {{data_gov_base}}/weather/forecast/?contains={{met_location_id}}@location__location_id&date_start={{date_start}}@date&date_end={{date_end}}@date&exclude=summary_forecast,summary_when
+  url: {{data_gov_base}}/weather/forecast?contains={{met_location_id}}@location__location_id
   body: none
   auth: none
+}
+
+params:query {
+  contains: {{met_location_id}}@location__location_id
+  ~contains: {{met_location_id}}@location__location_id&date_start={{date_start}}@date&date_end={{date_end}}@date&exclude=summary_forecast,summary_when
+}
+
+script:pre-request {
+  const forecastDays = Number(bru.getVar("forecast_days") || 7);
+
+  const formatMalaysiaDate = (date) => new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kuala_Lumpur",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(date);
+  const start = new Date();
+  const end = new Date(start.getTime() + Math.max(forecastDays - 1, 0) * 86400000);
+
+  bru.setVar("date_start", formatMalaysiaDate(start));
+  bru.setVar("date_end", formatMalaysiaDate(end));
 }
 
 docs {

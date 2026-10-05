@@ -58,6 +58,16 @@ test("uses base Firebase settings without requesting an absent environment file"
     assert.equal(state.window.firebaseApp, app);
 });
 
+test("reads Firebase settings when appsettings contains line comments and URL strings", async () => {
+    const state = await setup();
+    state.fetch = () => ({
+        ok: true,
+        text: async () => `{"Firebase":${JSON.stringify(firebaseConfig)},"Endpoint":"https://example.com", // Keep this comment\n"Enabled":true}`
+    });
+    await state.api.getFirebaseApp();
+    assert.deepEqual(state.initialized, [firebaseConfig]);
+});
+
 test("merges the active Development or Staging Firebase section over inherited base values", async () => {
     for (const environment of ["Development", "Staging"]) {
         const filename = `appsettings.${environment}.json`;

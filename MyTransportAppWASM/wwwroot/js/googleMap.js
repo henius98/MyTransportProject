@@ -4,6 +4,7 @@ let storedApiKey = null;
 const activeMarkers = Object.create(null);
 const autocompletes = Object.create(null);
 const advancedMarkerEventHandlers = new WeakMap();
+let displayTimeZone = null;
 const transportMarkerTypes = {
 	bus: { icon: "🚌", className: "bus-marker", label: "Bus" },
 	lrt: { icon: "🚈", className: "lrt-marker", label: "LRT" },
@@ -17,8 +18,45 @@ let routePolylines = [];
 let routeMarkers = [];
 let routeOptionsMap = new Map();
 let currentActiveRouteId = -1;
-let locationPickerMap = null;
-let locationPickerMarkers = [];
+let staticRouteLayer = null;
+let staticRouteDotNetRef = null;
+
+export function clearStaticRoute() {
+	if (!staticRouteLayer) return;
+	const features = [];
+	staticRouteLayer.forEach(feature => features.push(feature));
+	features.forEach(feature => staticRouteLayer.remove(feature));
+}
+
+export function showStaticRoute(geoJson, dotNetRef) {
+	if (!map) return;
+	if (!staticRouteLayer) {
+		staticRouteLayer = new google.maps.Data({ map });
+		staticRouteLayer.setStyle(feature => {
+			if (feature.getProperty("kind") === "stop") {
+				return { icon: { path: google.maps.SymbolPath.CIRCLE, scale: 5, fillColor: "#ffffff", fillOpacity: 1, strokeColor: "#1769aa", strokeWeight: 2 }, zIndex: 2 };
+			}
+			const color = feature.getProperty("route_color");
+			return { strokeColor: typeof color === "string" && /^[0-9a-fA-F]{6}$/.test(color) ? `#${color}` : "#1769aa", strokeWeight: 4, zIndex: 1 };
+		});
+		staticRouteLayer.addListener("click", event => {
+			if (event.feature.getProperty("kind") !== "stop") return;
+			const stopId = event.feature.getProperty("stop_id");
+			if (!stopId || !staticRouteDotNetRef) return;
+			staticRouteDotNetRef.invokeMethodAsync("OnStaticStopSelected", stopId, event.feature.getProperty("stop_name") || stopId)
+				.catch(error => console.error("Static stop selection failed:", error));
+		});
+	}
+	clearStaticRoute();
+	staticRouteDotNetRef = dotNetRef;
+	const collection = JSON.parse(geoJson);
+	const features = staticRouteLayer.addGeoJson(collection);
+	const bounds = new google.maps.LatLngBounds();
+	for (const feature of features) {
+		feature.getGeometry()?.forEachLatLng(position => bounds.extend(position));
+	}
+	if (!bounds.isEmpty()) map.fitBounds(bounds);
+}
 
 function addAdvancedMarkerEventListener(marker, eventName, handler) {
 	marker.addEventListener(eventName, handler);
@@ -71,8 +109,10 @@ export async function loadGoogleMaps(apiKey) {
 	return mapsApiPromise;
 }
 
-export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dotNetHelper, theme = 'DARK') {
+export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dotNetHelper, theme = 'DARK', timeZone) {
 	await loadGoogleMaps(apiKey);
+	if (!timeZone) throw new Error("Display time zone not provided.");
+	displayTimeZone = timeZone;
 
 	const el = document.getElementById(elementId);
 	if (!el) throw new Error(`Element #${elementId} not found.`);
@@ -588,7 +628,9 @@ function buildVehicleInfoContent(id, location) {
 	appendBusInfoRow(
 		content,
 		"Updated",
-		new Date(location.timestamp * 1000).toLocaleTimeString(),
+		new Date(location.timestamp * 1000).toLocaleTimeString(undefined, {
+			timeZone: displayTimeZone,
+		}),
 	);
 
 	return content;
@@ -606,60 +648,13 @@ function appendBusInfoRow(container, label, value) {
 	row.append(heading, text);
 	container.appendChild(row);
 }
-export async function showLocationPickerMap(containerId, locations, dotnetHelper, apiKey) {
-    await loadGoogleMaps(apiKey);
-    const { Map } = await google.maps.importLibrary("maps");
-    const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
-
-    const container = document.getElementById(containerId);
-    if (!container) return;
-
-    cleanupLocationPickerMap();
-    container.replaceChildren();
-
-    // Center map around Malaysia
-    locationPickerMap = new Map(container, {
-        center: { lat: 4.2105, lng: 101.9758 },
-        zoom: 6,
-        mapId: "LOCATION_PICKER_MAP",
-        disableDefaultUI: false
-    });
-
-    locations.forEach(loc => {
-        const marker = new AdvancedMarkerElement({
-            position: { lat: loc.latitude, lng: loc.longitude },
-            map: locationPickerMap,
-            title: loc.location_name,
-            gmpClickable: true
-        });
-
-        locationPickerMarkers.push(marker);
-
-        addAdvancedMarkerEventListener(marker, "gmp-click", () => {
-            dotnetHelper.invokeMethodAsync('OnLocationSelectedFromMap', loc.latitude, loc.longitude, `MET ID: ${loc.location_id}`, loc.location_name);
-        });
-    });
-}
-
-export function cleanupLocationPickerMap() {
-    locationPickerMarkers.forEach(removeAdvancedMarker);
-    locationPickerMarkers = [];
-    locationPickerMap = null;
-}
-
-export function showDialog(dialog) {
-    if (dialog && typeof dialog.showModal === 'function') {
-        dialog.showModal();
-    }
-}
-
-export function closeDialog(dialog) {
-    if (dialog && typeof dialog.close === 'function') {
-        dialog.close();
-    }
-}
-
 export function cleanupMap() {
+	clearStaticRoute();
+	if (staticRouteLayer) {
+		staticRouteLayer.setMap(null);
+		staticRouteLayer = null;
+		staticRouteDotNetRef = null;
+	}
 	for (const id in activeMarkers) {
 		removeAdvancedMarker(activeMarkers[id]);
 		delete activeMarkers[id];

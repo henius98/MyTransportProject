@@ -5,6 +5,21 @@ namespace MyTransportAppWASM.Tests;
 
 public class LanguageServiceTests
 {
+    [Theory]
+    [InlineData("Tiada hujan", "No rain")]
+    [InlineData("Tiada Hujan", "No rain")]
+    [InlineData("TIADA HUJAN", "No rain")]
+    [InlineData("Unknown weather", "Unknown weather")]
+    public async Task TranslationLookupIgnoresCasingAndPreservesUnknownKeys(string key, string expected)
+    {
+        using var client = new HttpClient(new WeatherLanguageHandler()) { BaseAddress = new Uri("https://app.example/") };
+        var language = new LanguageService(client);
+
+        await language.LoadLanguageAsync("en-US");
+
+        Assert.Equal(expected, language[key]);
+    }
+
     [Fact]
     public async Task SlowPreviousAccountsLanguageDoesNotOverrideCurrentLanguage()
     {
@@ -22,6 +37,17 @@ public class LanguageServiceTests
 
         Assert.Equal("en-US", language.CurrentLanguageName);
         Assert.Equal("Home", language["Home"]);
+    }
+
+    private sealed class WeatherLanguageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("{\"Tiada hujan\":\"No rain\"}")
+            });
+        }
     }
 
     private sealed class LanguageHandler(TaskCompletionSource started, TaskCompletionSource resume) : HttpMessageHandler

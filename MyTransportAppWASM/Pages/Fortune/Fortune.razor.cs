@@ -35,7 +35,7 @@ namespace MyTransportAppWASM.Pages.Fortune
                     if (profileData?.Profile != null)
                     {
                         profile = profileData.Profile;
-                        var dateStr = DateTime.Now.ToString("yyyy-MM-dd");
+                        var dateStr = MalaysiaTime.Now.ToString("yyyy-MM-dd");
                         fortune = await BaziFlowService.GetDateFortuneAsync(dateStr);
                     }
                     else
@@ -100,7 +100,7 @@ namespace MyTransportAppWASM.Pages.Fortune
         {
             public string ApiKey { get; set; } = string.Empty;
             public int Gender { get; set; } = 1;
-            public string BirthDate { get; set; } = DateTime.Now.AddYears(-30).ToString("yyyy-MM-dd");
+            public string BirthDate { get; set; } = MalaysiaTime.Now.AddYears(-30).ToString("yyyy-MM-dd");
             public int BirthHour { get; set; } = 12;
             public int BirthMinute { get; set; } = 0;
         }

@@ -6,67 +6,67 @@ using System.Threading.Tasks;
 
 namespace MyTransportAppWASM.Services
 {
-    public class LanguageOption
-    {
-        public string Code { get; set; } = string.Empty;
-        public string NativeLabel { get; set; } = string.Empty;
-        public string ShortName { get; set; } = string.Empty;
-        public string FullName { get; set; } = string.Empty;
-    }
+  public class LanguageOption
+  {
+    public string Code { get; set; } = string.Empty;
+    public string NativeLabel { get; set; } = string.Empty;
+    public string ShortName { get; set; } = string.Empty;
+    public string FullName { get; set; } = string.Empty;
+  }
 
-    public class LanguageService
+  public class LanguageService
+  {
+    public static readonly IReadOnlyList<LanguageOption> SupportedLanguages = new[]
     {
-        public static readonly IReadOnlyList<LanguageOption> SupportedLanguages = new[]
-        {
             new LanguageOption { Code = "en-US", NativeLabel = "Language", ShortName = "English", FullName = "English" },
             new LanguageOption { Code = "zh-CN", NativeLabel = "语言", ShortName = "中文", FullName = "中文 (简体)" },
             new LanguageOption { Code = "ms-MY", NativeLabel = "Bahasa", ShortName = "Bahasa", FullName = "Bahasa Melayu" },
         };
 
-        private readonly HttpClient _http;
-        private Dictionary<string, string> _translations = new();
-        private int _loadVersion;
-        public event Action? OnLanguageChanged;
+    private readonly HttpClient _http;
+    private Dictionary<string, string> _translations = new();
+    private int _loadVersion;
+    public event Action? OnLanguageChanged;
 
-        public string CurrentLanguageName { get; private set; } = "en-US";
+    public string CurrentLanguageName { get; private set; } = "en-US";
 
-        public LanguageService(HttpClient http)
-        {
-            _http = http;
-        }
-
-        public async Task LoadLanguageAsync(string langCode)
-        {
-            var version = ++_loadVersion;
-            if (_translations.Count > 0 && string.Equals(CurrentLanguageName, langCode, StringComparison.Ordinal))
-            {
-                return;
-            }
-
-            try
-            {
-                var response = await _http.GetFromJsonAsync<Dictionary<string, string>>($"i18n/{langCode}.json");
-                if (response != null && version == _loadVersion)
-                {
-                    _translations = response;
-                    CurrentLanguageName = langCode;
-                    OnLanguageChanged?.Invoke();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Failed to load language {langCode}: {ex.Message}");
-            }
-        }
-
-        public string this[string key]
-        {
-            get
-            {
-                if (_translations.TryGetValue(key, out var value))
-                    return value;
-                return key; // Fallback to key if translation not found
-            }
-        }
+    public LanguageService(HttpClient http)
+    {
+      _http = http;
     }
+
+    public async Task LoadLanguageAsync(string langCode)
+    {
+      var version = ++_loadVersion;
+      if (_translations.Count > 0 && string.Equals(CurrentLanguageName, langCode, StringComparison.Ordinal))
+      {
+        return;
+      }
+
+      try
+      {
+        var response = await _http.GetFromJsonAsync<Dictionary<string, string>>($"i18n/{langCode}.json");
+        if (response != null && version == _loadVersion)
+        {
+          _translations = new Dictionary<string, string>(response, StringComparer.OrdinalIgnoreCase);
+          CurrentLanguageName = langCode;
+          OnLanguageChanged?.Invoke();
+        }
+      }
+      catch (Exception ex)
+      {
+        Console.WriteLine($"Failed to load language {langCode}: {ex.Message}");
+      }
+    }
+
+    public string this[string key]
+    {
+      get
+      {
+        if (_translations.TryGetValue(key, out var value))
+          return value;
+        return key; // Fallback to key if translation not found
+      }
+    }
+  }
 }

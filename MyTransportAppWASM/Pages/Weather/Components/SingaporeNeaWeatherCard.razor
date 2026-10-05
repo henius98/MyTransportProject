@@ -7,11 +7,16 @@
     <div class="d-flex align-items-center justify-content-between mb-3 border-bottom border-secondary border-opacity-10 pb-3">
         <div>
             <h3 class="m-0 fw-semibold" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(Options.Name ?? "Singapore NEA")</h3>
-            <div class="text-dim mt-1" style="font-size: 0.75rem;">
-                <i class="bi bi-box-arrow-up-right me-1"></i>@(Options.Source ?? "data.gov.sg")
-            </div>
+            <a class="text-dim mt-1 d-inline-block" style="font-size: 0.75rem;" href="@($"https://{SourceDomain}")"
+               target="_blank" rel="noopener noreferrer">
+                <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>@SourceDomain
+            </a>
         </div>
-        <span class="badge @MyTransportAppWASM.Utils.WeatherUIHelper.GetStatusClass(Provider?.Status ?? "Loading")">@(Provider?.Status ?? "Loading")</span>
+        <WeatherStatusBadge Status="@(Provider?.Status ?? "Loading")"
+                            ProviderName="@(Options.Name ?? "Singapore NEA")"
+                            IsCached="@(Provider?.IsCached == true)"
+                            IsRefreshing="isLoading"
+                            OnRefresh="RefreshAsync" />
     </div>
 
     @if (isLoading)
@@ -33,7 +38,7 @@
                     </div>
                     <div>
                         <strong class="d-block mb-1 text-primary" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(slice.Summary ?? "N/A")</strong>
-                        <div class="text-dim" style="font-size: 0.85rem;"><i class="bi bi-calendar-event me-1"></i>@slice.Time.ToLocalTime().ToString("ddd, dd MMM HH:mm")</div>
+                        <div class="text-dim" style="font-size: 0.85rem;"><i class="bi bi-calendar-event me-1"></i>@MalaysiaTime.Convert(slice.Time).ToString("ddd, dd MMM HH:mm")</div>
                     </div>
                 </div>
                 
@@ -59,13 +64,13 @@
 
 @code {
     [Parameter, EditorRequired]
-    public required WeatherProviderOptions Options { get; set; }
+    public required KeyedWeatherProviderOptions Options { get; set; }
 
     [Parameter, EditorRequired]
     public required WeatherQuery Query { get; set; }
 
     [Parameter]
-    public string Label { get; set; } = "Baseline";
+    public string Label { get; set; } = "Realtime";
 
     [Parameter]
     public bool FetchOutlook { get; set; } = false;
@@ -73,6 +78,7 @@
     private WeatherProviderResult? Provider;
     private bool isLoading = true;
     private string? lastUrl;
+    private string SourceDomain => string.IsNullOrWhiteSpace(Options.Source) ? "data.gov.sg" : Options.Source;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -85,9 +91,9 @@
                 {
                     endpointPath = outlookPath;
                 }
-                else if (Options.Endpoints != null && Options.Endpoints.TryGetValue("Baseline", out string? baselinePath))
+                else if (Options.Endpoints != null && Options.Endpoints.TryGetValue("Realtime", out string? realtimePath))
                 {
-                    endpointPath = baselinePath;
+                    endpointPath = realtimePath;
                 }
 
                 string fullUrl = Options.BaseUrl + endpointPath;
@@ -99,27 +105,52 @@
                 lastUrl = uri.AbsoluteUri;
                 isLoading = true;
 
-                Provider = await WeatherPlannerService.FetchProviderDataAsync(Options, uri, Label);
-
-                // Filter logic
-                if (!FetchOutlook && Provider.Periods.Count > 1)
-                {
-                    var now = DateTimeOffset.UtcNow;
-                    var closest = Provider.Periods.MinBy(p => Math.Abs((p.Time - now).Ticks));
-                    if (closest != null)
-                        Provider = Provider with { Periods = new List<WeatherTimeSlice> { closest } };
-                }
-                else if (FetchOutlook && Provider.Periods.Count > 0)
-                {
-                    var now = DateTimeOffset.UtcNow;
-                    var sortedPeriods = Provider.Periods.Where(p => p.Time.Date >= now.Date).OrderBy(p => p.Time).Take(14).ToList();
-                    Provider = Provider with { Periods = sortedPeriods };
-                }
+                await LoadProviderAsync(uri);
             }
         }
         finally
         {
             isLoading = false;
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        if (Provider?.IsCached != true || lastUrl == null || isLoading)
+            return;
+
+        isLoading = true;
+        try
+        {
+            await LoadProviderAsync(new Uri(lastUrl, UriKind.Absolute), forceRefresh: true);
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadProviderAsync(Uri uri, bool forceRefresh = false)
+    {
+        Provider = await WeatherPlannerService.FetchProviderDataAsync(
+            Options,
+            uri,
+            Label,
+            forceRefresh: forceRefresh);
+
+        // Filter logic
+        if (!FetchOutlook && Provider.Periods.Count > 1)
+        {
+            var now = MalaysiaTime.Now;
+            var closest = Provider.Periods.MinBy(p => Math.Abs((p.Time - now).Ticks));
+            if (closest != null)
+                Provider = Provider with { Periods = new List<WeatherTimeSlice> { closest } };
+        }
+        else if (FetchOutlook && Provider.Periods.Count > 0)
+        {
+            var now = MalaysiaTime.Now;
+            var sortedPeriods = Provider.Periods.Where(p => MalaysiaTime.Convert(p.Time).Date >= now.Date).OrderBy(p => p.Time).Take(14).ToList();
+            Provider = Provider with { Periods = sortedPeriods };
         }
     }
 

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json.Serialization;
 
@@ -71,15 +72,32 @@ namespace MyTransportAppWASM.Services
       if (string.IsNullOrWhiteSpace(address))
         return new();
 
+      address = address.Trim();
+      var coordinates = address.Contains(',')
+        ? address.Split(',', StringSplitOptions.TrimEntries)
+        : address.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+      if (coordinates.Length == 2
+        && double.TryParse(coordinates[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var latitude)
+        && double.TryParse(coordinates[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var longitude))
+      {
+        if (!double.IsFinite(latitude) || !double.IsFinite(longitude)
+          || latitude is < -90 or > 90 || longitude is < -180 or > 180)
+          return new();
+
+        return [(latitude, longitude, "Latitude, longitude", FormattableString.Invariant($"{latitude}, {longitude}"))];
+      }
+
       try
       {
         var metLocations = await GetMetLocationsAsync();
         if (metLocations != null)
         {
           return metLocations
-            .Where(l => l.LocationName != null && l.LocationName.Contains(address, StringComparison.OrdinalIgnoreCase))
+            .Where(l => l.LocationName?.Contains(address, StringComparison.OrdinalIgnoreCase) == true
+              || l.LocationId?.Contains(address, StringComparison.OrdinalIgnoreCase) == true)
+            .OrderByDescending(l => string.Equals(l.LocationId, address, StringComparison.OrdinalIgnoreCase))
             .Take(15)
-            .Select(l => (l.Latitude, l.Longitude, $"MET ID: {l.LocationId}", l.LocationName!))
+            .Select(l => (l.Latitude, l.Longitude, $"MET ID: {l.LocationId}", l.LocationName ?? l.LocationId!))
             .ToList();
         }
       }

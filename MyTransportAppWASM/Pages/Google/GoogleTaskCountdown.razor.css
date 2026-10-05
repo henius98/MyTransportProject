@@ -1,0 +1,12 @@
+.task-countdown { padding: 14px 12px; border: 1px solid var(--border-color); border-radius: 16px; background: var(--gcal-surface); color: var(--text-color); }
+.task-countdown + .task-countdown { margin-top: 12px; }
+.task-countdown h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 16px; color: var(--text-dim); font-size: 12px; font-weight: 400; }
+.task-countdown-name { display: block; font-size: 14px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
+.task-countdown-clock { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin: 16px 0; }
+.task-countdown-clock--today { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.task-countdown-clock span { text-align: center; }
+.task-countdown-clock strong { display: block; font-size: 23px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.task-countdown-clock small { color: var(--text-dim); font-size: 10px; }
+.task-countdown-today { margin: 16px 0; font-size: 22px; }
+.task-countdown p { margin: 12px 0; color: var(--text-dim); font-size: 11px; line-height: 1.6; }
+.task-countdown a { display: inline-flex; align-items: center; gap: 8px; color: var(--text-color); font-size: 12px; text-underline-offset: 3px; }

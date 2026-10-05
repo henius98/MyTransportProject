@@ -8,36 +8,63 @@ const user = (uid = "user-a") => ({ uid, email: `${uid}@example.com`, providerDa
 const response = (payload = {}, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => payload });
 const plain = value => JSON.parse(JSON.stringify(value));
 
-async function setup() {
-    const state = { auth: { currentUser: user() }, requests: [], popups: [], now: 1000 };
+async function setup({ storage = new Map(), cloud = new Map(), currentUser = user(), now = 1000 } = {}) {
+    const state = { auth: { currentUser, authStateReady: async () => { await state.restoration; } }, requests: [], popups: [], now, storage, cloud, refreshes: 0 };
     const sdk = {
-        GoogleAuthProvider: class {
-            scopes = [];
-            addScope(scope) { this.scopes.push(scope); }
-            setCustomParameters(parameters) { this.parameters = parameters; }
-            static credentialFromResult(result) { return result.credential; }
-        },
-        onAuthStateChanged(_auth, callback) { state.authChanged = callback; return () => {}; },
-        async reauthenticateWithPopup(currentUser, provider) {
-            state.popups.push({ user: currentUser, scopes: provider.scopes, parameters: provider.parameters });
-            return state.reauthenticate ? state.reauthenticate() : { user: currentUser, credential: { accessToken: `google-token-${state.popups.length}` } };
-        }
+        onAuthStateChanged(_auth, callback) { state.authChanged = callback; return () => {}; }
     };
     state.changeUser = value => { state.auth.currentUser = value; state.authChanged?.(value); };
     const context = createContext({
         URLSearchParams,
+        localStorage: {
+            getItem: key => storage.get(key) ?? null,
+            setItem: (key, value) => storage.set(key, value),
+            removeItem: key => storage.delete(key)
+        },
         Date: class extends Date { static now() { return state.now; } },
         fetch: async (url, options) => {
             state.requests.push({ url, ...options });
             return state.fetch ? state.fetch(url, options) : response({ items: [] });
         }
     });
-    // No production dependency injection or token export is needed: only Firebase is mocked at the module boundary.
+    // No production dependency injection is needed: Firebase is mocked at the module boundary, with shared browser and cloud storage across reloads.
     const firebase = new SyntheticModule(["getAuthContext"], function () {
         this.setExport("getAuthContext", async () => ({ auth: state.auth, sdk }));
     }, { context });
+    const authorization = new SyntheticModule(["authorizeConnection", "restoreConnection", "invalidateConnection", "prepareAuthorization"], function () {
+        this.setExport("prepareAuthorization", async () => {});
+        this.setExport("authorizeConnection", async (uid, service, email, requireSession) => {
+            state.popups.push({ user: state.auth.currentUser, parameters: { login_hint: email }, scopes: service === "calendar"
+                ? ["https://www.googleapis.com/auth/calendar.calendarlist.readonly", "https://www.googleapis.com/auth/calendar.events"]
+                : ["https://www.googleapis.com/auth/tasks"] });
+            const result = state.reauthenticate ? await state.reauthenticate() : { user: state.auth.currentUser, credential: { accessToken: `google-token-${state.popups.length}` } };
+            if (result.user.uid !== uid) throw new Error("Choose the same Google account you used to sign in to this app.");
+            requireSession();
+            const connection = { accessToken: result.credential.accessToken, expiresAt: state.now + 3600000 };
+            cloud.set(`${uid}/${service}`, connection);
+            return connection;
+        });
+        this.setExport("restoreConnection", async (uid, service, rejectedAccessToken) => {
+            if (state.restore) return state.restore(uid, service, rejectedAccessToken);
+            let saved = cloud.get(`${uid}/${service}`);
+            if (!saved) return null;
+            if (saved.expiresAt <= state.now + 60000 || saved.accessToken === rejectedAccessToken) {
+                saved = { accessToken: `renewed-${++state.refreshes}`, expiresAt: state.now + 3600000 };
+                cloud.set(`${uid}/${service}`, saved);
+            }
+            return saved;
+        });
+        this.setExport("invalidateConnection", async (uid, service, rejectedAccessToken) => {
+            if (cloud.get(`${uid}/${service}`)?.accessToken === rejectedAccessToken) cloud.delete(`${uid}/${service}`);
+        });
+    }, { context });
     const module = new SourceTextModule(source, { context });
-    await module.link(specifier => {
+    await module.link(async specifier => {
+        if (specifier === "./google-authorization.js") return authorization;
+        if (specifier === "./google-token-store.js") {
+            const storeSource = await readFile(new URL("../../MyTransportAppWASM/wwwroot/js/google-token-store.js", import.meta.url), "utf8");
+            return new SourceTextModule(storeSource, { context });
+        }
         assert.equal(specifier, "./firebase-auth.js");
         return firebase;
     });
@@ -58,6 +85,7 @@ test("requires separate service consent, requests narrow scopes, and uses only t
         "https://www.googleapis.com/auth/calendar.calendarlist.readonly", "https://www.googleapis.com/auth/calendar.events"
     ]);
     assert.equal(state.popups[0].parameters.login_hint, "user-a@example.com");
+    assert.equal(state.popups[0].parameters.prompt, undefined);
     await state.api.listCalendars("user-a");
     assert.equal(state.requests[0].headers.Authorization, "Bearer google-token-1");
     assert.equal(state.requests[0].credentials, "omit");
@@ -69,42 +97,200 @@ test("requires separate service consent, requests narrow scopes, and uses only t
     assert.equal(state.requests[1].headers.Authorization, "Bearer google-token-2");
 });
 
-test("tokens never touch browser storage and disappear on a fresh module load", async () => {
+test("restores both services after reload and renews expired access without another popup", async () => {
     const state = await setup();
-    for (const name of ["localStorage", "sessionStorage", "indexedDB", "document"]) {
-        Object.defineProperty(state.context, name, { get() { assert.fail(`Unexpected access to ${name}`); } });
-    }
     await state.api.connect("user-a", "calendar");
-    await state.api.listCalendars("user-a");
-    assert.equal(await state.api.isConnected("user-a", "calendar"), true);
-    const fresh = await setup();
-    assert.equal(await fresh.api.isConnected("user-a", "calendar"), false);
+    await state.api.connect("user-a", "tasks");
+    const fresh = await setup({ storage: state.storage, cloud: state.cloud, now: state.now + 10 * 60 * 1000 });
+    assert.equal(await fresh.api.isConnected("user-a", "calendar"), true);
+    assert.equal(await fresh.api.isConnected("user-a", "tasks"), true);
+    await fresh.api.listCalendars("user-a");
+    await fresh.api.listTaskLists("user-a");
+    assert.deepEqual(fresh.requests.map(request => request.headers.Authorization), ["Bearer google-token-1", "Bearer google-token-2"]);
+    assert.equal(fresh.popups.length, 0);
+    fresh.now = state.now + 3600000;
+    assert.equal(await fresh.api.isConnected("user-a", "calendar"), true);
+    assert.equal(await fresh.api.isConnected("user-a", "tasks"), true);
+    assert.equal(fresh.refreshes, 2);
+    assert.equal(fresh.popups.length, 0);
 });
 
-test("expires memory credentials and invalidates revoked credentials on 401", async () => {
+test("renews expired credentials and invalidates credentials still rejected after one 401 retry", async () => {
     const state = await setup();
     await state.api.connect("user-a", "calendar");
-    state.now += 50 * 60 * 1000;
-    assert.equal(await state.api.isConnected("user-a", "calendar"), false);
-    await assert.rejects(state.api.listCalendars("user-a"), /Connect Google Calendar/);
-    assert.equal(state.requests.length, 0);
-    await state.api.connect("user-a", "calendar");
+    state.now += 3600000;
+    assert.equal(await state.api.isConnected("user-a", "calendar"), true);
+    await state.api.listCalendars("user-a");
+    assert.equal(state.requests[0].headers.Authorization, "Bearer renewed-1");
     state.fetch = () => response({}, 401);
     await assert.rejects(state.api.listCalendars("user-a"), /expired or was revoked/);
     assert.equal(await state.api.isConnected("user-a", "calendar"), false);
+    assert.equal(state.requests.length, 3);
+    const fresh = await setup({ storage: state.storage, cloud: state.cloud });
+    assert.equal(await fresh.api.isConnected("user-a", "calendar"), false);
 });
 
-test("sign-out and account changes discard all credentials, including when the same account returns", async () => {
+test("opening service pages before Firebase restores the account preserves both saved connections", async () => {
+    const state = await setup();
+    await state.api.connect("user-a", "calendar");
+    await state.api.connect("user-a", "tasks");
+    const fresh = await setup({ storage: state.storage, currentUser: null });
+    let restore;
+    fresh.restoration = new Promise(resolve => { restore = resolve; });
+    const checks = Promise.allSettled([
+        fresh.api.isConnected("user-a", "calendar"),
+        fresh.api.isConnected("user-a", "tasks")
+    ]);
+    await new Promise(resolve => setImmediate(resolve));
+    fresh.changeUser(user());
+    restore();
+    assert.deepEqual(await checks, [
+        { status: "fulfilled", value: true },
+        { status: "fulfilled", value: true }
+    ]);
+    assert.equal(await fresh.api.isConnected("user-a", "calendar"), true);
+    assert.equal(await fresh.api.isConnected("user-a", "tasks"), true);
+    assert.equal(fresh.popups.length, 0);
+});
+
+test("reopening on another device restores both services entirely from Firestore", async () => {
+    const state = await setup();
+    await state.api.connect("user-a", "calendar");
+    await state.api.connect("user-a", "tasks");
+    const fresh = await setup({ cloud: state.cloud, now: state.now + 86400000 });
+    assert.equal(await fresh.api.isConnected("user-a", "calendar"), true);
+    assert.equal(await fresh.api.isConnected("user-a", "tasks"), true);
+    assert.equal(fresh.refreshes, 2);
+    assert.equal(fresh.popups.length, 0);
+});
+
+test("concurrent access checks share renewal and discard responses after sign-out", async () => {
+    const state = await setup();
+    let finish;
+    let restores = 0;
+    state.restore = () => { restores++; return new Promise(resolve => { finish = resolve; }); };
+    const pending = Promise.allSettled([
+        state.api.isConnected("user-a", "calendar"), state.api.isConnected("user-a", "calendar")
+    ]);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(restores, 1);
+    state.changeUser(null);
+    finish({ accessToken: "stale", expiresAt: 3601000 });
+    for (const result of await pending) {
+        assert.equal(result.status, "rejected");
+        assert.match(result.reason.message, /account has changed/);
+    }
+    assert.equal(state.storage.size, 0);
+});
+
+test("a delayed restore does not overwrite a newly authorized connection", async () => {
+    const state = await setup();
+    let finish;
+    state.restore = () => new Promise(resolve => { finish = resolve; });
+    const restoring = state.api.isConnected("user-a", "calendar");
+    await new Promise(resolve => setImmediate(resolve));
+    await state.api.connect("user-a", "calendar");
+    finish(null);
+    assert.equal(await restoring, true);
+    await state.api.listCalendars("user-a");
+    assert.equal(state.requests[0].headers.Authorization, "Bearer google-token-1");
+});
+
+test("an early 401 renews access and retries once without another consent popup", async () => {
+    const state = await setup();
+    await state.api.connect("user-a", "tasks");
+    state.fetch = () => state.requests.length === 1 ? response({}, 401) : response({ items: [{ id: "restored" }] });
+    assert.deepEqual(plain(await state.api.listTaskLists("user-a")), [{ id: "restored" }]);
+    assert.equal(state.requests.length, 2);
+    assert.equal(state.requests[1].headers.Authorization, "Bearer renewed-1");
+    assert.equal(state.popups.length, 1);
+});
+
+test("temporary refresh failure leaves cloud consent available for the next visit", async () => {
+    const state = await setup();
+    await state.api.connect("user-a", "tasks");
+    state.now += 86400000;
+    state.restore = () => { throw new Error("Google could not be reached"); };
+    await assert.rejects(state.api.isConnected("user-a", "tasks"), /could not be reached/);
+    assert.equal(state.cloud.size, 1);
+    const fresh = await setup({ cloud: state.cloud, now: state.now });
+    assert.equal(await fresh.api.isConnected("user-a", "tasks"), true);
+    assert.equal(fresh.popups.length, 0);
+});
+
+test("cancelling a reconnect preserves the existing unexpired access across reloads", async () => {
+    const state = await setup();
+    await state.api.connect("user-a", "calendar");
+    await state.api.connect("user-a", "tasks");
+    const saved = [...state.storage.entries()];
+    state.reauthenticate = () => {
+        throw new Error("The Google permission window was closed.");
+    };
+    await assert.rejects(state.api.connect("user-a", "calendar"), /closed/);
+    assert.deepEqual([...state.storage.entries()], saved);
+    const fresh = await setup({ storage: state.storage });
+    assert.equal(await fresh.api.isConnected("user-a", "calendar"), true);
+    assert.equal(await fresh.api.isConnected("user-a", "tasks"), true);
+    await fresh.api.listCalendars("user-a");
+    assert.equal(fresh.requests[0].headers.Authorization, "Bearer google-token-1");
+});
+
+test("saved credentials cannot be restored by another account", async () => {
+    const state = await setup();
+    await state.api.connect("user-a", "calendar");
+    await state.api.connect("user-a", "tasks");
+    const fresh = await setup({ storage: state.storage, currentUser: user("user-b") });
+    assert.equal(await fresh.api.isConnected("user-b", "calendar"), false);
+    assert.equal(await fresh.api.isConnected("user-b", "tasks"), false);
+    await assert.rejects(fresh.api.listCalendars("user-b"), /Connect Google Calendar/);
+    assert.equal(fresh.requests.length, 0);
+    assert.equal(state.storage.size, 0);
+});
+
+test("invalid saved credentials are discarded and reconnect remains available", async () => {
+    for (const value of ["broken json", "null", "[]", "123", JSON.stringify({ calendar: { uid: "user-a", accessToken: "token" } }),
+        JSON.stringify({ calendar: { uid: "user-a", accessToken: "", expiresAt: 9999999 } })]) {
+        const state = await setup();
+        await state.api.connect("user-a", "calendar");
+        const key = [...state.storage.keys()][0];
+        state.storage.set(key, value);
+        const fresh = await setup({ storage: state.storage });
+        assert.equal(await fresh.api.isConnected("user-a", "calendar"), false);
+        await fresh.api.connect("user-a", "calendar");
+        assert.equal(await fresh.api.isConnected("user-a", "calendar"), true);
+    }
+});
+
+test("blocked storage or failed writes fall back to the current page session", async () => {
+    for (const failure of ["access", "write"]) {
+        const state = await setup();
+        if (failure === "access") {
+            Object.defineProperty(state.context, "localStorage", { get() { throw new Error("Storage blocked"); } });
+        } else {
+            state.context.localStorage.setItem = () => { throw new Error("Quota exceeded"); };
+        }
+        await state.api.connect("user-a", "calendar");
+        assert.equal(await state.api.isConnected("user-a", "calendar"), true);
+        await state.api.listCalendars("user-a");
+        state.changeUser(null);
+        state.changeUser(user());
+        assert.equal(await state.api.isConnected("user-a", "calendar"), true);
+    }
+});
+
+test("sign-out clears browser credentials while the same account can restore its saved cloud connection", async () => {
     const state = await setup();
     await state.api.connect("user-a", "calendar");
     await state.api.connect("user-a", "tasks");
     state.changeUser(null);
+    assert.equal(state.storage.size, 0);
     await assert.rejects(state.api.listTaskLists("user-a"), /account has changed/);
     state.changeUser(user());
-    assert.equal(await state.api.isConnected("user-a", "calendar"), false);
-    assert.equal(await state.api.isConnected("user-a", "tasks"), false);
+    assert.equal(await state.api.isConnected("user-a", "calendar"), true);
+    assert.equal(await state.api.isConnected("user-a", "tasks"), true);
     await state.api.connect("user-a", "calendar");
     state.changeUser(user("user-b"));
+    assert.equal(state.storage.size, 0);
     await assert.rejects(state.api.listCalendars("user-a"), /account has changed/);
     assert.equal(await state.api.isConnected("user-b", "calendar"), false);
     assert.equal(state.requests.length, 0);
@@ -274,15 +460,38 @@ test("partial scope denial disconnects only the affected service so it can be re
     await assert.rejects(state.api.listCalendars("user-a"), /denied access/);
     assert.equal(await state.api.isConnected("user-a", "calendar"), false);
     assert.equal(await state.api.isConnected("user-a", "tasks"), true);
+    const fresh = await setup({ storage: state.storage });
+    assert.equal(await fresh.api.isConnected("user-a", "calendar"), false);
+    assert.equal(await fresh.api.isConnected("user-a", "tasks"), true);
+});
+
+test("a delayed authorization failure cannot discard a newer token saved in another tab", async () => {
+    for (const status of [401, 403]) {
+        const state = await setup();
+        await state.api.connect("user-a", "calendar");
+        const otherTab = await setup({ storage: state.storage, cloud: state.cloud });
+        otherTab.reauthenticate = () => ({ user: user(), credential: { accessToken: "renewed-token" } });
+        state.fetch = async () => {
+            await otherTab.api.connect("user-a", "calendar");
+            if (state.requests.length > 1) return response({ items: [] });
+            return response({ error: { details: [{ reason: "ACCESS_TOKEN_SCOPE_INSUFFICIENT" }] } }, status);
+        };
+        if (status === 401) await state.api.listCalendars("user-a");
+        else await assert.rejects(state.api.listCalendars("user-a"), /denied access/);
+        assert.equal(await state.api.isConnected("user-a", "calendar"), true);
+        state.fetch = null;
+        await state.api.listCalendars("user-a");
+        assert.equal(state.requests.at(-1).headers.Authorization, "Bearer renewed-token");
+    }
 });
 
 test("consent failures can be retried and never grant a connection", async () => {
-    for (const [code, expected] of [
-        ["auth/popup-blocked", /Allow pop-ups/], ["auth/popup-closed-by-user", /closed/],
-        ["auth/user-mismatch", /same Google account/], ["auth/unauthorized-domain", /authorized domains/]
+    for (const [message, expected] of [
+        ["Allow pop-ups for this site", /Allow pop-ups/], ["The permission window was closed", /closed/],
+        ["Choose the same Google account", /same Google account/], ["Google could not be reached", /could not be reached/]
     ]) {
         const state = await setup();
-        state.reauthenticate = () => { throw Object.assign(new Error(code), { code }); };
+        state.reauthenticate = () => { throw new Error(message); };
         await assert.rejects(state.api.connect("user-a", "tasks"), expected);
         assert.equal(await state.api.isConnected("user-a", "tasks"), false);
         state.reauthenticate = null;

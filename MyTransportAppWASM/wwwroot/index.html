@@ -182,48 +182,20 @@
       <a href="." class="reload">Reload</a>
       <button class="dismiss" aria-label="Dismiss error">🗙</button>
     </div>
-    <script>
-      // Firebase Auth state is managed natively by Firebase JS SDK
-      window.appAuth = {
-        explicitLogoutKey: "mytransport.explicitLogout",
-        noteExplicitLogout: function () {
-          sessionStorage.setItem(this.explicitLogoutKey, "true");
-        },
-        clearExplicitLogout: function () {
-          sessionStorage.removeItem(this.explicitLogoutKey);
-        },
-        wasExplicitLogout: function () {
-          return sessionStorage.getItem(this.explicitLogoutKey) === "true";
-        }
-      };
-    </script>
+    <!-- Firebase manages popup completion and auth state natively, without a delayed opener reload. -->
     <!-- Empty importmap removed — no module specifier overrides needed -->
     <script src="js/theme-manager.js"></script>
     <script src="_framework/blazor.webassembly.js" autostart="false"></script>
+    <!-- Register the push service worker when a signed-in user opts in. -->
     <script type="module">
       await Promise.allSettled([
         import("./js/firebase-auth.js"),
         import("./js/firebase-firestore.js"),
+        import("./js/push-notifications.js"),
       ]);
       await Blazor.start();
     </script>
 
-    <script src="js/auth.js" type="module"></script>
-    <script>
-      // Unregister any previously cached service workers to suppress stale no-op fetch handler warnings
-      if ("serviceWorker" in navigator) {
-        var appBaseUrl = new URL(document.baseURI).href;
-        navigator.serviceWorker
-          .getRegistrations()
-          .then(function (registrations) {
-            for (let reg of registrations) {
-              if (reg.scope.startsWith(appBaseUrl)) {
-                reg.unregister();
-              }
-            }
-          });
-      }
-    </script>
     <!-- Dialog Helper and Fallback -->
     <script>
       window.dialogHelper = {

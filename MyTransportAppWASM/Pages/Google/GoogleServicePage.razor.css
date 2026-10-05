@@ -5,6 +5,125 @@
     color: var(--text-color);
 }
 
+.google-workspace--calendar {
+    max-width: none;
+    padding: 0;
+    position: relative;
+    --gcal-shell: #202020;
+    --gcal-surface: #191919;
+    --gcal-week-bg: #2b2b2b;
+    --gcal-hover: #303134;
+    --gcal-create: #373b3d;
+    --gcal-date-scheme: dark;
+    --bg-color: #202020;
+    --text-color: #e3e3e3;
+    --text-dim: #bdc1c6;
+    --card-bg: #202020;
+    --border-color: #363636;
+    --primary-blue: #a8c7fa;
+    color: var(--text-color);
+    background: var(--gcal-shell);
+    color-scheme: dark;
+}
+
+.theme-light .google-workspace--calendar {
+    --gcal-shell: #f8fafd;
+    --gcal-surface: #fff;
+    --gcal-week-bg: #f1f3f4;
+    --gcal-hover: #e8eaed;
+    --gcal-create: #c2e7ff;
+    --gcal-date-scheme: light;
+    --bg-color: #fff;
+    --text-color: #3c4043;
+    --text-dim: #5f6368;
+    --card-bg: #fff;
+    --border-color: #dadce0;
+    --primary-blue: #1a73e8;
+    color-scheme: light;
+}
+
+.google-workspace--calendar ::deep .google-connection.gcal-connected {
+    position: absolute;
+    top: 14px;
+    right: 24px;
+    z-index: 2;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 0;
+    margin: 0;
+}
+
+.google-workspace--calendar ::deep .gcal-reconnect {
+    min-height: 36px;
+    height: 36px;
+    padding: 0 12px;
+    color: var(--text-color);
+    border: 1px solid var(--text-dim);
+    background: var(--gcal-shell);
+    border-radius: 20px;
+    font-size: .8rem;
+}
+
+@media (max-width: 1050px) {
+    .google-workspace--calendar ::deep .google-connection.gcal-connected {
+        position: static;
+        justify-content: flex-end;
+        padding: 8px 12px;
+        background: var(--gcal-shell);
+    }
+}
+
+.google-workspace--tasks {
+    --tasks-bg: #131314;
+    --tasks-surface: #1e1f20;
+    --tasks-hover: #303134;
+    --tasks-border: #444746;
+    --tasks-text: #e3e3e3;
+    --tasks-muted: #a9acb0;
+    --tasks-accent: #a8c7fa;
+    --tasks-selected: #334b70;
+    --tasks-date-scheme: dark;
+    max-width: none;
+    padding: 0 0 2rem;
+    position: relative;
+    color: var(--tasks-text);
+}
+
+.google-workspace--tasks ::deep .google-connection.gtasks-connected {
+    position: absolute;
+    top: 14px;
+    right: 165px;
+    z-index: 2;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.google-workspace--tasks ::deep .gtasks-reconnect {
+    min-height: 36px;
+    padding: .4rem .8rem;
+    border: 1px solid var(--tasks-border);
+    border-radius: 18px;
+    background: var(--tasks-surface);
+    color: var(--tasks-text);
+    font-size: .8rem;
+}
+
+.theme-light .google-workspace--tasks {
+    --tasks-bg: #f8fafd;
+    --tasks-surface: #fff;
+    --tasks-hover: #f1f3f4;
+    --tasks-border: #dadce0;
+    --tasks-text: #1f1f1f;
+    --tasks-muted: #5f6368;
+    --tasks-accent: #0b57d0;
+    --tasks-selected: #d3e3fd;
+    --tasks-date-scheme: light;
+}
+
 .google-heading h1 {
     font-family: 'Outfit', sans-serif;
     font-size: clamp(2rem, 4vw, 3rem);
@@ -126,6 +245,10 @@
 .google-workspace ::deep input[type="datetime-local"] { color-scheme: dark; }
 .theme-light .google-workspace ::deep input[type="date"],
 .theme-light .google-workspace ::deep input[type="datetime-local"] { color-scheme: light; }
+.google-workspace--calendar ::deep input[type="date"],
+.google-workspace--calendar ::deep input[type="datetime-local"] { color-scheme: var(--gcal-date-scheme); }
+.google-workspace--calendar ::deep .gcal .btn--primary { background: #a8c7fa; color: #062e6f; box-shadow: none; }
+.google-workspace--calendar ::deep .gcal a { color: var(--primary-blue); }
 
 .google-workspace ::deep .google-list { list-style: none; padding: 0; margin: 0; }
 .google-workspace ::deep .google-list-item { padding: 1rem 0; border-bottom: 1px solid var(--border-color); overflow-wrap: anywhere; }
@@ -150,4 +273,15 @@
     .google-workspace ::deep .google-panel,
     .google-workspace ::deep .google-service-card { padding: 1rem; }
     .google-tabs ::deep a { padding: .75rem .4rem; font-size: .9rem; }
+}
+
+@media (max-width: 640px) {
+    .google-workspace--tasks,
+    .google-workspace--calendar { padding-top: 0; }
+    .google-workspace--tasks ::deep .google-connection.gtasks-connected {
+        position: static;
+        justify-content: flex-end;
+        padding: .4rem 1rem;
+        background: var(--tasks-surface);
+    }
 }

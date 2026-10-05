@@ -1,5 +1,8 @@
 {
   "version": "1",
   "name": "MyTransportAppWASM External APIs",
-  "type": "collection"
+  "type": "collection",
+  "presets": {
+    "defaultEnvironment": "Local"
+  }
 }

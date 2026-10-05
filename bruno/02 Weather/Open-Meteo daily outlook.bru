@@ -5,7 +5,7 @@ meta {
 }
 
 get {
-  url: {{open_meteo_base}}/v1/forecast?latitude={{latitude}}&longitude={{longitude}}&daily=temperature_2m_max,precipitation_probability_max,weather_code&forecast_days={{forecast_days}}&timezone=UTC
+  url: {{open_meteo_base}}/v1/forecast?latitude={{latitude}}&longitude={{longitude}}&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_speed_10m_max,uv_index_max,sunrise,sunset,weather_code&forecast_days={{forecast_days}}&timezone=auto
   body: none
   auth: none
 }
