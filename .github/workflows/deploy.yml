@@ -35,7 +35,7 @@ jobs:
 
       - name: Configure Firebase web app
         env:
-          FIREBASE_CONFIG_JSON: ${{ vars.FIREBASE_CONFIG_JSON }}\
+          FIREBASE_CONFIG_JSON: ${{ vars.FIREBASE_CONFIG_JSON }}
         run: node scripts/configure-firebase.mjs
 
       - name: Install .NET WASM Build Tools
@@ -56,8 +56,9 @@ jobs:
         run: |
           node --experimental-vm-modules --test tests/google-services/*.test.mjs
           corepack enable
-          pnpm --prefix functions install --frozen-lockfile
-          pnpm --prefix functions test
+          cd functions
+          pnpm install --frozen-lockfile
+          pnpm test
 
       - name: Setup Java for Firebase tests
         # The Firestore emulator requires Java 21 or later.
@@ -77,6 +78,7 @@ jobs:
 
       - name: Prepare for GitHub Pages
         run: |
+          which rsync || ((command -v sudo >/dev/null 2>&1 && sudo apt-get update -qq && sudo apt-get install -y -qq rsync) || (apt-get update -qq && apt-get install -y -qq rsync))
           # Copy index.html to 404.html for SPA support
           cp release/wwwroot/index.html release/wwwroot/404.html
           # Add .nojekyll to bypass Jekyll
@@ -92,6 +94,7 @@ jobs:
         with:
           folder: release/wwwroot
           branch: gh-pages
+          dry-run: ${{ env.ACT == 'true' }}
 
       - name: Package for Release
         if: startsWith(github.ref, 'refs/tags/v')
