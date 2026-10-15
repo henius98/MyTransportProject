@@ -1,24 +1,24 @@
 import { getAuthContext } from "./firebase-auth.js";
+import { clearConnections, getConnection, setConnection } from "./google-token-store.js";
+import { authorizeConnection, restoreConnection, invalidateConnection, prepareAuthorization } from "./google-authorization.js";
 
 const services = {
     calendar: {
         name: "Google Calendar",
-        base: "https://www.googleapis.com/calendar/v3/",
-        scopes: ["https://www.googleapis.com/auth/calendar.calendarlist.readonly", "https://www.googleapis.com/auth/calendar.events"]
+        base: "https://www.googleapis.com/calendar/v3/"
     },
     tasks: {
         name: "Google Tasks",
-        base: "https://tasks.googleapis.com/tasks/v1/",
-        scopes: ["https://www.googleapis.com/auth/tasks"]
+        base: "https://tasks.googleapis.com/tasks/v1/"
     }
 };
 
-// Google access tokens stay in this module's memory; Firebase ID tokens cannot authorize these APIs.
-const connections = new Map();
+// Google access tokens are cached in this browser; the backend restores and renews them from Firestore.
 let observingAuth = false;
 let currentUid = null;
 let sessionVersion = 0;
 let connecting = false;
+const restoring = new Map();
 
 function serviceDetails(service) {
     if (!Object.hasOwn(services, service)) throw new Error("This Google service is not supported.");
@@ -30,12 +30,13 @@ function accountChanged(user) {
     if (uid !== currentUid) {
         currentUid = uid;
         sessionVersion++;
-        connections.clear();
+        clearConnections();
     }
 }
 
 async function contextFor(uid) {
     const context = await getAuthContext();
+    await context.auth.authStateReady();
     if (!observingAuth) {
         currentUid = context.auth.currentUser?.uid ?? null;
         context.sdk.onAuthStateChanged(context.auth, accountChanged);
@@ -53,60 +54,68 @@ function requireAccount(context, uid, version = sessionVersion) {
 }
 
 function activeConnection(uid, service) {
-    const connection = connections.get(service);
-    if (connection && (connection.uid !== uid || connection.expiresAt <= Date.now())) {
-        connections.delete(service);
+    const connection = getConnection(service);
+    if (connection && (connection.uid !== uid || typeof connection.accessToken !== "string" || !connection.accessToken ||
+        !Number.isFinite(connection.expiresAt) || connection.expiresAt <= Date.now() + 60000)) {
+        setConnection(service, null);
         return null;
     }
     return connection;
+}
+
+async function connectionFor(context, uid, service, rejectedAccessToken = null) {
+    const cached = activeConnection(uid, service);
+    if (cached && cached.accessToken !== rejectedAccessToken) return cached;
+    const version = sessionVersion;
+    const key = JSON.stringify([uid, service, version, rejectedAccessToken]);
+    if (!restoring.has(key)) {
+        const pending = (async () => {
+            const connection = await restoreConnection(uid, service, rejectedAccessToken);
+            requireAccount(context, uid, version);
+            const newer = activeConnection(uid, service);
+            if (newer && newer.accessToken !== rejectedAccessToken) return newer;
+            setConnection(service, connection ? { uid, accessToken: connection.accessToken, expiresAt: connection.expiresAt } : null);
+            return activeConnection(uid, service);
+        })();
+        restoring.set(key, pending);
+        void pending.finally(() => restoring.delete(key)).catch(() => {});
+    }
+    return restoring.get(key);
 }
 
 export async function isConnected(uid, service) {
     serviceDetails(service);
     const context = await contextFor(uid);
     requireAccount(context, uid);
-    return Boolean(activeConnection(uid, service));
+    const version = sessionVersion;
+    const connected = Boolean(await connectionFor(context, uid, service));
+    // Prepare Google's popup before the Connect button is shown, preserving the click's user activation.
+    await prepareAuthorization(uid, service).catch(() => {});
+    requireAccount(context, uid, version);
+    return connected;
 }
 
 export async function connect(uid, service) {
     const details = serviceDetails(service);
     const context = await contextFor(uid);
     requireAccount(context, uid);
-    const { auth, sdk } = context;
+    const { auth } = context;
     if (connecting) throw new Error("Finish the current Google permission window before connecting another service.");
     if (!auth.currentUser.providerData.some(provider => provider.providerId === "google.com")) {
         throw new Error("Sign in with a Google account to connect this service.");
     }
 
     const version = sessionVersion;
-    const provider = new sdk.GoogleAuthProvider();
-    details.scopes.forEach(scope => provider.addScope(scope));
-    provider.setCustomParameters({ prompt: "consent", login_hint: auth.currentUser.email ?? "", include_granted_scopes: "true" });
-    connections.delete(service);
     connecting = true;
     try {
-        // Reauthentication binds permission consent to the current Firebase account.
-        const result = await sdk.reauthenticateWithPopup(auth.currentUser, provider);
+        // The backend verifies that permission consent belongs to the current Firebase account.
+        const connection = await authorizeConnection(uid, service, auth.currentUser.email ?? "", () => requireAccount(context, uid, version));
         requireAccount(context, uid, version);
-        if (result.user.uid !== uid) throw new Error("Choose the same Google account you used to sign in to this app.");
-        const credential = sdk.GoogleAuthProvider.credentialFromResult(result);
-        if (!credential?.accessToken) throw new Error(`Google did not grant access to ${details.name}. Connect again and allow the requested permissions.`);
+        if (!connection?.accessToken) throw new Error(`Google did not grant access to ${details.name}. Connect again and allow the requested permissions.`);
 
-        // The public Firebase credential does not expose Google token expiry. Reconnect conservatively;
+        // The backend uses Google's actual token expiry and retains the refresh token in Firestore;
         // an earlier revocation or expiry is also handled by the API's 401 response.
-        connections.set(service, { uid, accessToken: credential.accessToken, expiresAt: Date.now() + 50 * 60 * 1000 });
-    } catch (error) {
-        const messages = {
-            "auth/popup-blocked": "Allow pop-ups for this site, then connect again.",
-            "auth/popup-closed-by-user": "The Google permission window was closed. Connect again when you are ready.",
-            "auth/cancelled-popup-request": "The Google permission request was cancelled. Connect again.",
-            "auth/user-mismatch": "Choose the same Google account you used to sign in to this app.",
-            "auth/unauthorized-domain": "This site's domain must be added to Firebase Authentication's authorized domains by the app owner.",
-            "auth/admin-restricted-operation": "Your Google Workspace administrator has blocked this connection. Ask your administrator to allow it.",
-            "auth/operation-not-allowed": "Google sign-in must be enabled in Firebase Authentication by the app owner.",
-            "auth/network-request-failed": "Google could not be reached. Check your connection and try again."
-        };
-        throw new Error(messages[error.code] ?? error.message ?? `Could not connect ${details.name}. Please try again.`);
+        setConnection(service, { uid, accessToken: connection.accessToken, expiresAt: connection.expiresAt });
     } finally {
         connecting = false;
     }
@@ -130,12 +139,13 @@ function apiError(service, status, payload) {
     return new Error(`${name} is unavailable right now. Please try again later.`);
 }
 
-async function request(uid, service, path, method = "GET", body = null, etag = null) {
+async function request(uid, service, path, method = "GET", body = null, etag = null, retry = true) {
     const details = serviceDetails(service);
     const context = await contextFor(uid);
     requireAccount(context, uid);
     const version = sessionVersion;
-    const connection = activeConnection(uid, service);
+    const connection = await connectionFor(context, uid, service);
+    requireAccount(context, uid, version);
     if (!connection) throw new Error(`Connect ${details.name} to continue. Permissions are requested separately from signing in.`);
     const headers = { Authorization: `Bearer ${connection.accessToken}`, Accept: "application/json" };
     if (body !== null) headers["Content-Type"] = "application/json";
@@ -150,14 +160,20 @@ async function request(uid, service, path, method = "GET", body = null, etag = n
         throw new Error(`${details.name} could not be reached. Check your connection and try again.`);
     }
     requireAccount(context, uid, version);
-    if (response.status === 401 && connections.get(service) === connection) connections.delete(service);
+    if (response.status === 401 && retry) {
+        const renewed = await connectionFor(context, uid, service, connection.accessToken);
+        requireAccount(context, uid, version);
+        if (renewed) return request(uid, service, path, method, body, etag, false);
+    }
     let payload = null;
     if (response.status !== 204) {
         try { payload = await response.json(); } catch { /* Non-JSON errors are mapped using the HTTP status. */ }
     }
     requireAccount(context, uid, version);
-    if (response.status === 403 && /insufficientPermissions|ACCESS_TOKEN_SCOPE_INSUFFICIENT/.test(JSON.stringify(payload)) && connections.get(service) === connection) {
-        connections.delete(service);
+    if ((response.status === 401 || (response.status === 403 && /insufficientPermissions|ACCESS_TOKEN_SCOPE_INSUFFICIENT/.test(JSON.stringify(payload)))) && getConnection(service)?.accessToken === connection.accessToken) {
+        setConnection(service, null);
+        await invalidateConnection(uid, service, connection.accessToken);
+        requireAccount(context, uid, version);
     }
     if (!response.ok) throw apiError(service, response.status, payload);
     if (response.status !== 204 && payload === null) throw new Error(`${details.name} returned an unreadable response. Refresh the list and try again.`);
@@ -226,4 +242,19 @@ export function saveTask(uid, listId, taskId, body, etag) {
 
 export function deleteTask(uid, listId, taskId, etag) {
     return request(uid, "tasks", tasksPath(listId, taskId), "DELETE", null, etag);
+}
+
+export async function listTaskExtensions(uid) {
+    const extensions = await import("./firebase-task-extensions.js");
+    return extensions.listTaskExtensions(uid);
+}
+
+export async function saveTaskExtension(uid, extension) {
+    const extensions = await import("./firebase-task-extensions.js");
+    return extensions.saveTaskExtension(uid, extension);
+}
+
+export async function deleteTaskExtensions(uid, deleted) {
+    const extensions = await import("./firebase-task-extensions.js");
+    return extensions.deleteTaskExtensions(uid, deleted);
 }

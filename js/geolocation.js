@@ -6,7 +6,7 @@
  * @property {number}  [minAccuracy=100]         Desired accuracy in meters before we stop retrying.
  * @property {number}  [watchTimeout=5000]       Max extra time (ms) we wait with watchPosition.
  * @property {boolean} [useCache=true]           Use localStorage cache when valid.
- * @property {number}  [cacheMaxAge=60000]       Max cache age (ms) before ignoring.
+ * @property {number}  [cacheMaxAge=0]           Max cache age (ms) before ignoring.
  */
 
 let permissionDeniedNotified = false;
@@ -26,7 +26,7 @@ export async function getUserLocation(options = {}) {
     minAccuracy = 100,
     watchTimeout = 5000,
     useCache = true,
-    cacheMaxAge = 60000
+    cacheMaxAge = 0
   } = options;
 
   if (!("geolocation" in navigator)) {

@@ -2,6 +2,31 @@
 export const firebaseSdkBase = "https://www.gstatic.com/firebasejs/10.14.1";
 let appPromise = null;
 
+function parseSettings(text) {
+  // appsettings.json contains explanatory line comments outside JSON strings.
+  let result = "";
+  let quoted = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (quoted) {
+      result += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+    } else if (char === '"') {
+      quoted = true;
+      result += char;
+    } else if (char === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      result += "\n";
+    } else {
+      result += char;
+    }
+  }
+  return JSON.parse(result);
+}
+
 export async function getFirebaseApp() {
   if (!appPromise) {
     const pending = (async () => {
@@ -14,7 +39,9 @@ export async function getFirebaseApp() {
       const settings = await Promise.all(files.map(async file => {
         const response = await fetch(new URL(`../${file}`, import.meta.url), { cache: "no-cache" });
         if (!response.ok) throw new Error("Could not load sign-in configuration.");
-        return (await response.json()).Firebase;
+        const settings = typeof response.text === "function"
+          ? parseSettings(await response.text()) : await response.json();
+        return settings.Firebase;
       }));
       const config = Object.assign({}, ...settings);
       if (!["apiKey", "authDomain", "projectId", "appId"].every(
