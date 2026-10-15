@@ -1,22 +1,21 @@
 @using MyTransportAppWASM.Models
 @using MyTransportAppWASM.Services.Interfaces
-@using System.Globalization
-@inject MyTransportAppWASM.Services.LanguageService Language
 @inject IWeatherPlannerService WeatherPlannerService
 @inject IJSRuntime JS
+@implements IDisposable
 
 <div class="card h-100">
   <div
     class="d-flex align-items-center justify-content-between mb-3 border-bottom border-secondary border-opacity-10 pb-3">
     <div>
-      <h3 class="m-0 fw-semibold" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(Options.Name ?? "Open-Meteo")
+      <h3 class="m-0 fw-semibold" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(Options?.Name ?? Provider?.Provider ?? "Open-Meteo")
       </h3>
       <a class="text-dim mt-1 d-inline-block" style="font-size: 0.75rem;" href="@($"https://{SourceDomain}")"
          target="_blank" rel="noopener noreferrer">
         <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>@SourceDomain
       </a>
     </div>
-    <WeatherStatusBadge Status="@(Provider?.Status ?? "Loading")" ProviderName="@(Options.Name ?? "Open-Meteo")"
+    <WeatherStatusBadge Status="@(Provider?.Status ?? "Loading")" ProviderName="@(Options?.Name ?? Provider?.Provider ?? "Open-Meteo")"
                         IsCached="@(Provider?.IsCached == true)" IsRefreshing="isLoading" OnRefresh="RefreshAsync" />
   </div>
 
@@ -167,7 +166,7 @@
     <div class="d-flex justify-content-between align-items-start gap-3 p-3 border-bottom">
       <div>
         <h4 id="@(hourlyDialogId + "-title")" class="fs-5 mb-1">Hourly forecast · @selectedDate?.ToString("dddd, dd MMMM yyyy")</h4>
-        <div class="small text-dim">@Query.PlaceName · @MalaysiaTime.DisplayName</div>
+        <div class="small text-dim">@(Query?.PlaceName ?? "Current location") · @MalaysiaTime.DisplayName</div>
         @if (isHourlyCached && !isHourlyLoading)
         {
           <span class="badge bg-secondary mt-2">Cached forecast</span>
@@ -252,23 +251,34 @@
 }
 
 @code {
-  [Parameter, EditorRequired]
-  public required KeyedWeatherProviderOptions Options { get; set; }
-
-  [Parameter, EditorRequired]
-  public required WeatherQuery Query { get; set; }
+  [CascadingParameter]
+  private MyTransportAppWASM.Services.LanguageService Language { get; set; } = default!;
 
   [Parameter]
-  public string Label { get; set; } = "Realtime";
+  public KeyedWeatherProviderOptions? Options { get; set; }
+
+  [Parameter]
+  public WeatherQuery? Query { get; set; }
+
+  [Parameter]
+  public WeatherProviderResult? Result { get; set; }
+
+  [Parameter]
+  public EventCallback OnRefresh { get; set; }
+
+  [Parameter]
+  public bool IsRefreshing { get; set; }
 
   [Parameter]
   public bool FetchOutlook { get; set; } = false;
 
-  private WeatherProviderResult? Provider;
-  private bool isLoading = true;
-  private string? lastUrl;
-  private string SourceDomain => string.IsNullOrWhiteSpace(Options.Source) ? "open-meteo.com" : Options.Source;
+  private WeatherProviderResult? Provider => Result;
+  private bool isLoading => IsRefreshing;
+  private string? lastQueryLocationKey;
+  private string SourceDomain => string.IsNullOrWhiteSpace(Options?.Source) ? (Provider?.Source ?? "open-meteo.com") : Options.Source;
   private readonly string hourlyDialogId = $"open-meteo-hourly-{Guid.NewGuid():N}";
+  private readonly CancellationTokenSource _cts = new();
+  private bool _disposed;
   private DateTime? selectedDate;
   private WeatherTimeSlice? selectedDay;
   private IReadOnlyList<WeatherTimeSlice> hourlyPeriods = Array.Empty<WeatherTimeSlice>();
@@ -278,45 +288,19 @@
 
   protected override async Task OnParametersSetAsync()
   {
-    try
+    var locationKey = Query == null ? null : $"{Query.Latitude:F4},{Query.Longitude:F4}";
+    if (lastQueryLocationKey != null && lastQueryLocationKey != locationKey && selectedDate.HasValue)
     {
-      if (Options.Enabled && !string.IsNullOrWhiteSpace(Options.BaseUrl))
-      {
-        string endpointPath = string.Empty;
-        if (FetchOutlook && Options.Endpoints != null && Options.Endpoints.TryGetValue("Outlook", out string? outlookPath))
-        {
-          endpointPath = outlookPath;
-        }
-        else if (Options.Endpoints != null && Options.Endpoints.TryGetValue("Realtime", out string? realtimePath))
-        {
-          endpointPath = realtimePath;
-        }
-
-        string fullUrl = Options.BaseUrl + endpointPath;
-        Uri uri = BuildUri(fullUrl, Query);
-
-        if (lastUrl == uri.AbsoluteUri)
-          return; // Prevent duplicate fetches on parent re-render
-
-        lastUrl = uri.AbsoluteUri;
-        isLoading = true;
-        hourlyRequestId++;
-        if (selectedDate.HasValue)
-        {
-          selectedDate = null;
-          selectedDay = null;
-          await JS.InvokeVoidAsync("dialogHelper.close", hourlyDialogId);
-        }
-
-        await LoadProviderAsync(uri);
-      }
+      hourlyRequestId++;
+      selectedDate = null;
+      selectedDay = null;
+      await JS.InvokeVoidAsync("dialogHelper.close", hourlyDialogId);
     }
-    finally
-    {
-      isLoading = false;
-    }
+
+    lastQueryLocationKey = locationKey;
   }
 
+  // Filter logic
   private async Task ShowHourlyForecastAsync(WeatherTimeSlice slice)
   {
     if (!FetchOutlook || slice.IsPlaceholder)
@@ -335,7 +319,7 @@
 
   private async Task LoadHourlyForecastAsync(bool forceRefresh = false)
   {
-    if (!selectedDate.HasValue)
+    if (!selectedDate.HasValue || Query == null)
       return;
 
     var date = selectedDate.Value;
@@ -345,97 +329,47 @@
     isHourlyCached = false;
     try
     {
-      if (!Options.Endpoints.TryGetValue("Hourly", out var hourlyPath))
-        return;
+      var res = await WeatherPlannerService.GetHourlyForecastAsync(
+        Query,
+        date,
+        cancellationToken: _cts.Token,
+        forceRefresh: forceRefresh);
 
-      var template = (Options.BaseUrl + hourlyPath)
-        .Replace("{date}", date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
-        .Replace("{timezone}", Uri.EscapeDataString(MalaysiaTime.IanaTimeZone), StringComparison.OrdinalIgnoreCase);
-      var result = await WeatherPlannerService.FetchProviderDataAsync(
-        Options, BuildUri(template, Query), "Outlook", forceRefresh: forceRefresh);
-
-      if (requestId == hourlyRequestId)
+      if (!_disposed && requestId == hourlyRequestId)
       {
-        isHourlyCached = result.IsCached;
-        hourlyPeriods = result.Periods
-          .Where(p => !p.IsPlaceholder && MalaysiaTime.Convert(p.Time).Date == date)
-          .OrderBy(p => p.Time).ToList();
+        isHourlyCached = res.IsCached;
+        hourlyPeriods = res.Periods;
+      }
+    }
+    catch (OperationCanceledException)
+    {
+    }
+    catch (Exception ex)
+    {
+      if (!_disposed)
+      {
+        Console.Error.WriteLine($"Failed to load hourly forecast: {ex.Message}");
       }
     }
     finally
     {
-      if (requestId == hourlyRequestId)
+      if (!_disposed && requestId == hourlyRequestId)
         isHourlyLoading = false;
     }
   }
 
   private async Task RefreshAsync()
   {
-    if (Provider?.IsCached != true || lastUrl == null || isLoading)
-      return;
-
-    isLoading = true;
-    try
+    if (OnRefresh.HasDelegate)
     {
-      await LoadProviderAsync(new Uri(lastUrl, UriKind.Absolute), forceRefresh: true);
-    }
-    finally
-    {
-      isLoading = false;
+      await OnRefresh.InvokeAsync();
     }
   }
 
-  private async Task LoadProviderAsync(Uri uri, bool forceRefresh = false)
+  public void Dispose()
   {
-    Provider = await WeatherPlannerService.FetchProviderDataAsync(
-        Options,
-        uri,
-        Label,
-        forceRefresh: forceRefresh);
-
-    // Filter logic
-    if (!FetchOutlook && Provider.Periods.Count > 1)
-    {
-      var now = MalaysiaTime.Now;
-      var closest = Provider.Periods.MinBy(p => Math.Abs((p.Time - now).Ticks));
-      if (closest != null)
-        Provider = Provider with { Periods = new List<WeatherTimeSlice> { closest } };
-    }
-    else if (FetchOutlook && Provider.Periods.Count > 0)
-    {
-      var now = MalaysiaTime.Now;
-      var sortedPeriods = Provider.Periods.Where(p => MalaysiaTime.Convert(p.Time).Date >= now.Date).OrderBy(p => p.Time)
-        .Take(WeatherForecastLimits.OpenMeteoForecastDays).ToList();
-      Provider = Provider with { Periods = sortedPeriods };
-    }
-  }
-
-  private Uri BuildUri(string template, WeatherQuery query)
-  {
-    var formatted = template
-        .Replace("{lat}", query.Latitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
-        .Replace("{lon}", query.Longitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
-
-    if (formatted.Contains("{forecast_hours}", StringComparison.OrdinalIgnoreCase))
-    {
-      formatted = formatted.Replace("{forecast_hours}", "1", StringComparison.OrdinalIgnoreCase);
-    }
-
-    if (formatted.Contains("{forecast_days}", StringComparison.OrdinalIgnoreCase))
-    {
-      int days = 7;
-      if (query.Return.HasValue)
-      {
-        var timeSpan = MalaysiaTime.Convert(query.Return.Value).Date - MalaysiaTime.Today;
-        days = Math.Max(1, Math.Min(WeatherForecastLimits.OpenMeteoForecastDays, timeSpan.Days + 2));
-      }
-      formatted = formatted.Replace("{forecast_days}", days.ToString(), StringComparison.OrdinalIgnoreCase);
-    }
-
-    if (!string.IsNullOrWhiteSpace(Options.ApiKey))
-      formatted = formatted.Replace("{key}", Options.ApiKey, StringComparison.OrdinalIgnoreCase).Replace("{apiKey}",
-Options.ApiKey, StringComparison.OrdinalIgnoreCase);
-
-    return new Uri(formatted, UriKind.Absolute);
+    _disposed = true;
+    _cts.Cancel();
+    _cts.Dispose();
   }
 }

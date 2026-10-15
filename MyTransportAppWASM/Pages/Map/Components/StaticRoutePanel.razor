@@ -1,0 +1,72 @@
+@using MyTransportAppWASM.Models
+@using MyTransportAppWASM.Utils
+
+@if (TransportProviders.Any(provider => provider.StaticData != null))
+{
+    <div class="static-routes mt-3">
+        <h3 class="fs-6 mb-2">Routes and estimated departures</h3>
+        <label class="form-label" for="static-provider-select">Provider</label>
+        <select id="static-provider-select" class="form-input" value="@SelectedProviderIndex" @onchange="OnProviderChanged">
+            <option value="-1">Choose a provider</option>
+            @for (var index = 0; index < TransportProviders.Count; index++)
+            {
+                if (TransportProviders[index].StaticData != null)
+                {
+                    <option value="@index">@TransportProviders[index].Name</option>
+                }
+            }
+        </select>
+        @if (HasSelectedStaticData)
+        {
+            <label class="form-label mt-2" for="static-route-select">Route</label>
+            <select id="static-route-select" class="form-input" value="@SelectedRouteId" @onchange="OnRouteChanged" disabled="@(Routes.Count == 0)">
+                <option value="">Choose a route</option>
+                @foreach (var route in Routes)
+                {
+                    <option value="@route.Id">@route.Name (@route.Id)</option>
+                }
+            </select>
+            <div class="small mt-2" role="status">@Status</div>
+            @if (!string.IsNullOrEmpty(StopName))
+            {
+                <h4 class="fs-6 mt-3">@StopName</h4>
+                @foreach (var departure in Departures)
+                {
+                    <div class="small">@MalaysiaTime.Convert(departure.DepartureAt).ToString("HH:mm") · @(departure.Headsign ?? departure.RouteId)</div>
+                }
+            }
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<TransportProvider> TransportProviders { get; set; } = [];
+
+    [Parameter]
+    public int SelectedProviderIndex { get; set; } = -1;
+
+    [Parameter]
+    public bool HasSelectedStaticData { get; set; }
+
+    [Parameter]
+    public string SelectedRouteId { get; set; } = string.Empty;
+
+    [Parameter]
+    public IReadOnlyList<StaticRoute> Routes { get; set; } = [];
+
+    [Parameter]
+    public string Status { get; set; } = string.Empty;
+
+    [Parameter]
+    public string StopName { get; set; } = string.Empty;
+
+    [Parameter]
+    public IReadOnlyList<StaticDeparture> Departures { get; set; } = [];
+
+    [Parameter]
+    public EventCallback<ChangeEventArgs> OnProviderChanged { get; set; }
+
+    [Parameter]
+    public EventCallback<ChangeEventArgs> OnRouteChanged { get; set; }
+}

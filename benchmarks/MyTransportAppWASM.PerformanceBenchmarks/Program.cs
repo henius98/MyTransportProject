@@ -32,12 +32,12 @@ var protobufPayload = CreateFeedPayload(vehicleCount: 2_000);
 Run(
     "LiveRouting/typical-3x3x1000",
     iterations: 120,
-    () => routingService.EnrichRoutesAsync(typicalRoutes, typicalVehicles).GetAwaiter().GetResult().Count);
+    () => routingService.EnrichRoutes(typicalRoutes, typicalVehicles).Count);
 
 Run(
     "LiveRouting/stress-10x6x5000",
     iterations: 30,
-    () => routingService.EnrichRoutesAsync(stressRoutes, stressVehicles).GetAwaiter().GetResult().Count);
+    () => routingService.EnrichRoutes(stressRoutes, stressVehicles).Count);
 
 Run(
     "LiveRouting/legacy-compatible-stress",
@@ -47,7 +47,7 @@ Run(
 Run(
     "LiveRouting/indexed-compatible-stress",
     iterations: 20,
-    () => routingService.EnrichRoutesAsync(comparableStressRoutes, comparableStressVehicles).GetAwaiter().GetResult().Count);
+    () => routingService.EnrichRoutes(comparableStressRoutes, comparableStressVehicles).Count);
 
 Run(
     "WeatherShaper/generic-14",

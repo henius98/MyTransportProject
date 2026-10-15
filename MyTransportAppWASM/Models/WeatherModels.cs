@@ -12,6 +12,7 @@ namespace MyTransportAppWASM.Models
     public double Longitude { get; set; }
     public string? PlaceName { get; set; }
     public string? LocationId { get; set; }
+    public string? PendingSearchText { get; set; }
     public DateTimeOffset? Departure { get; set; }
     public DateTimeOffset? Return { get; set; }
   }
@@ -50,7 +51,14 @@ namespace MyTransportAppWASM.Models
     public required WeatherQuery Query { get; init; }
     public required IReadOnlyList<WeatherProviderResult> Realtime { get; init; }
     public required IReadOnlyList<WeatherProviderResult> Outlooks { get; init; }
-    public IReadOnlyList<string> Notes { get; init; } = Array.Empty<string>();
+    public string? ValidationError { get; init; }
+    public bool IsValid => string.IsNullOrEmpty(ValidationError);
+
+    public WeatherProviderResult? GetRealtime(string provider) =>
+      Realtime.FirstOrDefault(r => string.Equals(r.Provider, provider, StringComparison.OrdinalIgnoreCase));
+
+    public WeatherProviderResult? GetOutlook(string provider) =>
+      Outlooks.FirstOrDefault(o => string.Equals(o.Provider, provider, StringComparison.OrdinalIgnoreCase));
   }
 
   public record WeatherProviderOptions

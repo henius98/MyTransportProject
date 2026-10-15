@@ -3,6 +3,8 @@
 @using MyTransportAppWASM.Models
 @using MyTransportAppWASM.Services
 
+@using MyTransportAppWASM.Pages.Map.Components
+
 <PageTitle>Transit Map - MyTransportApp</PageTitle>
 
 <div id="map-container" class="@MapContainerClass">
@@ -68,86 +70,20 @@
                     <span>@(string.IsNullOrEmpty(locationStatus) ? "Ready" : locationStatus)</span>
                 </div>
 
-                @if (_transportProviders.Any(provider => provider.StaticData != null))
-                {
-                    <div class="static-routes mt-3">
-                        <h3 class="fs-6 mb-2">Routes and estimated departures</h3>
-                        <label class="form-label" for="static-provider-select">Provider</label>
-                        <select id="static-provider-select" class="form-input" value="@_selectedStaticProviderIndex" @onchange="SelectStaticProvider">
-                            <option value="-1">Choose a provider</option>
-                            @for (var index = 0; index < _transportProviders.Count; index++)
-                            {
-                                if (_transportProviders[index].StaticData != null)
-                                {
-                                    <option value="@index">@_transportProviders[index].Name</option>
-                                }
-                            }
-                        </select>
-                        @if (SelectedStaticData != null)
-                        {
-                            <label class="form-label mt-2" for="static-route-select">Route</label>
-                            <select id="static-route-select" class="form-input" value="@_selectedStaticRouteId" @onchange="SelectStaticRoute" disabled="@(_staticRoutes.Count == 0)">
-                                <option value="">Choose a route</option>
-                                @foreach (var route in _staticRoutes)
-                                {
-                                    <option value="@route.Id">@route.Name (@route.Id)</option>
-                                }
-                            </select>
-                            <div class="small mt-2" role="status">@_staticStatus</div>
-                            @if (!string.IsNullOrEmpty(_staticStopName))
-                            {
-                                <h4 class="fs-6 mt-3">@_staticStopName</h4>
-                                @foreach (var departure in _staticDepartures)
-                                {
-                                    <div class="small">@MalaysiaTime.Convert(departure.DepartureAt).ToString("HH:mm") · @(departure.Headsign ?? departure.RouteId)</div>
-                                }
-                            }
-                        }
-                    </div>
-                }
+                <StaticRoutePanel TransportProviders="_transportProviders"
+                                  SelectedProviderIndex="_selectedStaticProviderIndex"
+                                  HasSelectedStaticData="@(SelectedStaticData != null)"
+                                  SelectedRouteId="@_selectedStaticRouteId"
+                                  Routes="_staticRoutes"
+                                  Status="@_staticStatus"
+                                  StopName="@_staticStopName"
+                                  Departures="_staticDepartures"
+                                  OnProviderChanged="SelectStaticProvider"
+                                  OnRouteChanged="SelectStaticRoute" />
 
-                @if (_routeOptions != null && _routeOptions.Any())
-                {
-                    <div class="route-options mt-3" style="max-height: 300px; overflow-y: auto;">
-                        <h3 class="fs-6 mb-2">Live Route Options</h3>
-                        @foreach (var route in _routeOptions)
-                        {
-                            <button type="button" @key="route.OriginalRoute.RouteId"
-                                    class="route-option card mb-2 p-2 shadow-sm @(route.HasLiveBus ? "border-success" : "") @(route.OriginalRoute.RouteId == _activeRouteId ? "border-primary border-2 shadow" : "")"
-                                    aria-pressed="@(route.OriginalRoute.RouteId == _activeRouteId)"
-                                    @onclick="() => SelectRoute(route)">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <strong style="color: var(--text-color);">Option @(route.OriginalRoute.RouteId + 1)</strong>
-                                    <div>
-                                        @if (route.IsAuspicious)
-                                        {
-                                            <span class="badge bg-warning text-dark me-1" title="Aligns with lucky directions or times">🌟 Auspicious</span>
-                                        }
-                                        <span class="badge @(route.HasLiveBus ? "bg-success" : "bg-secondary")">
-                                            @(route.HasLiveBus ? "Live" : "Scheduled")
-                                        </span>
-                                    </div>
-                                </div>
-                                <div class="small mt-1" style="color: var(--text-muted);">
-                                    <div>Base ETA: @(route.OriginalRoute.DurationSeconds / 60) mins</div>
-                                    @if (route.HasLiveBus)
-                                    {
-                                        <div class="text-success fw-bold">Live ETA: @(route.LiveTotalDurationSeconds / 60) mins</div>
-                                    }
-                                </div>
-                                @if (route.NearestBuses.Any())
-                                {
-                                    <div class="small mt-1" style="color: var(--text-muted);">
-                                        @foreach (var bus in route.NearestBuses)
-                                        {
-                                            <div>Bus <strong>@bus.RouteId</strong> is @((int)bus.DistanceToStopMeters)m away</div>
-                                        }
-                                    </div>
-                                }
-                            </button>
-                        }
-                    </div>
-                }
+                <LiveRouteOptionsList RouteOptions="_routeOptions"
+                                      ActiveRouteId="_activeRouteId"
+                                      OnSelectRoute="SelectRoute" />
             </div>
     </div>
 </div>

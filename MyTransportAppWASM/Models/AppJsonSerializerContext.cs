@@ -1,5 +1,4 @@
 using System.Text.Json.Serialization;
-using static MyTransportAppWASM.Services.GeocodingService;
 using MyTransportAppWASM.Models.BaziFlow;
 
 namespace MyTransportAppWASM.Models
@@ -28,6 +27,7 @@ namespace MyTransportAppWASM.Models
   [JsonSerializable(typeof(CreateProfileRequest))]
   [JsonSerializable(typeof(DateFortuneRequest))]
   [JsonSerializable(typeof(UserSettings))]
+  [JsonSerializable(typeof(Dictionary<string, string>))]
   internal partial class AppJsonSerializerContext : JsonSerializerContext
   {
   }

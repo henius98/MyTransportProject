@@ -1,6 +1,8 @@
+@using MyTransportAppWASM.Models
 @using MyTransportAppWASM.Services.Interfaces
 @using MyTransportAppWASM.Services
-@inject IGeocodingService GeocodingService
+@inject IPlaceResolutionService PlaceResolutionService
+@inject IWeatherStationCatalogService StationCatalog
 @inject IJSRuntime JSRuntime
 @implements IAsyncDisposable
 
@@ -138,7 +140,7 @@
   private ElementReference _mapTooltip;
   private bool _isLoadingMap = false;
   private bool _initializeMap;
-  private List<GeocodingService.MetLocation> _mapLocations = new();
+  private IReadOnlyList<MetLocation> _mapLocations = Array.Empty<MetLocation>();
   private string _mapSearch = string.Empty;
   private IJSObjectReference? _mapModule;
   private bool _disposed;
@@ -146,11 +148,10 @@
   // The source SVG's embedded calibration points map longitude and latitude to its 1000 x 332 viewBox.
   private static double MapX(double longitude) => 90.9 + (longitude - 100.62687099273207) * 46.30559021697878;
   private static double MapY(double latitude) => 302.2 - (latitude - 1.176590816028057) * 46.44711959017247;
-  private List<GeocodingService.MetLocation> FilteredMapLocations =>
+  private IReadOnlyList<MetLocation> FilteredMapLocations =>
       string.IsNullOrWhiteSpace(_mapSearch)
           ? _mapLocations
-          : _mapLocations.Where(location => location.LocationName?.Contains(_mapSearch.Trim(), StringComparison.OrdinalIgnoreCase)
-== true
+          : _mapLocations.Where(location => location.LocationName?.Contains(_mapSearch.Trim(), StringComparison.OrdinalIgnoreCase) == true
               || location.LocationId?.Contains(_mapSearch.Trim(), StringComparison.OrdinalIgnoreCase) == true).ToList();
 
   protected override void OnInitialized()
@@ -163,6 +164,7 @@
     if (Value != _searchText)
     {
       _debounceCts?.Cancel();
+      _debounceCts?.Dispose();
       _showSuggestions = false;
       _searchText = Value;
     }
@@ -202,20 +204,26 @@
       {
         _suggestions.Clear();
         _isSearchingSuggestions = false;
-        await InvokeAsync(StateHasChanged);
+        if (!_disposed)
+        {
+          await InvokeAsync(StateHasChanged);
+        }
         return;
       }
 
-      var results = await GeocodingService.GetSuggestionsAsync(searchText);
+      var results = await PlaceResolutionService.GetSuggestionsAsync(searchText, cancellationToken);
       cancellationToken.ThrowIfCancellationRequested();
 
-      await InvokeAsync(() =>
+      if (!_disposed)
       {
-        _suggestions = results;
-        _activeIndex = -1;
-        _isSearchingSuggestions = false;
-        StateHasChanged();
-      });
+        await InvokeAsync(() =>
+        {
+          _suggestions = results;
+          _activeIndex = -1;
+          _isSearchingSuggestions = false;
+          StateHasChanged();
+        });
+      }
     }
     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
     {
@@ -288,7 +296,7 @@
       StateHasChanged();
 
       // Map the forecast coordinates directly onto the static SVG.
-      _mapLocations = await GeocodingService.GetAllLocationsAsync();
+      _mapLocations = await StationCatalog.GetAllStationsAsync();
     }
     catch (Exception ex)
     {
@@ -319,7 +327,7 @@
     }
   }
 
-  private async Task SelectMapLocation(GeocodingService.MetLocation location)
+  private async Task SelectMapLocation(MetLocation location)
   {
     await CloseMapModal();
     await SelectSuggestion((location.Latitude, location.Longitude, $"MET ID: {location.LocationId}", location.LocationName

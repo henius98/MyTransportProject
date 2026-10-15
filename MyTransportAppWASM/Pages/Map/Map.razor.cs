@@ -4,21 +4,18 @@ namespace MyTransportAppWASM.Pages.Map;
 public partial class Map : IAsyncDisposable
 {
   [Inject] private IJSRuntime JS { get; set; } = default!;
-  [Inject] private IGtfsService GtfsService { get; set; } = default!;
+  [Inject] private ITransitTrackingService TransitTracking { get; set; } = default!;
   [Inject] private ITransportStaticDataService StaticDataService { get; set; } = default!;
   [Inject] private IConfiguration Config { get; set; } = default!;
-  [Inject] private ThemeService Theme { get; set; } = default!;
+  [CascadingParameter] private ThemeService Theme { get; set; } = default!;
   [Inject] private ILocationService LocationService { get; set; } = default!;
-  [Inject] private MyTransportAppWASM.Services.Interfaces.ILiveRoutingService LiveRouting { get; set; } = default!;
-  [Inject] private IBaziFlowService BaziFlowService { get; set; } = default!;
-  private MyTransportAppWASM.Models.BaziFlow.FortuneData? TodayFortune;
+  [Inject] private IPlaceResolutionService PlaceResolution { get; set; } = default!;
 
   private double Latitude;
   private double Longitude;
 
   private IJSObjectReference? mapModule;
   private DotNetObjectReference<Map>? objRef;
-  private DateTimeOffset? lastUpdated;
   private CancellationTokenSource _cts = new();
   private string origin = "";
   private string destination = "";
@@ -34,20 +31,14 @@ public partial class Map : IAsyncDisposable
   private string _selectedStaticStopId = "";
   private string _staticStopName = "";
   private string _staticStatus = "";
-  private List<MyTransportAppWASM.Models.BusLocation> _cachedVehicles = [];
   private TimeSpan _pollingInterval = TimeSpan.FromSeconds(15);
-  private TransitRefreshCoordinator _transitRefresh = new(
-    TimeSpan.FromSeconds(15),
-    TimeSpan.FromMinutes(2),
-    TimeSpan.FromMinutes(2));
   private readonly SemaphoreSlim _refreshGate = new(1, 1);
   private List<MyTransportAppWASM.Models.EnrichedRoute> _routeOptions = new();
   private int _activeRouteId = -1;
   private Task _autocompleteTask = Task.CompletedTask;
   private Task _pollingTask = Task.CompletedTask;
-  private Task _fortuneTask = Task.CompletedTask;
 
-  private string MapContainerClass => Theme.IsDarkMode ? "theme-dark" : "theme-light";
+  private string MapContainerClass => Theme?.IsDarkMode == true ? "theme-dark" : "theme-light";
   private string MapOverlayClass => $"map-overlay {(isCollapsed ? "collapsed" : "")}".Trim();
 
   private void ToggleCollapse() => isCollapsed = !isCollapsed;
@@ -134,6 +125,7 @@ public partial class Map : IAsyncDisposable
       StateHasChanged();
     }
     catch (OperationCanceledException) { }
+    catch (ObjectDisposedException) { }
     catch (Exception ex)
     {
       if (_isDisposed || SelectedStaticData != source || _selectedStaticRouteId != routeId || _selectedStaticStopId != stopId) return;
@@ -152,43 +144,24 @@ public partial class Map : IAsyncDisposable
     _transportProviders = Config.GetSection("TransportProviders").Get<List<TransportProvider>>() ?? [];
 
     var pollingSeconds = Math.Max(5, Config.GetValue("TransitPolling:IntervalSeconds", 15));
-    var maximumBackoffSeconds = Math.Max(
-      pollingSeconds,
-      Config.GetValue("TransitPolling:MaximumBackoffSeconds", 120));
-    var maximumSnapshotAgeSeconds = Math.Max(
-      pollingSeconds,
-      Config.GetValue("TransitPolling:MaximumSnapshotAgeSeconds", 120));
     _pollingInterval = TimeSpan.FromSeconds(pollingSeconds);
-    _transitRefresh = new TransitRefreshCoordinator(
-      _pollingInterval,
-      TimeSpan.FromSeconds(maximumBackoffSeconds),
-      TimeSpan.FromSeconds(maximumSnapshotAgeSeconds));
 
-    Theme.OnThemeChanged += OnThemeChanged;
+    if (Theme != null)
+    {
+      Theme.OnThemeChanged += OnThemeChanged;
+    }
 
     // Fortune data is optional route decoration and must not delay the map's first render.
-    _fortuneTask = LoadTodayFortuneAsync();
     return Task.CompletedTask;
   }
 
-  private async Task LoadTodayFortuneAsync()
+  private void OnThemeChanged()
   {
-    try
+    if (!_isDisposed)
     {
-      if (!await BaziFlowService.HasApiKeyAsync())
-      {
-        return;
-      }
-
-      TodayFortune = await BaziFlowService.GetDateFortuneAsync(MalaysiaTime.Now.ToString("yyyy-MM-dd"));
-    }
-    catch (Exception ex)
-    {
-      Console.Error.WriteLine($"Today's fortune could not be loaded: {ex.Message}");
+      _ = InvokeAsync(UpdateMapThemeAsync);
     }
   }
-
-  private void OnThemeChanged() => _ = InvokeAsync(UpdateMapThemeAsync);
 
   private async Task UpdateMapThemeAsync()
   {
@@ -197,7 +170,6 @@ public partial class Map : IAsyncDisposable
       try
       {
         await mapModule.InvokeVoidAsync("setMapTheme", Theme.IsDarkMode ? "DARK" : "LIGHT");
-        if (!_isDisposed) await InvokeAsync(StateHasChanged);
       }
       catch (Exception ex)
       {
@@ -294,14 +266,38 @@ public partial class Map : IAsyncDisposable
     }
   }
 
+  private async Task<string?> ResolveAddressAsync(double lat, double lng)
+  {
+    string? resolved = null;
+    if (mapModule != null)
+    {
+      try
+      {
+        resolved = await mapModule.InvokeAsync<string>("reverseGeocode", lat, lng);
+      }
+      catch (JSException)
+      {
+      }
+    }
+    if (string.IsNullOrEmpty(resolved))
+    {
+      resolved = await PlaceResolution.ReverseGeocodeAsync(lat, lng);
+    }
+    return resolved;
+  }
+
   private async Task UpdateOriginFromLocation(double lat, double lng)
   {
-    if (mapModule == null || _isDisposed || !string.IsNullOrEmpty(origin)) return;
+    if (_isDisposed || !string.IsNullOrEmpty(origin)) return;
     try
     {
-      origin = await mapModule.InvokeAsync<string>("reverseGeocode", lat, lng);
-      if (_isDisposed || mapModule == null) return;
-      await mapModule.InvokeVoidAsync("setAutocompleteValue", "origin-input", origin);
+      string? resolved = await ResolveAddressAsync(lat, lng);
+      if (_isDisposed || string.IsNullOrEmpty(resolved)) return;
+      origin = resolved;
+      if (mapModule != null)
+      {
+        await mapModule.InvokeVoidAsync("setAutocompleteValue", "origin-input", origin);
+      }
     }
     catch (Exception ex)
     {
@@ -313,6 +309,7 @@ public partial class Map : IAsyncDisposable
   [JSInvokable]
   public void UpdateOrigin(string value)
   {
+    if (_isDisposed) return;
     origin = value;
     StateHasChanged();
   }
@@ -320,14 +317,17 @@ public partial class Map : IAsyncDisposable
   [JSInvokable]
   public async Task UpdateUserPosition(double lat, double lng)
   {
+    if (_isDisposed) return;
     LocationService.UpdateLocation(lat, lng);
     await RefreshBusPosition();
+    if (_isDisposed) return;
     StateHasChanged();
   }
 
   [JSInvokable]
   public void UpdateDestination(string value)
   {
+    if (_isDisposed) return;
     destination = value;
     StateHasChanged();
   }
@@ -335,7 +335,7 @@ public partial class Map : IAsyncDisposable
   [JSInvokable]
   public void OnRouteSelected(int routeId)
   {
-    if (_activeRouteId == routeId) return;
+    if (_isDisposed || _activeRouteId == routeId) return;
     _activeRouteId = routeId;
     StateHasChanged();
   }
@@ -366,7 +366,8 @@ public partial class Map : IAsyncDisposable
     try
     {
       await mapModule.InvokeVoidAsync("updateUserMarker", position.Latitude, position.Longitude);
-      origin = await mapModule.InvokeAsync<string>("reverseGeocode", position.Latitude, position.Longitude);
+      var resolved = await ResolveAddressAsync(position.Latitude, position.Longitude);
+      if (!string.IsNullOrEmpty(resolved)) origin = resolved;
 
       if (_isDisposed || mapModule == null) return;
       await mapModule.InvokeVoidAsync("setAutocompleteValue", "origin-input", origin);
@@ -386,59 +387,30 @@ public partial class Map : IAsyncDisposable
   {
     var pos = LocationService.LastKnownLocation;
     if (mapModule == null || _isDisposed || pos == null) return;
-    if (!await _refreshGate.WaitAsync(0)) return;
+    try
+    {
+      if (!await _refreshGate.WaitAsync(0)) return;
+    }
+    catch (ObjectDisposedException)
+    {
+      return;
+    }
 
     try
     {
-      var nearbyProviders = _transportProviders.Where(p =>
-          p.HasRealtimeFeed &&
-          CalculateDistance(pos.Latitude, pos.Longitude, p.CenterLat, p.CenterLng) <= p.RadiusKm
-      ).ToList();
-
-      if (nearbyProviders.Count == 0)
-      {
-        _transitRefresh.Clear();
-        _cachedVehicles = [];
-        await mapModule.InvokeVoidAsync("syncMarkers", Array.Empty<MyTransportAppWASM.Models.BusLocation>());
-        locationStatus = "No live vehicle feeds nearby. Scheduled routes are available below.";
-        StateHasChanged();
-        return;
-      }
-
-      if (_isDisposed) return;
-      var cancellationToken = _cts.Token;
-      var refreshStartedAt = DateTimeOffset.UtcNow;
-      var providersToRefresh = _transitRefresh.GetProvidersToRefresh(
-        nearbyProviders,
-        refreshStartedAt,
-        force);
-
-      var refreshResults = await Task.WhenAll(
-        providersToRefresh.Select(provider => FetchProviderVehiclesAsync(
-          provider,
-          _transitRefresh.HasUsableSnapshot(provider.Endpoint, refreshStartedAt),
-          cancellationToken)));
-
+      var result = await TransitTracking.RefreshVehiclesAsync(pos.Latitude, pos.Longitude, force, _cts.Token);
       if (_isDisposed || mapModule == null) return;
 
-      var outcome = _transitRefresh.ApplyResults(
-        nearbyProviders,
-        refreshResults,
-        DateTimeOffset.UtcNow);
-      _cachedVehicles = outcome.Vehicles;
+      await mapModule.InvokeVoidAsync("syncMarkers", result.Vehicles);
 
-      await mapModule.InvokeVoidAsync("syncMarkers", _cachedVehicles);
-
-      var successfulRefreshCount = outcome.AttemptedProviderCount - outcome.FailedProviderCount;
-      if (successfulRefreshCount > 0)
-      {
-        lastUpdated = MalaysiaTime.Now;
-      }
-
-      locationStatus = BuildTransitStatus(outcome, nearbyProviders.Count);
+      locationStatus = result.StatusMessage;
       StateHasChanged();
     }
     catch (OperationCanceledException)
+    {
+      // Expected during disposal — suppress
+    }
+    catch (ObjectDisposedException)
     {
       // Expected during disposal — suppress
     }
@@ -449,81 +421,13 @@ public partial class Map : IAsyncDisposable
     }
     finally
     {
-      _refreshGate.Release();
+      try
+      {
+        _refreshGate.Release();
+      }
+      catch (ObjectDisposedException) { }
     }
   }
-
-  private async Task<ProviderVehicleRefresh> FetchProviderVehiclesAsync(
-    TransportProvider provider,
-    bool allowNotModified,
-    CancellationToken cancellationToken)
-  {
-    var result = await GtfsService.GetBusPositionsAsync(
-      provider.Endpoint,
-      allowNotModified,
-      cancellationToken);
-    if (_isDisposed || result.Status == GtfsFetchStatus.Failed)
-    {
-      return new ProviderVehicleRefresh(provider.Endpoint, ProviderVehicleRefreshStatus.Failed);
-    }
-
-    if (result.Status == GtfsFetchStatus.NotModified)
-    {
-      return new ProviderVehicleRefresh(provider.Endpoint, ProviderVehicleRefreshStatus.NotModified);
-    }
-
-    if (result.Vehicles is not { } vehicles)
-    {
-      return new ProviderVehicleRefresh(provider.Endpoint, ProviderVehicleRefreshStatus.Failed);
-    }
-
-    foreach (var vehicle in vehicles)
-    {
-      vehicle.TransportType = provider.TransportType;
-    }
-
-    return new ProviderVehicleRefresh(
-      provider.Endpoint,
-      ProviderVehicleRefreshStatus.Updated,
-      vehicles);
-  }
-
-  private string BuildTransitStatus(TransitRefreshOutcome outcome, int nearbyProviderCount)
-  {
-    if (_cachedVehicles.Count == 0)
-    {
-      return outcome.FailedProviderCount > 0 || outcome.ExpiredProviderCount > 0
-        ? "Live bus data unavailable; retrying with backoff."
-        : $"No active vehicles reported ({nearbyProviderCount} source(s)).";
-    }
-
-    var staleSuffix = outcome.StaleProviderCount > 0
-      ? $", {outcome.StaleProviderCount} temporarily stale"
-      : string.Empty;
-    var expiredSuffix = outcome.ExpiredProviderCount > 0
-      ? $", {outcome.ExpiredProviderCount} expired"
-      : string.Empty;
-
-    if (!lastUpdated.HasValue)
-    {
-      return $"Showing {_cachedVehicles.Count} buses ({nearbyProviderCount} source(s){staleSuffix}{expiredSuffix})";
-    }
-
-    return $"Buses updated: {lastUpdated:HH:mm:ss} ({nearbyProviderCount} source(s){staleSuffix}{expiredSuffix})";
-  }
-
-  private double CalculateDistance(double lat1, double lon1, double lat2, double lon2)
-  {
-    var R = 6371;
-    var dLat = ToRadians(lat2 - lat1);
-    var dLon = ToRadians(lon2 - lon1);
-    var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
-            Math.Cos(ToRadians(lat1)) * Math.Cos(ToRadians(lat2)) *
-            Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
-    return R * 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
-  }
-
-  private double ToRadians(double deg) => deg * (Math.PI / 180);
 
   private async Task ShowRoute()
   {
@@ -560,19 +464,9 @@ public partial class Map : IAsyncDisposable
         return;
       }
 
-      _routeOptions = await LiveRouting.EnrichRoutesAsync(googleRoutes, _cachedVehicles);
-
-      if (TodayFortune != null)
-      {
-          int currentHour = MalaysiaTime.Now.Hour;
-          bool isLuckyHour = TodayFortune.LuckyHours.Contains(currentHour);
-          for (int i = 0; i < _routeOptions.Count; i++)
-          {
-              // For demonstration purposes, mark as auspicious if it's a lucky hour,
-              // or alternate to show the badge regardless.
-              _routeOptions[i].IsAuspicious = isLuckyHour || (i % 2 == 0);
-          }
-      }
+      // For demonstration purposes, mark as auspicious if it's a lucky hour,
+      // or alternate to show the badge regardless.
+      _routeOptions = await TransitTracking.EnrichRoutesAsync(googleRoutes, _cts.Token);
 
       var top3 = _routeOptions.Take(3).ToList();
       if (top3.Any())
@@ -639,14 +533,17 @@ public partial class Map : IAsyncDisposable
     if (_isDisposed) return;
     _isDisposed = true;
 
-    Theme.OnThemeChanged -= OnThemeChanged;
+    objRef?.Dispose();
+    if (Theme != null)
+    {
+      Theme.OnThemeChanged -= OnThemeChanged;
+    }
 
     // Cancel the polling loop and any in-flight HTTP calls
     await _cts.CancelAsync();
     await Task.WhenAll(_autocompleteTask, _pollingTask);
     _cts.Dispose();
-
-    objRef?.Dispose();
+    _refreshGate.Dispose();
 
     if (mapModule != null)
     {

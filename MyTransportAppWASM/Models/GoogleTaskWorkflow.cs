@@ -41,4 +41,24 @@ public static class GoogleTaskWorkflow
         var remaining = minutes % 60;
         return remaining == 0 ? $"{hours} hr" : $"{hours} hr {remaining} min";
     }
+
+    public static void RemoveReferences(
+        IDictionary<string, GoogleTaskExtension> extensions,
+        IEnumerable<GoogleTaskReference> deleted)
+    {
+        var deletedKeys = deleted.Select(Key).ToHashSet();
+        foreach (var key in deletedKeys)
+        {
+            extensions.Remove(key);
+        }
+
+        foreach (var extension in extensions.Values.ToArray())
+        {
+            extension.DependsOn.RemoveAll(reference => deletedKeys.Contains(Key(reference)));
+            if (extension.DependsOn.Count == 0 && extension.EstimatedMinutes == null && extension.StartedAt == null)
+            {
+                extensions.Remove(Key(extension.TaskListId, extension.TaskId));
+            }
+        }
+    }
 }

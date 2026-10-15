@@ -7,18 +7,11 @@ namespace MyTransportAppWASM.Services
         public bool IsLoginRequested { get; private set; }
 
         public event Action? OnShowLoginRequested;
-        public event Action? OnHideLoginRequested;
 
         public void RequestShowLogin()
         {
             IsLoginRequested = true;
             OnShowLoginRequested?.Invoke();
-        }
-
-        public void RequestHideLogin()
-        {
-            IsLoginRequested = false;
-            OnHideLoginRequested?.Invoke();
         }
 
         public void ClearLoginRequest()

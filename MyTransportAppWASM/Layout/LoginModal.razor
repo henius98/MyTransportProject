@@ -50,7 +50,6 @@
   protected override void OnInitialized()
   {
     AppState.OnShowLoginRequested += HandleShowModalRequested;
-    AppState.OnHideLoginRequested += HandleHideModalRequested;
   }
 
   protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -62,8 +61,6 @@
   }
 
   private void HandleShowModalRequested() => _ = InvokeAsync(ShowModalAsync);
-
-  private void HandleHideModalRequested() => _ = InvokeAsync(CloseDialogAsync);
 
   private async Task ShowModalAsync()
   {
@@ -151,6 +148,5 @@
   public void Dispose()
   {
     AppState.OnShowLoginRequested -= HandleShowModalRequested;
-    AppState.OnHideLoginRequested -= HandleHideModalRequested;
   }
 }

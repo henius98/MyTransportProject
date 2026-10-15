@@ -54,3 +54,30 @@
 - **Asynchronous JS Interop**: Heavy use of `Task.WhenAll` to parallelize JS module loading and map initialization without blocking the UI thread.
 - **Graceful Degradation**: Whether it's GPS permission denial, CORS blocked APIs, or failed Protobuf parsing, the application avoids hard crashes by falling back to defaults and informing the user via the UI (`locationStatus`).
 - **UI & Styling Principles**: Implement minimal, simple CSS with a single source of truth (shared styles). Maintain a clear, modern UI aesthetic while strictly avoiding complex, performance-heavy animations.
+
+## 5. CI & Automated Verification
+
+- **GitHub Actions Workflow**:
+  - `.github/workflows/deploy.yml`: Single consolidated pipeline running on PRs, pushes to `master`, and release tags (build, unit tests, Firebase rules/services, browser smoke test, and GitHub Pages deployment).
+- **Local Workflow Testing (`wrkflw`)**:
+  - Tool: [`wrkflw`](https://github.com/bahdotsh/wrkflw) validates and runs workflows locally (emulation or rootless Podman).
+  - Helper script: `./scripts/test-workflow-local.sh`
+  - Validation: `./scripts/test-workflow-local.sh validate`
+  - Execution: `./scripts/test-workflow-local.sh run .github/workflows/deploy.yml --runtime emulation` (or `--runtime podman`)
+  - Interactive TUI: `./scripts/test-workflow-local.sh tui`
+- **Browser Smoke Test**: `./scripts/smoke-test.sh` verifies live WASM rendering, routing, and navigation via `agent-browser`.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues via `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical 5-role triage label set. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout (`GLOSSARY.md` and `docs/adr/` at root). See `docs/agents/domain.md`.
+

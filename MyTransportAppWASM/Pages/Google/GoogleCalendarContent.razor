@@ -292,6 +292,7 @@
   private bool allDay;
   private bool busy;
   private bool disposed;
+  private readonly CancellationTokenSource _cts = new();
   private bool confirmDelete;
   private bool showEditor;
   private bool showLunar = true;
@@ -610,5 +611,10 @@ MalaysiaTime.LocalDateTime(time) : DateTime.MinValue;
       ? exception.Message.Split('\n')[0]
       : "Google Calendar could not complete the request. Your changes are still in the form. Try again, or reconnect your account.";
 
-  public void Dispose() => disposed = true;
+  public void Dispose()
+  {
+    disposed = true;
+    _cts.Cancel();
+    _cts.Dispose();
+  }
 }

@@ -1,20 +1,18 @@
 @using Microsoft.AspNetCore.Components.WebAssembly.Services
 @inject LazyAssemblyLoader LazyAssemblyLoader
 
-<CascadingAuthenticationState>
-    <Router AppAssembly="@typeof(App).Assembly" OnNavigateAsync="PrepareRouteAsync">
-        <Found Context="routeData">
-            <!-- All routes are public, so no Authorizing message is shown; Firebase sign-in stays in the account UI. -->
-            <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
-            <FocusOnNavigate RouteData="@routeData" Selector="h1" />
-        </Found>
-        <NotFound>
-            <LayoutView Layout="@typeof(MainLayout)">
-                <MyTransportAppWASM.Pages.Core.NotFound />
-            </LayoutView>
-        </NotFound>
-    </Router>
-</CascadingAuthenticationState>
+<Router AppAssembly="@typeof(App).Assembly" OnNavigateAsync="PrepareRouteAsync">
+    <Found Context="routeData">
+        <!-- All routes are public, so no Authorizing message is shown; Firebase sign-in stays in the account UI. -->
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <LayoutView Layout="@typeof(MainLayout)">
+            <MyTransportAppWASM.Pages.Core.NotFound />
+        </LayoutView>
+    </NotFound>
+</Router>
 
 @code {
     private bool _gtfsAssemblyLoaded;
@@ -28,7 +26,14 @@
             return;
         }
 
-        await LazyAssemblyLoader.LoadAssembliesAsync(["MyTransportAppWASM.Gtfs.dll"]);
-        _gtfsAssemblyLoaded = true;
+        try
+        {
+            await LazyAssemblyLoader.LoadAssembliesAsync(["MyTransportAppWASM.Gtfs.dll"]);
+            _gtfsAssemblyLoaded = true;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to load GTFS assembly: {ex.Message}");
+        }
     }
 }

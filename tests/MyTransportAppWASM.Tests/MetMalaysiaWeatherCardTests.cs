@@ -1,13 +1,15 @@
+using System.Net;
+using System.Text;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Moq;
+using Microsoft.Extensions.Options;
 using MyTransportAppWASM.Models;
 using MyTransportAppWASM.Pages.Weather.Components;
 using MyTransportAppWASM.Services;
-using MyTransportAppWASM.Services.Interfaces;
 using MyTransportAppWASM.Utils;
 
 namespace MyTransportAppWASM.Tests;
@@ -41,8 +43,8 @@ public class MetMalaysiaWeatherCardTests
     [Fact]
     public async Task RealtimeRequestOnlyIncludesCurrentMalaysiaDate()
     {
-        var beforeRender = CurrentMalaysiaDate();
-        var endpoint = await RenderAndCaptureEndpointAsync(
+        var beforeRequest = CurrentMalaysiaDate();
+        var endpoint = await RequestAndCaptureEndpointAsync(
             fetchOutlook: false,
             new WeatherQuery
             {
@@ -50,17 +52,17 @@ public class MetMalaysiaWeatherCardTests
                 Departure = MalaysiaTime.At(new DateTime(2026, 10, 10)),
                 Return = MalaysiaTime.At(new DateTime(2026, 10, 17))
             });
-        var afterRender = CurrentMalaysiaDate();
+        var afterRequest = CurrentMalaysiaDate();
         var dates = GetRequestedDates(endpoint);
 
         Assert.Equal(dates.Start, dates.End);
-        Assert.Contains(dates.Start, new[] { beforeRender, afterRender });
+        Assert.Contains(dates.Start, new[] { beforeRequest, afterRequest });
     }
 
     [Fact]
     public async Task OutlookRequestKeepsSelectedDateRange()
     {
-        var endpoint = await RenderAndCaptureEndpointAsync(
+        var endpoint = await RequestAndCaptureEndpointAsync(
             fetchOutlook: true,
             new WeatherQuery
             {
@@ -74,55 +76,77 @@ public class MetMalaysiaWeatherCardTests
         Assert.Equal("2026-10-17", dates.End);
     }
 
-    private static async Task<Uri> RenderAndCaptureEndpointAsync(bool fetchOutlook, WeatherQuery query)
+    [Fact]
+    public async Task CardRendersProvidedResultWithoutSelfFetching()
     {
-        Uri? requestedEndpoint = null;
-        var weatherPlanner = new Mock<IWeatherPlannerService>();
-        weatherPlanner
-            .Setup(service => service.FetchProviderDataAsync(
-                It.IsAny<WeatherProviderOptions>(),
-                It.IsAny<Uri>(),
-                It.IsAny<string>(),
-                It.IsAny<CancellationToken>(),
-                It.IsAny<bool>()))
-            .Callback<WeatherProviderOptions, Uri, string, CancellationToken, bool>(
-                (_, endpoint, _, _, _) => requestedEndpoint = endpoint)
-            .ReturnsAsync(new WeatherProviderResult
-            {
-                Provider = "MetMalaysia",
-                Status = "LIVE",
-                Periods =
-                [
-                    new WeatherTimeSlice
-                    {
-                        Label = "Pagi",
-                        Time = DateTimeOffset.UtcNow,
-                        Summary = "Tiada hujan"
-                    }
-                ]
-            });
+        var result = new WeatherProviderResult
+        {
+            Provider = "MetMalaysia",
+            Status = "LIVE",
+            Periods =
+            [
+                new WeatherTimeSlice
+                {
+                    Label = "Pagi",
+                    Time = DateTimeOffset.UtcNow,
+                    Summary = "Tiada hujan",
+                    MinTemperatureC = 24,
+                    MaxTemperatureC = 32
+                }
+            ]
+        };
 
         await using var services = new ServiceCollection()
             .AddLogging()
-            .AddSingleton(weatherPlanner.Object)
-            .AddSingleton(new LanguageService(new HttpClient()))
+            .AddCascadingValue(_ => new LanguageService(new HttpClient()))
             .BuildServiceProvider();
         await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
 
-        await renderer.Dispatcher.InvokeAsync(() => renderer.RenderComponentAsync<MetMalaysiaWeatherCard>(
-            ParameterView.FromDictionary(new Dictionary<string, object?>
+        var html = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<MetMalaysiaWeatherCard>(
+                ParameterView.FromDictionary(new Dictionary<string, object?>
+                {
+                    [nameof(MetMalaysiaWeatherCard.Options)] = new MetMalaysiaWeatherProviderOptions
+                    {
+                        Enabled = true,
+                        Name = "MetMalaysia",
+                        BaseUrl = BaseUrl,
+                        Endpoints = EndpointTemplate
+                    },
+                    [nameof(MetMalaysiaWeatherCard.Result)] = result
+                }));
+            return component.ToHtmlString();
+        });
+
+        Assert.Contains("Tiada hujan", html);
+        Assert.Contains("Pagi", html);
+    }
+
+    private static async Task<Uri> RequestAndCaptureEndpointAsync(bool fetchOutlook, WeatherQuery query)
+    {
+        Uri? requestedEndpoint = null;
+        var handler = new CapturingHandler(uri => requestedEndpoint = uri);
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = new WeatherPlannerService(
+            new HttpClient(handler),
+            cache,
+            Options.Create(new CacheExpirationOptions
             {
-                [nameof(MetMalaysiaWeatherCard.Options)] = new MetMalaysiaWeatherProviderOptions
+                Weather = new() { LiveSeconds = 600, OutlookSeconds = 10800, FallbackSeconds = 30 }
+            }),
+            Options.Create(new WeatherOptions
+            {
+                MetMalaysia = new MetMalaysiaWeatherProviderOptions
                 {
                     Enabled = true,
                     Name = "MetMalaysia",
                     BaseUrl = BaseUrl,
                     Endpoints = EndpointTemplate
-                },
-                [nameof(MetMalaysiaWeatherCard.Query)] = query,
-                [nameof(MetMalaysiaWeatherCard.Label)] = fetchOutlook ? "Outlook" : "Realtime",
-                [nameof(MetMalaysiaWeatherCard.FetchOutlook)] = fetchOutlook
-            })));
+                }
+            }));
+
+        await service.RefreshProviderAsync("MetMalaysia", query, isOutlook: fetchOutlook);
 
         return Assert.IsType<Uri>(requestedEndpoint);
     }
@@ -140,4 +164,25 @@ public class MetMalaysiaWeatherCardTests
     }
 
     private static string CurrentMalaysiaDate() => MalaysiaTime.Now.ToString("yyyy-MM-dd");
+
+    private sealed class CapturingHandler(Action<Uri> onRequest) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            if (request.RequestUri != null)
+            {
+                onRequest(request.RequestUri);
+            }
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """[{"date":"2026-10-13T00:00:00Z","morning_forecast":"Tiada hujan"}]""",
+                    Encoding.UTF8,
+                    "application/json")
+            });
+        }
+    }
 }

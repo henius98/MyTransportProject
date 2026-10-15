@@ -6,12 +6,6 @@ namespace MyTransportAppWASM.Models.BaziFlow
         public T? Data { get; set; }
     }
 
-    public record ApiError
-    {
-        public string Status { get; set; } = string.Empty;
-        public string Message { get; set; } = string.Empty;
-    }
-
     public record CreateProfileRequest
     {
         public int Gender { get; set; }

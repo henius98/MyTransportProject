@@ -1,8 +1,7 @@
 @page "/not-found"
 @layout MainLayout
-@inject IJSRuntime JS
 @inject NavigationManager Navigation
-@inject CountdownTimer _timer
+@inject MyTransportAppWASM.Utils.CountdownTimer _timer
 @implements IDisposable
 
 <div class="modal__backdrop" @onclick="GoHome">
@@ -42,9 +41,10 @@
     </div>
 
 @code {
-    protected override async Task OnInitializedAsync()
+    protected override Task OnInitializedAsync()
     {
         _ = _timer.StartAsync(10, StateHasChanged, () => GoHome());
+        return Task.CompletedTask;
     }
 
     private void GoHome()

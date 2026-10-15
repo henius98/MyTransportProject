@@ -43,6 +43,7 @@ else
     private bool connected;
     private bool connecting;
     private bool disposed;
+    private readonly CancellationTokenSource _cts = new();
     private string? error;
 
     protected override async Task OnInitializedAsync()
@@ -82,5 +83,10 @@ else
         }
     }
 
-    public void Dispose() => disposed = true;
+    public void Dispose()
+    {
+        disposed = true;
+        _cts.Cancel();
+        _cts.Dispose();
+    }
 }

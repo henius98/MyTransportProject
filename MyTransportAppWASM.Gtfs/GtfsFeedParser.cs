@@ -238,10 +238,10 @@ public static class GtfsFeedParser
 
     public float ReadFloat()
     {
-      EnsureAvailable(sizeof(int));
-      var bits = BinaryPrimitives.ReadInt32LittleEndian(_data.Slice(_position, sizeof(int)));
-      _position += sizeof(int);
-      return BitConverter.Int32BitsToSingle(bits);
+      EnsureAvailable(sizeof(float));
+      var value = BinaryPrimitives.ReadSingleLittleEndian(_data.Slice(_position, sizeof(float)));
+      _position += sizeof(float);
+      return value;
     }
 
     public string ReadString()

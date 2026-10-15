@@ -1,10 +1,11 @@
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.JSInterop;
 using MyTransportAppWASM.Models;
+using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM.Services;
 
-public sealed class GoogleWorkspaceService : IAsyncDisposable
+public sealed class GoogleWorkspaceService : IGoogleWorkspaceService, IAsyncDisposable
 {
     private readonly IJSRuntime _jsRuntime;
     private Task<IJSObjectReference>? _moduleTask;
@@ -56,12 +57,25 @@ public sealed class GoogleWorkspaceService : IAsyncDisposable
     public Task DeleteTaskExtensionsAsync(string uid, GoogleTaskReference[] deleted) =>
         InvokeVoidAsync("deleteTaskExtensions", uid, deleted);
 
-    private Task<IJSObjectReference> GetModuleAsync()
-    {
-        if (_moduleTask is null || _moduleTask.IsFaulted || _moduleTask.IsCanceled)
-            _moduleTask = LoadModuleAsync();
+    private readonly SemaphoreSlim _moduleLock = new(1, 1);
 
-        return _moduleTask;
+    private async Task<IJSObjectReference> GetModuleAsync()
+    {
+        if (_moduleTask is { IsCompletedSuccessfully: true })
+            return await _moduleTask;
+
+        await _moduleLock.WaitAsync();
+        try
+        {
+            if (_moduleTask is null || _moduleTask.IsFaulted || _moduleTask.IsCanceled)
+                _moduleTask = LoadModuleAsync();
+
+            return await _moduleTask;
+        }
+        finally
+        {
+            _moduleLock.Release();
+        }
     }
 
     private async Task<IJSObjectReference> LoadModuleAsync()
@@ -86,20 +100,23 @@ public sealed class GoogleWorkspaceService : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (_moduleTask is null) return;
+        if (_moduleTask is not null)
+        {
+            try
+            {
+                var module = await _moduleTask;
+                await module.DisposeAsync();
+            }
+            catch (JSException)
+            {
+                // Loading may have failed while offline, or the browser may be closing.
+            }
+            catch (JSDisconnectedException)
+            {
+                // Normal during browser teardown.
+            }
+        }
 
-        try
-        {
-            var module = await _moduleTask;
-            await module.DisposeAsync();
-        }
-        catch (JSException)
-        {
-            // Loading may have failed while offline, or the browser may be closing.
-        }
-        catch (JSDisconnectedException)
-        {
-            // Normal during browser teardown.
-        }
+        _moduleLock.Dispose();
     }
 }

@@ -189,6 +189,77 @@ To run with Hot Reload enabled:
 dotnet watch --project MyTransportAppWASM
 ```
 
+## 🧪 Automated Testing & CI
+
+### Continuous Integration & Deployment (GitHub Actions)
+
+The repository runs automated verification on pull requests, pushes to `master`, and release tags via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml):
+- Solution build and .NET unit tests (`dotnet test MyTransportApp.slnx`)
+- Node.js test suites (Firebase config, Web Push, service worker, Google services)
+- Cloud Firestore rules testing with Firebase emulator
+- Browser smoke verification via `agent-browser`
+- Automated deployment to GitHub Pages (on `master` push) and release packaging (on tags)
+
+### Running Tests Locally
+
+#### .NET Tests
+```bash
+dotnet test MyTransportApp.slnx -c Release
+```
+
+#### Node.js & Firebase Tests
+```bash
+node --experimental-vm-modules --test tests/firebase-config/*.test.mjs
+node --test tests/push/*.test.mjs
+node --test tests/service-worker/*.test.mjs
+node --experimental-vm-modules --test tests/google-services/*.test.mjs
+pnpm --prefix functions test
+```
+
+#### Browser Smoke Verification
+Run automated headless browser smoke verification:
+```bash
+./scripts/smoke-test.sh
+```
+
+### Local Workflow Testing with `wrkflw`
+
+You can validate and execute GitHub Actions workflows locally using [`wrkflw`](https://github.com/bahdotsh/wrkflw).
+
+#### Prerequisites
+
+Install `wrkflw` via Homebrew or Cargo:
+```bash
+brew install wrkflw
+# or
+cargo install wrkflw
+```
+
+Supply local secrets and workflow variables if needed:
+```bash
+cp .secrets.example .secrets
+cp .vars.example .vars
+```
+Both `.secrets` and `.vars` are ignored by git.
+
+#### Running Workflows Locally
+
+Use the helper script [`scripts/test-workflow-local.sh`](scripts/test-workflow-local.sh):
+
+```bash
+# Validate and list all workflows
+./scripts/test-workflow-local.sh
+
+# Run the workflow using host emulation
+./scripts/test-workflow-local.sh run .github/workflows/deploy.yml --runtime emulation
+
+# Run the workflow inside Podman containers
+./scripts/test-workflow-local.sh run .github/workflows/deploy.yml --runtime podman
+
+# Launch the interactive TUI
+./scripts/test-workflow-local.sh tui
+```
+
 ## 📄 License
 
 This project is licensed under the MIT License.

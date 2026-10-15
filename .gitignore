@@ -368,3 +368,7 @@ FodyWeavers.xsd
 .codex
 functions/.env*
 functions/.secret.local
+
+# Local testing secrets and variables
+.secrets
+.vars

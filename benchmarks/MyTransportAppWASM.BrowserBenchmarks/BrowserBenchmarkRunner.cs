@@ -37,11 +37,11 @@ public static class BrowserBenchmarkRunner
       Measure(
         "LiveRouting/typical-3x3x1000",
         iterations: 120,
-        () => routingService.EnrichRoutesAsync(typicalRoutes, typicalVehicles).GetAwaiter().GetResult().Count),
+        () => routingService.EnrichRoutes(typicalRoutes, typicalVehicles).Count),
       Measure(
         "LiveRouting/stress-10x6x5000",
         iterations: 30,
-        () => routingService.EnrichRoutesAsync(stressRoutes, stressVehicles).GetAwaiter().GetResult().Count),
+        () => routingService.EnrichRoutes(stressRoutes, stressVehicles).Count),
       Measure(
         "WeatherShaper/generic-14",
         iterations: 300,

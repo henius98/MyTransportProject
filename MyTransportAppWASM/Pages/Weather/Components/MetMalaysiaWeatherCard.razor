@@ -1,20 +1,17 @@
 @using MyTransportAppWASM.Models
-@using MyTransportAppWASM.Services.Interfaces
-@inject MyTransportAppWASM.Services.LanguageService Language
-@inject IWeatherPlannerService WeatherPlannerService
 
 <div class="card h-100">
   <div
     class="d-flex align-items-center justify-content-between mb-3 border-bottom border-secondary border-opacity-10 pb-3">
     <div>
-      <h3 class="m-0 fw-semibold" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(Options.Name ?? "MetMalaysia")
+      <h3 class="m-0 fw-semibold" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(Options?.Name ?? Provider?.Provider ?? "MetMalaysia")
       </h3>
       <a class="text-dim mt-1 d-inline-block" style="font-size: 0.75rem;" href="@($"https://{SourceDomain}")"
          target="_blank" rel="noopener noreferrer">
         <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>@SourceDomain
       </a>
     </div>
-    <WeatherStatusBadge Status="@(Provider?.Status ?? "Loading")" ProviderName="@(Options.Name ?? "MetMalaysia")"
+    <WeatherStatusBadge Status="@(Provider?.Status ?? "Loading")" ProviderName="@(Options?.Name ?? Provider?.Provider ?? "MetMalaysia")"
                         IsCached="@(Provider?.IsCached == true)" IsRefreshing="isLoading" OnRefresh="RefreshAsync" />
   </div>
 
@@ -58,7 +55,7 @@
                   <i class="@slice.Icon"></i>
                 </div>
                 <div class="forecast-details flex-grow-1">
-                  <div class="fw-medium mb-1 fs-5" style="letter-spacing: -0.01em;">@(Language[slice.Summary ?? "N/A"])</div>
+                  <div class="fw-medium mb-1 fs-5" style="letter-spacing: -0.01em;">@(Language?[slice.Summary ?? "N/A"] ?? slice.Summary ?? "N/A")</div>
 
                   <div class="d-flex flex-wrap gap-3 text-dim fw-medium" style="font-size: 0.85rem;">
                     @if (slice.MinTemperatureC.HasValue && slice.MaxTemperatureC.HasValue)
@@ -79,10 +76,10 @@
                   @* @if (slice.Label != "Realtime" && slice.Label != "Outlook" &&
                     !string.IsNullOrWhiteSpace(slice.Label))
                   { *@
-                  <span class="forecast-period-trigger ms-3 flex-shrink-0" tabindex="0" aria-label="@(Language[slice.Label])"
-                        data-label="@(Language[slice.Label])">
+                  <span class="forecast-period-trigger ms-3 flex-shrink-0" tabindex="0" aria-label="@(Language?[slice.Label] ?? slice.Label)"
+                        data-label="@(Language?[slice.Label] ?? slice.Label)">
                     <span class="badge forecast-period-label @labelColorClass" style="font-weight: 500;">
-                      <span class="forecast-period-text">@(Language[slice.Label])</span>
+                      <span class="forecast-period-text">@(Language?[slice.Label] ?? slice.Label)</span>
                     </span>
                   </span>
                   @* } *@
@@ -96,111 +93,31 @@
   </div>
 
 @code {
-  [Parameter, EditorRequired]
-  public required MetMalaysiaWeatherProviderOptions Options { get; set; }
-
-  [Parameter, EditorRequired]
-  public required WeatherQuery Query { get; set; }
+  [CascadingParameter]
+  private MyTransportAppWASM.Services.LanguageService Language { get; set; } = default!;
 
   [Parameter]
-  public string Label { get; set; } = "Realtime";
+  public MetMalaysiaWeatherProviderOptions? Options { get; set; }
 
   [Parameter]
-  public bool FetchOutlook { get; set; } = false;
+  public WeatherProviderResult? Result { get; set; }
 
-  private WeatherProviderResult? Provider;
-  private bool isLoading = true;
-  private string? lastUrl;
-  private string SourceDomain => string.IsNullOrWhiteSpace(Options.Source) ? "data.gov.my" : Options.Source;
+  [Parameter]
+  public EventCallback OnRefresh { get; set; }
 
-  protected override async Task OnParametersSetAsync()
-  {
-    try
-    {
-      if (Options.Enabled && !string.IsNullOrWhiteSpace(Options.BaseUrl))
-      {
-        string fullUrl = Options.BaseUrl + Options.Endpoints;
-        Uri uri = BuildUri(fullUrl, Query);
+  [Parameter]
+  public bool IsRefreshing { get; set; }
 
-        if (lastUrl == uri.AbsoluteUri)
-          return; // Prevent duplicate fetches on parent re-render
-
-        lastUrl = uri.AbsoluteUri;
-        isLoading = true;
-
-        await LoadProviderAsync(uri);
-      }
-    }
-    finally
-    {
-      isLoading = false;
-    }
-  }
+  // If fetching realtime weather, just grab the closest time (handled by WeatherPlannerService shaping)
+  private WeatherProviderResult? Provider => Result;
+  private bool isLoading => IsRefreshing;
+  private string SourceDomain => string.IsNullOrWhiteSpace(Options?.Source) ? (Provider?.Source ?? "data.gov.my") : Options.Source;
 
   private async Task RefreshAsync()
   {
-    if (Provider?.IsCached != true || lastUrl == null || isLoading)
-      return;
-
-    isLoading = true;
-    try
+    if (OnRefresh.HasDelegate)
     {
-      await LoadProviderAsync(new Uri(lastUrl, UriKind.Absolute), forceRefresh: true);
+      await OnRefresh.InvokeAsync();
     }
-    finally
-    {
-      isLoading = false;
-    }
-  }
-
-  private async Task LoadProviderAsync(Uri uri, bool forceRefresh = false)
-  {
-    Provider = await WeatherPlannerService.FetchProviderDataAsync(
-      Options,
-      uri,
-      Label,
-      forceRefresh: forceRefresh);
-
-    // If fetching realtime weather, just grab the closest time
-    if (!FetchOutlook && Provider.Periods.Count > 1)
-    {
-      var now = MalaysiaTime.Now;
-      var closest = Provider.Periods.MinBy(p => Math.Abs((p.Time - now).Ticks));
-      if (closest != null)
-        Provider = Provider with { Periods = new List<WeatherTimeSlice> { closest } };
-    }
-    else if (FetchOutlook && Provider.Periods.Count > 0)
-    {
-      var now = MalaysiaTime.Now;
-      var sortedPeriods = Provider.Periods.Where(p => MalaysiaTime.Convert(p.Time).Date >= now.Date).OrderBy(p => p.Time).Take(14).ToList();
-      Provider = Provider with { Periods = sortedPeriods };
-    }
-  }
-
-  private Uri BuildUri(string template, WeatherQuery query)
-  {
-    var formatted = template;
-
-    if (formatted.Contains("{location_id}", StringComparison.OrdinalIgnoreCase))
-    {
-      string locId = !string.IsNullOrWhiteSpace(query.LocationId) ? query.LocationId : "Ds058";
-      formatted = formatted.Replace("{location_id}", Uri.EscapeDataString(locId), StringComparison.OrdinalIgnoreCase);
-    }
-
-    if (formatted.Contains("{date_start}", StringComparison.OrdinalIgnoreCase) || formatted.Contains("{date_end}",
-StringComparison.OrdinalIgnoreCase))
-    {
-      var currentMalaysiaTime = MalaysiaTime.Now;
-      var start = FetchOutlook ? query.Departure ?? currentMalaysiaTime : currentMalaysiaTime;
-      var end = FetchOutlook ? query.Return ?? start.AddDays(7) : currentMalaysiaTime;
-      formatted = formatted.Replace("{date_start}", start.ToString("yyyy-MM-dd"), StringComparison.OrdinalIgnoreCase);
-      formatted = formatted.Replace("{date_end}", end.ToString("yyyy-MM-dd"), StringComparison.OrdinalIgnoreCase);
-    }
-
-    if (!string.IsNullOrWhiteSpace(Options.ApiKey))
-      formatted = formatted.Replace("{key}", Options.ApiKey, StringComparison.OrdinalIgnoreCase).Replace("{apiKey}",
-Options.ApiKey, StringComparison.OrdinalIgnoreCase);
-
-    return new Uri(formatted, UriKind.Absolute);
   }
 }

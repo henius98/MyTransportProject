@@ -1,7 +1,7 @@
 @if (IsCached)
 {
   <button type="button"
-          class="badge badge--action @WeatherUIHelper.GetStatusClass(Status)"
+          class="badge badge--action @GetStatusClass(Status)"
           disabled="@IsRefreshing"
           title="Refresh latest data from @ProviderName"
           aria-label="Refresh latest data from @ProviderName"
@@ -12,7 +12,7 @@
 }
 else
 {
-  <span class="badge @WeatherUIHelper.GetStatusClass(Status)" aria-live="polite">@Status</span>
+  <span class="badge @GetStatusClass(Status)" aria-live="polite">@Status</span>
 }
 
 @code {
@@ -30,4 +30,6 @@ else
 
   [Parameter]
   public EventCallback OnRefresh { get; set; }
+
+  public static string GetStatusClass(string? status) => WeatherUIHelper.GetStatusClass(status);
 }

@@ -35,6 +35,8 @@
              Link="Production/Services/Interfaces/ILiveRoutingService.cs" />
     <Compile Include="../../MyTransportAppWASM/Services/LiveRoutingService.cs"
              Link="Production/Services/LiveRoutingService.cs" />
+    <Compile Include="../../MyTransportAppWASM/Utils/GeoMath.cs"
+             Link="Production/Utils/GeoMath.cs" />
     <Compile Include="../../MyTransportAppWASM/Utils/WeatherShaper.cs"
              Link="Production/Utils/WeatherShaper.cs" />
     <Compile Include="../../MyTransportAppWASM/Utils/MalaysiaTime.cs"

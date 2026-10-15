@@ -1,3 +1,4 @@
+using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM.Services
 {

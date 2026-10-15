@@ -1,12 +1,9 @@
 @inherits LayoutComponentBase
 @using MyTransportAppWASM.Services
-@inject ThemeService Theme
-@inject LanguageService Language
-@inject AuthenticationStateProvider AuthStateProvider
 @inject IUserSettingsService UserSettings
 @inject IConfiguration Configuration
 @inject IJSRuntime JS
-@implements IDisposable
+@inject ThemeService Theme
 
 <div class="page" style="@SidebarStyle">
     <!-- Skip link for keyboard users — visually hidden until focused -->
@@ -40,26 +37,31 @@
 </div>
 
 @code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    [CascadingParameter] private LanguageService Language { get; set; } = default!;
+
     private bool isCollapsed = false;
     private bool isHovered = false;
     private int preferenceVersion;
-    private bool disposed;
+    private Task<AuthenticationState>? _lastAuthState;
 
     private bool EffectiveIsCollapsed => isCollapsed && !isHovered;
 
     private string SidebarStyle => $"--sidebar-width: {(EffectiveIsCollapsed ? "70px" : "250px")};";
     private string SidebarClass => $"sidebar {(EffectiveIsCollapsed ? "collapsed" : "")}".Trim();
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnParametersSetAsync()
     {
-        AuthStateProvider.AuthenticationStateChanged += HandleAuthenticationChanged;
-        Theme.OnThemeChanged += StateHasChanged;
-        Language.OnLanguageChanged += StateHasChanged;
-        await ApplyPreferencesAsync();
+        if (!ReferenceEquals(AuthState, _lastAuthState))
+        {
+            _lastAuthState = AuthState;
+            if (AuthState is not null)
+            {
+                await AuthState;
+            }
+            await ApplyPreferencesAsync();
+        }
     }
-
-    private void HandleAuthenticationChanged(Task<AuthenticationState> state) =>
-        _ = InvokeAsync(ApplyPreferencesAsync);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -82,9 +84,9 @@
         try
         {
             var settings = await UserSettings.GetSettingsAsync();
-            if (disposed || version != preferenceVersion) return;
+            if (version != preferenceVersion) return;
             await Theme.ApplyAsync(settings);
-            if (disposed || version != preferenceVersion) return;
+            if (version != preferenceVersion) return;
             var language = LanguageService.SupportedLanguages.Any(option => option.Code == settings.Language)
                 ? settings.Language! : "en-US";
             await Language.LoadLanguageAsync(language);
@@ -100,12 +102,4 @@
 
     private void HandleMouseEnter() => isHovered = true;
     private void HandleMouseLeave() => isHovered = false;
-
-    public void Dispose()
-    {
-        disposed = true;
-        AuthStateProvider.AuthenticationStateChanged -= HandleAuthenticationChanged;
-        Theme.OnThemeChanged -= StateHasChanged;
-        Language.OnLanguageChanged -= StateHasChanged;
-    }
 }

@@ -1,6 +1,7 @@
 @using System.Globalization
+@using MyTransportAppWASM.Services.Interfaces
 @implements IDisposable
-@inject GoogleWorkspaceService Workspace
+@inject IGoogleTasksWorkflowService WorkflowService
 
 <div class="google-tasks-dashboard" aria-busy="@busy">
     <header class="tasks-topbar">
@@ -242,6 +243,7 @@
     private bool editorOpen;
     private bool busy;
     private bool disposed;
+    private readonly CancellationTokenSource _cts = new();
     private bool confirmDelete;
     private string? error;
     private string? status;
@@ -276,25 +278,13 @@
         error = status = null;
         try
         {
-            var lists = await Workspace.ListTaskListsAsync(UserId);
-            var loaded = await Task.WhenAll(lists.Select(async list => (list.Id, Tasks: (await Workspace.ListTasksAsync(UserId, list.Id)).ToList())));
-            var loadedExtensions = await Workspace.ListTaskExtensionsAsync(UserId);
+            var tree = await WorkflowService.LoadTaskTreeAsync(UserId, _cts.Token);
             if (disposed) return;
-            taskLists = lists.ToList();
-            tasksByList = loaded.ToDictionary(result => result.Id, result => result.Tasks);
-            taskLookup = AllTaskReferences.ToDictionary(item => GoogleTaskWorkflow.Key(item.ListId, item.Task.Id), item => item.Task);
-            extensions = loadedExtensions.ToDictionary(extension => GoogleTaskWorkflow.Key(extension.TaskListId, extension.TaskId));
-            var knownTasks = TaskLookup;
-            var missing = loadedExtensions
-                .Select(extension => new GoogleTaskReference { TaskListId = extension.TaskListId, TaskId = extension.TaskId })
-                .Concat(loadedExtensions.SelectMany(extension => extension.DependsOn))
-                .Where(reference => !knownTasks.ContainsKey(GoogleTaskWorkflow.Key(reference)))
-                .DistinctBy(GoogleTaskWorkflow.Key).ToArray();
-            if (missing.Length > 0)
-            {
-                await Workspace.DeleteTaskExtensionsAsync(UserId, missing);
-                RemoveExtensionReferences(missing);
-            }
+            taskLists = tree.TaskLists.ToList();
+            tasksByList = tree.TasksByList.ToDictionary(kv => kv.Key, kv => kv.Value);
+            taskLookup = tree.TaskLookup.ToDictionary(kv => kv.Key, kv => kv.Value);
+            extensions = tree.Extensions.ToDictionary(kv => kv.Key, kv => kv.Value);
+
             if (activeListId != null && !tasksByList.ContainsKey(activeListId)) activeListId = null;
             if (editorOpen && editingListId != null)
             {
@@ -310,6 +300,9 @@
                     else SelectTask(editingListId, refreshed);
                 }
             }
+        }
+        catch (OperationCanceledException)
+        {
         }
         catch (Exception ex)
         {
@@ -378,18 +371,6 @@
         else editingDependencies.Remove(key);
     }
 
-    private void RemoveExtensionReferences(IEnumerable<GoogleTaskReference> deleted)
-    {
-        var keys = deleted.Select(GoogleTaskWorkflow.Key).ToHashSet();
-        foreach (var key in keys) extensions.Remove(key);
-        foreach (var extension in extensions.Values.ToArray())
-        {
-            extension.DependsOn.RemoveAll(reference => keys.Contains(GoogleTaskWorkflow.Key(reference)));
-            if (extension.DependsOn.Count == 0 && extension.EstimatedMinutes == null && extension.StartedAt == null)
-                extensions.Remove(GoogleTaskWorkflow.Key(extension.TaskListId, extension.TaskId));
-        }
-    }
-
     private async Task ToggleCompleteAsync(string targetListId, GoogleTask task)
     {
         if (busy || disposed || task.AssignmentInfo != null) return;
@@ -397,17 +378,13 @@
         error = status = null;
         try
         {
-            var isComplete = task.Status != "completed";
-            var body = new GoogleTaskEdit
-            {
-                Title = task.Title, Notes = task.Notes, Due = task.Due,
-                Status = isComplete ? "completed" : "needsAction",
-                Completed = isComplete ? DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture) : null
-            };
-            var saved = await Workspace.SaveTaskAsync(UserId, targetListId, task.Id, body, task.Etag);
+            var saved = await WorkflowService.ToggleTaskCompletionAsync(UserId, targetListId, task, _cts.Token);
             if (disposed) return;
             ReplaceTask(targetListId, saved);
             if (selectedTask?.Id == saved.Id && editingListId == targetListId) SelectTask(targetListId, saved);
+        }
+        catch (OperationCanceledException)
+        {
         }
         catch (Exception ex)
         {
@@ -423,79 +400,67 @@
     {
         if (busy || disposed || !CanEdit || editingListId == null) return;
         error = status = null;
-        if (string.IsNullOrWhiteSpace(title))
-        {
-            error = "Enter a task title.";
-            return;
-        }
-        if (estimatedMinutes is < 1 or > 1440)
-        {
-            error = "Enter an estimated duration between 1 and 1440 minutes.";
-            return;
-        }
 
         var dependencies = AllTaskReferences
             .Where(item => editingDependencies.Contains(GoogleTaskWorkflow.Key(item.ListId, item.Task.Id)))
             .Select(item => new GoogleTaskReference { TaskListId = item.ListId, TaskId = item.Task.Id }).ToList();
-        if (dependencies.Count != editingDependencies.Count ||
-            dependencies.Any(reference => reference.TaskListId == editingListId && reference.TaskId == selectedTask?.Id))
+
+        var request = new GoogleTaskSaveRequest
         {
-            error = "Choose existing tasks other than this task as dependencies.";
-            return;
-        }
-        if (dependencies.Count > 100)
-        {
-            error = "Choose at most 100 dependency tasks.";
-            return;
-        }
+            TaskId = selectedTask?.Id,
+            Title = title,
+            Notes = notes,
+            DueDate = dueDate,
+            IsCompleted = completed,
+            CompletedTimestamp = completed ? selectedTask?.Completed : null,
+            Etag = selectedTask?.Etag,
+            EstimatedMinutes = estimatedMinutes,
+            Dependencies = dependencies
+        };
 
         busy = true;
-        var googleSaved = false;
         try
         {
-            var latest = (await Workspace.ListTaskExtensionsAsync(UserId))
-                .ToDictionary(extension => GoogleTaskWorkflow.Key(extension.TaskListId, extension.TaskId));
-            if (selectedTask != null && GoogleTaskWorkflow.CreatesCycle(
-                GoogleTaskWorkflow.Key(editingListId, selectedTask.Id), dependencies, latest))
-            {
-                error = "These dependencies would create a circular task chain.";
-                return;
-            }
-            var body = new GoogleTaskEdit
-            {
-                Title = title.Trim(), Notes = notes,
-                Due = dueDate?.ToString("yyyy-MM-dd'T'00:00:00.000'Z'", CultureInfo.InvariantCulture),
-                Status = completed ? "completed" : "needsAction",
-                Completed = completed ? selectedTask?.Completed ?? DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture) : null
-            };
-            var saved = await Workspace.SaveTaskAsync(UserId, editingListId, selectedTask?.Id, body, selectedTask?.Etag);
-            googleSaved = true;
+            var saved = await WorkflowService.SaveTaskWithWorkflowAsync(UserId, editingListId, request, _cts.Token);
             if (disposed) return;
             ReplaceTask(editingListId, saved);
             selectedTask = saved;
+
             var key = GoogleTaskWorkflow.Key(editingListId, saved.Id);
             var extension = new GoogleTaskExtension
             {
-                TaskListId = editingListId, TaskId = saved.Id,
-                EstimatedMinutes = estimatedMinutes, DependsOn = dependencies,
-                StartedAt = latest.GetValueOrDefault(key)?.StartedAt
+                TaskListId = editingListId,
+                TaskId = saved.Id,
+                EstimatedMinutes = estimatedMinutes,
+                DependsOn = dependencies,
+                StartedAt = extensions.GetValueOrDefault(key)?.StartedAt
             };
             if (extension.EstimatedMinutes != null || extension.DependsOn.Count > 0 ||
-                extension.StartedAt != null || latest.ContainsKey(key))
+                extension.StartedAt != null || extensions.ContainsKey(key))
             {
-                await Workspace.SaveTaskExtensionAsync(UserId, extension);
                 if (extension.EstimatedMinutes == null && extension.DependsOn.Count == 0 && extension.StartedAt == null)
                     extensions.Remove(key);
                 else extensions[key] = extension;
             }
+
             CloseEditor();
             status = "Task saved.";
         }
+        catch (GoogleTaskExtensionSyncException syncEx)
+        {
+            if (!disposed)
+            {
+                ReplaceTask(editingListId, syncEx.SavedTask);
+                selectedTask = syncEx.SavedTask;
+                error = syncEx.Message;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
         catch (Exception ex)
         {
-            if (!disposed) error = googleSaved
-                ? "Task saved to Google Tasks, but its extension details did not sync. Retry Save."
-                : ErrorMessage(ex);
+            if (!disposed) error = ErrorMessage(ex);
         }
         finally
         {
@@ -508,77 +473,21 @@
         if (busy || disposed || selectedTask == null || !CanEdit || !confirmDelete || editingListId == null) return;
         busy = true;
         error = status = null;
-        var googleDeleted = false;
         try
         {
             var deletedId = selectedTask.Id;
-            var previousTasks = TasksFor(editingListId).ToArray();
-            await Workspace.DeleteTaskAsync(UserId, editingListId, deletedId, selectedTask.Etag);
-            googleDeleted = true;
+            var targetListId = editingListId;
+            var result = await WorkflowService.DeleteTaskWithWorkflowAsync(UserId, targetListId, deletedId, selectedTask.Etag, _cts.Token);
             if (disposed) return;
-            var remaining = (await Workspace.ListTasksAsync(UserId, editingListId)).ToList();
-            remaining.RemoveAll(task => task.Id == deletedId);
-            var remainingIds = remaining.Select(task => task.Id).ToHashSet();
-            var deleted = previousTasks.Where(task => !remainingIds.Contains(task.Id))
-                .Select(task => new GoogleTaskReference { TaskListId = editingListId, TaskId = task.Id })
-                .Append(new GoogleTaskReference { TaskListId = editingListId, TaskId = deletedId })
-                .DistinctBy(GoogleTaskWorkflow.Key).ToArray();
-            tasksByList[editingListId] = remaining;
+
+            tasksByList[targetListId] = result.RemainingTasks.ToList();
             taskLookup = AllTaskReferences.ToDictionary(item => GoogleTaskWorkflow.Key(item.ListId, item.Task.Id), item => item.Task);
+            GoogleTaskWorkflow.RemoveReferences(extensions, result.DeletedReferences);
             CloseEditor();
-            await Workspace.DeleteTaskExtensionsAsync(UserId, deleted);
-            RemoveExtensionReferences(deleted);
             status = "Task deleted from Google Tasks.";
         }
-        catch (Exception ex)
+        catch (OperationCanceledException)
         {
-            if (!disposed) error = googleDeleted
-                ? "Task deleted from Google Tasks, but extension cleanup did not sync. Refresh to retry."
-                : ErrorMessage(ex);
-        }
-        finally
-        {
-            if (!disposed) busy = false;
-        }
-    }
-
-    private void ReplaceTask(string targetListId, GoogleTask task)
-    {
-        var listTasks = TasksFor(targetListId);
-        var index = listTasks.FindIndex(existing => existing.Id == task.Id);
-        if (index < 0) listTasks.Insert(0, task);
-        else listTasks[index] = task;
-        taskLookup[GoogleTaskWorkflow.Key(targetListId, task.Id)] = task;
-    }
-
-    private async Task StartTaskAsync()
-    {
-        if (busy || disposed || selectedTask == null || editingListId == null || EditorHasChanges) return;
-        var listId = editingListId;
-        var taskId = selectedTask.Id;
-        await RefreshAsync();
-        if (disposed || error != null) return;
-        var task = TasksFor(listId).FirstOrDefault(item => item.Id == taskId);
-        if (task == null || WorkflowState(listId, task) != GoogleTaskWorkflowState.Ready)
-        {
-            error = "This task is no longer ready. Complete its prerequisites and refresh.";
-            return;
-        }
-        busy = true;
-        try
-        {
-            var current = ExtensionFor(listId, taskId);
-            var extension = new GoogleTaskExtension
-            {
-                TaskListId = listId, TaskId = taskId,
-                EstimatedMinutes = current?.EstimatedMinutes,
-                DependsOn = current?.DependsOn.ToList() ?? [],
-                StartedAt = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)
-            };
-            await Workspace.SaveTaskExtensionAsync(UserId, extension);
-            if (disposed) return;
-            extensions[GoogleTaskWorkflow.Key(listId, taskId)] = extension;
-            status = "Task started.";
         }
         catch (Exception ex)
         {
@@ -590,9 +499,59 @@
         }
     }
 
-    private static string ErrorMessage(Exception exception) => exception is JSException
-        ? exception.Message.Split('\n')[0]
-        : "Google Tasks could not complete the request. Your changes are still in the form. Try again, or reconnect your account.";
+    private void ReplaceTask(string targetListId, GoogleTask task)
+    {
+        if (!tasksByList.TryGetValue(targetListId, out var listTasks))
+        {
+            listTasks = [];
+            tasksByList[targetListId] = listTasks;
+        }
+        var index = listTasks.FindIndex(existing => existing.Id == task.Id);
+        if (index < 0) listTasks.Insert(0, task);
+        else listTasks[index] = task;
+        taskLookup[GoogleTaskWorkflow.Key(targetListId, task.Id)] = task;
+    }
 
-    public void Dispose() => disposed = true;
+    private async Task StartTaskAsync()
+    {
+        if (busy || disposed || selectedTask == null || editingListId == null || EditorHasChanges) return;
+        var listId = editingListId;
+        var taskId = selectedTask.Id;
+        busy = true;
+        error = status = null;
+        try
+        {
+            var updated = await WorkflowService.StartTaskAsync(UserId, listId, taskId, _cts.Token);
+            if (disposed) return;
+            extensions[GoogleTaskWorkflow.Key(listId, taskId)] = updated;
+            status = "Task started.";
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            if (!disposed) error = ErrorMessage(ex);
+        }
+        finally
+        {
+            if (!disposed) busy = false;
+        }
+    }
+
+    private static string ErrorMessage(Exception exception) => exception switch
+    {
+        ArgumentException arg => arg.Message,
+        InvalidOperationException inv => inv.Message,
+        KeyNotFoundException key => key.Message,
+        JSException js => js.Message.Split('\n')[0],
+        _ => "Google Tasks could not complete the request. Your changes are still in the form. Try again, or reconnect your account."
+    };
+
+    public void Dispose()
+    {
+        disposed = true;
+        _cts.Cancel();
+        _cts.Dispose();
+    }
 }

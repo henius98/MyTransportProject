@@ -6,7 +6,9 @@ internal static class SolarTermDates
     // https://www.hko.gov.hk/en/gts/time/conversion.htm
     // Each row contains the day of the month for the two terms in January through December.
     // Extracted from https://www.hko.gov.hk/tc/gts/time/calendar/text/files/T{year}c.txt.
-    private const int FirstYear = 1901;
+    public const int FirstSupportedYear = 1901;
+    public const int LastSupportedYear = 2100;
+    private const int FirstYear = FirstSupportedYear;
     private static readonly string[] Names = ["小寒", "大寒", "立春", "雨水", "惊蛰", "春分", "清明", "谷雨", "立夏", "小满", "芒种", "夏至", "小暑", "大暑", "立秋", "处暑", "白露", "秋分", "寒露", "霜降", "立冬", "小雪", "大雪", "冬至"];
     private static readonly byte[] Days =
     [

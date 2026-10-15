@@ -2,10 +2,7 @@
 @page "/index.html"
 @using MyTransportAppWASM.Services
 @using MyTransportAppWASM.Services.Interfaces
-@inject IFormFactor FormFactor
 @inject IUserSettingsService UserSettings
-@inject AuthenticationStateProvider AuthStateProvider
-@implements IDisposable
 
 <PageTitle>Home - MyTransportApp</PageTitle>
 
@@ -41,7 +38,7 @@
 
     @if (showWelcome)
     {
-        <div class="modal__backdrop" @onclick="CloseWelcome">
+        <div class="modal__backdrop" @onclick="CloseWelcome" @onclick:stopPropagation="true">
             <div class="modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title" @onclick:stopPropagation="true">
                 <button type="button" class="modal__close" aria-label="Close welcome" @onclick="CloseWelcome">&times;</button>
                 <div class="modal__icon">👋</div>
@@ -69,40 +66,33 @@
 
 
 @code {
-    private string factor => FormFactor.GetFormFactor();
-    private string platform => FormFactor.GetPlatform();
+    private const string factor = "WebAssembly";
+    private const string platform = "Blazor WebAssembly";
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private bool showWelcome;
     private int welcomeVersion;
-    private bool disposed;
+    private Task<AuthenticationState>? _lastAuthState;
+    private bool _initialized;
 
-    protected override void OnInitialized() =>
-        AuthStateProvider.AuthenticationStateChanged += HandleAuthenticationChanged;
-
-    private void HandleAuthenticationChanged(Task<AuthenticationState> state) =>
-        _ = InvokeAsync(RefreshWelcomeAsync);
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
+    protected override async Task OnParametersSetAsync()
     {
-        if (firstRender)
+        if (_initialized && ReferenceEquals(AuthState, _lastAuthState))
         {
-            await RefreshWelcomeAsync();
+            return;
         }
-    }
 
-    private async Task RefreshWelcomeAsync()
-    {
+        _initialized = true;
+        _lastAuthState = AuthState;
         var version = ++welcomeVersion;
+        if (AuthState is not null)
+        {
+            await AuthState;
+        }
         var settings = await UserSettings.GetSettingsAsync();
-        if (disposed || version != welcomeVersion) return;
+        if (version != welcomeVersion) return;
         showWelcome = settings.HasSeenWelcome != true;
-        StateHasChanged();
-    }
-
-    public void Dispose()
-    {
-        disposed = true;
-        AuthStateProvider.AuthenticationStateChanged -= HandleAuthenticationChanged;
     }
 
     private async Task CloseWelcome()

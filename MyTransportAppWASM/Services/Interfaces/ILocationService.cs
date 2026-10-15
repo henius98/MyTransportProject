@@ -6,7 +6,6 @@ namespace MyTransportAppWASM.Services.Interfaces
   {
     Task<Location?> GetCurrentLocationAsync(bool forceRefresh = false);
     void UpdateLocation(double latitude, double longitude, double? accuracy = null);
-    event Action<Location>? OnLocationChanged;
     Location? LastKnownLocation { get; }
   }
 }

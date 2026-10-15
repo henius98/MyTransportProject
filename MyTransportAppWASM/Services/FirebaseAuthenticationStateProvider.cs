@@ -75,10 +75,7 @@ namespace MyTransportAppWASM.Services
 
             var authState = new AuthenticationState(_currentUser);
 
-            if (!_initialAuthStateTcs.Task.IsCompleted)
-            {
-                _initialAuthStateTcs.SetResult();
-            }
+            _initialAuthStateTcs.TrySetResult();
 
             NotifyAuthenticationStateChanged(Task.FromResult(authState));
         }

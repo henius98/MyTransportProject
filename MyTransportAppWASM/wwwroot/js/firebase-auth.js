@@ -144,7 +144,11 @@ window.firebaseAuthInterop = {
       googleIdentity?.disableAutoSelect();
       const { auth, sdk } = await getAuthContext();
       if (auth.currentUser && window.pushNotifications) {
-        await window.pushNotifications.disable(auth.currentUser.uid);
+        try {
+          await window.pushNotifications.disable(auth.currentUser.uid);
+        } catch (err) {
+          console.warn("Failed to unregister push notifications during sign-out:", err);
+        }
       }
       await sdk.signOut(auth);
       clearConnections();

@@ -4,6 +4,7 @@ public sealed class CacheExpirationOptions
 {
   public const string SectionName = "CacheExpiration";
 
+  public int SizeLimit { get; set; } = 200;
   public WeatherCacheExpirationOptions Weather { get; set; } = new();
   public MapCacheExpirationOptions Map { get; set; } = new();
 }

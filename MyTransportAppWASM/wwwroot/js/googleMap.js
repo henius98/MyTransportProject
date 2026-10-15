@@ -91,9 +91,16 @@ export async function loadGoogleMaps(apiKey) {
 		script.defer = true;
 
 		script.onload = () => {
+			const startTime = Date.now();
 			const waitUntilReady = () => {
-				if (window.google?.maps?.importLibrary) resolve();
-				else setTimeout(waitUntilReady, 25);
+				if (window.google?.maps?.importLibrary) {
+					resolve();
+				} else if (Date.now() - startTime > 15000) {
+					mapsApiPromise = null;
+					reject(new Error("Google Maps API initialization timed out"));
+				} else {
+					setTimeout(waitUntilReady, 25);
+				}
 			};
 			waitUntilReady();
 		};

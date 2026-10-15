@@ -8,6 +8,11 @@ namespace MyTransportAppWASM.Tests
 {
     public class WeatherRateLimitingHandlerTests
     {
+        public WeatherRateLimitingHandlerTests()
+        {
+            WeatherRateLimitingHandler.ResetForTesting();
+        }
+
         [Fact]
         public async Task SendAsync_ThrottlesRequests_ToSameHost()
         {
@@ -88,6 +93,42 @@ namespace MyTransportAppWASM.Tests
             Assert.True(watch.ElapsedMilliseconds < 400, $"Elapsed was {watch.ElapsedMilliseconds}ms, expected < 400ms");
             
             mockInnerHandler.Verify();
+        }
+
+        [Fact]
+        public async Task SendAsync_ThrottlesAcrossMultipleInstances_ToSameHost()
+        {
+            var handler1 = new WeatherRateLimitingHandler
+            {
+                InnerHandler = new Mock<HttpMessageHandler>().Object
+            };
+            var handler2 = new WeatherRateLimitingHandler
+            {
+                InnerHandler = new Mock<HttpMessageHandler>().Object
+            };
+
+            var mock1 = Mock.Get(handler1.InnerHandler);
+            mock1.Protected()
+                .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+                .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
+
+            var mock2 = Mock.Get(handler2.InnerHandler);
+            mock2.Protected()
+                .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+                .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
+
+            var client1 = new HttpClient(handler1);
+            var client2 = new HttpClient(handler2);
+
+            var response1 = await client1.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://api.shared-host.test/weather"));
+
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var response2 = await client2.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://api.shared-host.test/forecast"));
+            watch.Stop();
+
+            Assert.Equal(HttpStatusCode.OK, response1.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
+            Assert.True(watch.ElapsedMilliseconds >= 400, $"Elapsed across instances was {watch.ElapsedMilliseconds}ms, expected >= 400ms");
         }
     }
 }

@@ -20,9 +20,12 @@ namespace MyTransportAppWASM
 
       builder.Services.Configure<WeatherOptions>(builder.Configuration.GetSection("WeatherProviders"));
       builder.Services.Configure<CacheExpirationOptions>(builder.Configuration.GetSection(CacheExpirationOptions.SectionName));
-      builder.Services.AddMemoryCache();
+      builder.Services.AddMemoryCache(options =>
+      {
+        var configuredLimit = builder.Configuration.GetValue<int>($"{CacheExpirationOptions.SectionName}:SizeLimit");
+        options.SizeLimit = configuredLimit > 0 ? configuredLimit : 200;
+      });
 
-      builder.Services.AddSingleton<IFormFactor, FormFactor>();
 
       // Browser requests already share the browser's connection pool. Keep failures
       // bounded without pulling a server-oriented retry/circuit-breaker stack into WASM.
@@ -41,30 +44,55 @@ namespace MyTransportAppWASM
         client.BaseAddress = new Uri(builder.HostEnvironment.BaseAddress);
         client.Timeout = TimeSpan.FromSeconds(15);
       });
-      builder.Services.AddScoped<IGeocodingService>(services => new GeocodingService(
-          services.GetRequiredService<IHttpClientFactory>().CreateClient("StaticAssets"),
-          services.GetRequiredService<IConfiguration>()));
+      builder.Services.AddScoped<IWeatherStationCatalogService>(services => new WeatherStationCatalogService(
+          services.GetRequiredService<IHttpClientFactory>().CreateClient("StaticAssets")));
+      builder.Services.AddHttpClient<IPlaceResolutionService, PlaceResolutionService>(ConfigureExternalApiClient);
 
       builder.Services.AddTransient<BaziFlowAuthHandler>();
       builder.Services.AddHttpClient<IBaziFlowService, BaziFlowService>(client =>
       {
-          client.BaseAddress = new Uri(builder.Configuration["BaziFlow:BaseUrl"] ?? "http://localhost:3000");
+          client.BaseAddress = new Uri(builder.Configuration["BaziFlow:BaseUrl"] ?? "http://localhost:8080");
           ConfigureExternalApiClient(client);
       })
       .AddHttpMessageHandler<BaziFlowAuthHandler>();
 
       builder.Services.AddScoped<ThemeService>();
+      builder.Services.AddCascadingValue(sp =>
+      {
+        var theme = sp.GetRequiredService<ThemeService>();
+        var source = new CascadingValueSource<ThemeService>(theme, isFixed: false);
+        theme.OnThemeChanged += () => _ = source.NotifyChangedAsync();
+        return source;
+      });
       builder.Services.AddScoped<LanguageService>(services => new LanguageService(
           services.GetRequiredService<IHttpClientFactory>().CreateClient("StaticAssets")));
+      builder.Services.AddCascadingValue(sp =>
+      {
+        var language = sp.GetRequiredService<LanguageService>();
+        var source = new CascadingValueSource<LanguageService>(language, isFixed: false);
+        language.OnLanguageChanged += () => _ = source.NotifyChangedAsync();
+        return source;
+      });
       builder.Services.AddScoped<ILocationService, LocationService>();
       builder.Services.AddScoped<MyTransportAppWASM.Services.Interfaces.ILiveRoutingService, LiveRoutingService>();
-      builder.Services.AddTransient<CountdownTimer>();
+      builder.Services.AddScoped<ITransitTrackingService, TransitTrackingService>();
 
       builder.Services.AddAuthorizationCore();
+      builder.Services.AddCascadingAuthenticationState();
       builder.Services.AddScoped<AuthenticationStateProvider, FirebaseAuthenticationStateProvider>();
       builder.Services.AddScoped<GoogleWorkspaceService>();
+      builder.Services.AddScoped<IGoogleWorkspaceService>(sp => sp.GetRequiredService<GoogleWorkspaceService>());
+      builder.Services.AddScoped<IGoogleTasksWorkflowService, GoogleTasksWorkflowService>();
       builder.Services.AddScoped<IUserSettingsService, UserSettingsService>();
       builder.Services.AddScoped<AppStateService>();
+      builder.Services.AddSingleton<IFormFactor, FormFactor>();
+      builder.Services.AddTransient<MyTransportAppWASM.Utils.CountdownTimer>();
+      builder.Services.AddScoped<IGeocodingService>(sp =>
+          new GeocodingService(
+              sp.GetRequiredService<IPlaceResolutionService>(),
+              sp.GetRequiredService<IWeatherStationCatalogService>()));
+      builder.Services.AddScoped<IStateHydrationService>(sp =>
+          new StateHydrationService(sp.GetService<Microsoft.AspNetCore.Components.PersistentComponentState>()));
 
 
 
@@ -72,7 +100,14 @@ namespace MyTransportAppWASM
 
       // Force initialize the LanguageService on boot to ensure initial language is loaded
       var languageService = host.Services.GetRequiredService<LanguageService>();
-      await languageService.LoadLanguageAsync("en-US");
+      try
+      {
+        await languageService.LoadLanguageAsync("en-US");
+      }
+      catch (Exception ex)
+      {
+        Console.Error.WriteLine($"Initial language load failed: {ex.Message}");
+      }
 
       await host.RunAsync();
     }

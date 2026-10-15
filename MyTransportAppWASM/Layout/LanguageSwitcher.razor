@@ -1,6 +1,5 @@
 @using MyTransportAppWASM.Services
 @using MyTransportAppWASM.Services.Interfaces
-@inject LanguageService Language
 @inject IUserSettingsService UserSettings
 
 <div class="d-flex align-items-center justify-content-between w-100 p-0 m-0">
@@ -9,26 +8,32 @@
         <span style="font-size: 0.85rem;">@CurrentOption.NativeLabel</span>
     </div>
 
-    <div class="btn-group" @onfocusout="OnFocusOut">
+    <div class="btn-group" style="position: relative;">
         <button class="btn btn-sm btn-link text-muted text-decoration-none dropdown-toggle p-0 shadow-none m-0"
                 type="button" aria-expanded="@(_isOpen.ToString().ToLower())" aria-haspopup="menu" aria-label="Select language" 
                 style="font-size: 0.85rem;" @onclick="ToggleDropdown">
             @CurrentOption.ShortName
         </button>
-        <ul class="dropdown-menu dropdown-menu-end shadow-sm @(_isOpen ? "show" : "")" style="position: absolute; right: 0; top: 100%;" role="menu">
-            @foreach (var lang in LanguageService.SupportedLanguages)
-            {
-                <li role="presentation">
-                    <button class="dropdown-item" type="button" role="menuitem" @onclick='() => ChangeLanguage(lang.Code)'>
-                        @lang.FullName
-                    </button>
-                </li>
-            }
-        </ul>
+        @if (_isOpen)
+        {
+            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 999;" @onclick="CloseDropdown"></div>
+            <ul class="dropdown-menu dropdown-menu-end shadow-sm show" style="position: absolute; right: 0; top: 100%; z-index: 1000;" role="menu">
+                @foreach (var lang in LanguageService.SupportedLanguages)
+                {
+                    <li role="presentation">
+                        <button class="dropdown-item" type="button" role="menuitem" @onclick='() => ChangeLanguage(lang.Code)'>
+                            @lang.FullName
+                        </button>
+                    </li>
+                }
+            </ul>
+        }
     </div>
 </div>
 
 @code {
+    [CascadingParameter] private LanguageService Language { get; set; } = default!;
+
     private bool _isOpen;
 
     private LanguageOption CurrentOption => LanguageService.SupportedLanguages.FirstOrDefault(l => l.Code ==
@@ -39,18 +44,27 @@ Language.CurrentLanguageName) ?? LanguageService.SupportedLanguages[0];
         _isOpen = !_isOpen;
     }
 
-    private async Task OnFocusOut(FocusEventArgs e)
+    private void CloseDropdown()
     {
         // Delay to allow click event to register before closing
-        await Task.Delay(150);
+        // Backdrop click dismisses dropdown immediately without focus-out delay
         _isOpen = false;
-        StateHasChanged();
     }
 
     private async Task ChangeLanguage(string langCode)
     {
-        await Language.LoadLanguageAsync(langCode);
-        await UserSettings.UpdateLanguageAsync(langCode);
-        _isOpen = false;
+        try
+        {
+            await Language.LoadLanguageAsync(langCode);
+            await UserSettings.UpdateLanguageAsync(langCode);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Failed to change language: {ex.Message}");
+        }
+        finally
+        {
+            _isOpen = false;
+        }
     }
 }

@@ -13,6 +13,7 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <DebuggerSupport>true</DebuggerSupport>
     <EventSourceSupport>true</EventSourceSupport>
+    <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
@@ -42,6 +43,10 @@
 
   <ItemGroup>
     <BlazorWebAssemblyLazyLoad Include="MyTransportAppWASM.Gtfs.dll" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ServiceWorker Include="wwwroot\service-worker.js" PublishedContent="wwwroot\service-worker.published.js" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,13 @@
+{
+  "name": "my-transport-app-wasm",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:unit": "dotnet test MyTransportApp.slnx",
+    "test:node": "node --experimental-vm-modules --test tests/firebase-config/*.test.mjs && node --test tests/push/*.test.mjs && node --test tests/service-worker/*.test.mjs && node --experimental-vm-modules --test tests/google-services/*.test.mjs",
+    "test": "dotnet test MyTransportApp.slnx && node --experimental-vm-modules --test tests/firebase-config/*.test.mjs && node --test tests/push/*.test.mjs && node --test tests/service-worker/*.test.mjs && node --experimental-vm-modules --test tests/google-services/*.test.mjs",
+    "smoke": "bash tests/act/smoke-test.sh",
+    "test:smoke": "bash tests/act/smoke-test.sh"
+  }
+}

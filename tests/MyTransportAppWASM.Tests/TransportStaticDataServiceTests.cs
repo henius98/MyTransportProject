@@ -86,6 +86,42 @@ public sealed class TransportStaticDataServiceTests
     Assert.Equal("https://worker.example/rapid-bus-kl/map", handler.Urls[1]);
   }
 
+  [Fact]
+  public async Task UsesPublicMapWhenRouteDataHasMalformedPayload()
+  {
+    var handler = new FakeHandler(request => request.RequestUri!.AbsolutePath switch
+    {
+      "/rapid-bus-kl/data/routes" => """{"error":"Something went wrong"}""",
+      "/rapid-bus-kl/map" => """{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[]},"properties":{"kind":"route","route_id":"A1","route_short_name":"Airport"}}]}""",
+      _ => throw new InvalidOperationException(request.RequestUri.ToString())
+    });
+    var service = new TransportStaticDataService(new HttpClient(handler));
+
+    var routes = await service.GetRoutesAsync(Source);
+
+    Assert.Equal(new StaticRoute("A1", "Airport"), Assert.Single(routes));
+    Assert.Equal("https://worker.example/rapid-bus-kl/map", handler.Urls[1]);
+  }
+
+  [Fact]
+  public async Task ReadsDeparturesWithMissingOrMalformedFieldsGracefully()
+  {
+    var handler = new FakeHandler(request => request.RequestUri!.AbsolutePath switch
+    {
+      "/rapid-bus-kl/departures" => """{"departures":[{"trip_headsign":"Airport","estimated_departure_at":"invalid-date"},{"route_id":"B2"}]}""",
+      _ => throw new InvalidOperationException(request.RequestUri.ToString())
+    });
+    var service = new TransportStaticDataService(new HttpClient(handler));
+
+    var departures = await service.GetDeparturesAsync(Source, "A1", "STOP/1");
+
+    Assert.Equal(2, departures.Count);
+    Assert.Equal("A1", departures[0].RouteId);
+    Assert.Equal(default, departures[0].DepartureAt);
+    Assert.Equal("B2", departures[1].RouteId);
+    Assert.Null(departures[1].Headsign);
+  }
+
   private sealed class FakeHandler(Func<HttpRequestMessage, string> respond) : HttpMessageHandler
   {
     public List<string> Urls { get; } = [];

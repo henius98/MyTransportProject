@@ -5,13 +5,13 @@ namespace MyTransportAppWASM.Services.Handlers
     public class WeatherRateLimitingHandler : DelegatingHandler
     {
         private static readonly long RequestIntervalTicks = Stopwatch.Frequency / 2;
-        private readonly SemaphoreSlim _scheduleLock = new(1, 1);
-        private readonly Dictionary<string, long> _nextRequestByHost = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly SemaphoreSlim _scheduleLock = new(1, 1);
+        private static readonly Dictionary<string, long> _nextRequestByHost = new(StringComparer.OrdinalIgnoreCase);
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var host = request.RequestUri?.Host ?? "unknown";
-            long delayTicks;
+            TimeSpan delay;
 
             await _scheduleLock.WaitAsync(cancellationToken);
             try
@@ -19,7 +19,7 @@ namespace MyTransportAppWASM.Services.Handlers
                 var now = Stopwatch.GetTimestamp();
                 _nextRequestByHost.TryGetValue(host, out var nextRequest);
                 var scheduledRequest = Math.Max(now, nextRequest);
-                delayTicks = scheduledRequest - now;
+                delay = Stopwatch.GetElapsedTime(now, scheduledRequest);
                 _nextRequestByHost[host] = scheduledRequest + RequestIntervalTicks;
             }
             finally
@@ -27,22 +27,25 @@ namespace MyTransportAppWASM.Services.Handlers
                 _scheduleLock.Release();
             }
 
-            if (delayTicks > 0)
+            if (delay > TimeSpan.Zero)
             {
-                await Task.Delay(TimeSpan.FromSeconds((double)delayTicks / Stopwatch.Frequency), cancellationToken);
+                await Task.Delay(delay, cancellationToken);
             }
 
             return await base.SendAsync(request, cancellationToken);
         }
 
-        protected override void Dispose(bool disposing)
+        public static void ResetForTesting()
         {
-            if (disposing)
+            _scheduleLock.WaitAsync().GetAwaiter().GetResult();
+            try
             {
-                _scheduleLock.Dispose();
+                _nextRequestByHost.Clear();
             }
-
-            base.Dispose(disposing);
+            finally
+            {
+                _scheduleLock.Release();
+            }
         }
     }
 }

@@ -28,10 +28,31 @@ public class BrowserStorageServiceTests
         var storage = new BrowserStorageService(runtime);
 
         await storage.SetStringAsync("theme", "light");
-        await storage.SetDoubleAsync("latitude", 3.139);
 
         Assert.Equal("light", runtime.Values["theme"]);
-        Assert.Equal("3.139", runtime.Values["latitude"]);
+    }
+
+    [Fact]
+    public async Task FailingStorage_ReturnsDefaultWithoutThrowing()
+    {
+        var runtime = new FailingStorageJsRuntime();
+        var storage = new BrowserStorageService(runtime);
+
+        var str = await storage.GetStringAsync("key");
+        var num = await storage.GetDoubleAsync("key");
+        await storage.SetStringAsync("key", "val");
+
+        Assert.Null(str);
+        Assert.Null(num);
+    }
+
+    private sealed class FailingStorageJsRuntime : IJSRuntime
+    {
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+            throw new JSException("Storage is disabled");
+
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args) =>
+            throw new JSException("Storage is disabled");
     }
 
     private sealed class StorageJsRuntime : IJSRuntime

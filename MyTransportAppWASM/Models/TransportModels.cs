@@ -70,4 +70,17 @@ namespace MyTransportAppWASM.Models
         public bool HasLiveBus { get; set; }
         public bool IsAuspicious { get; set; }
     }
+
+  public record TransitTrackingResult
+  {
+    public IReadOnlyList<BusLocation> Vehicles { get; init; } = Array.Empty<BusLocation>();
+    public string StatusMessage { get; init; } = string.Empty;
+    public DateTimeOffset? LastUpdated { get; init; }
+    public int AttemptedProviderCount { get; init; }
+    public int FailedProviderCount { get; init; }
+    public int StaleProviderCount { get; init; }
+    public int ExpiredProviderCount { get; init; }
+    public int NearbyProviderCount { get; init; }
+    public bool HasNearbyFeeds { get; init; }
+  }
 }

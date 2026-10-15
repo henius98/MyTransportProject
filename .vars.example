@@ -1,0 +1,2 @@
+# Example workflow variables for running GitHub Actions workflows locally via wrkflw
+FIREBASE_CONFIG_JSON={"apiKey":"dummyApiKey","authDomain":"mytransportapp.firebaseapp.com","projectId":"mytransportapp","storageBucket":"mytransportapp.appspot.com","messagingSenderId":"123456789","appId":"1:123456789:web:abcdef"}

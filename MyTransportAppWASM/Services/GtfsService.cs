@@ -15,7 +15,7 @@ namespace MyTransportAppWASM.Services
     private readonly HttpClient _httpClient;
     private readonly TimeProvider _timeProvider;
     private readonly Dictionary<string, ValidatorEntry> _validators = new(StringComparer.Ordinal);
-    private readonly object _validatorLock = new();
+    private readonly Lock _validatorLock = new();
 
     public GtfsService(HttpClient httpClient) : this(httpClient, TimeProvider.System)
     {
@@ -261,21 +261,7 @@ namespace MyTransportAppWASM.Services
         return;
       }
 
-      string? oldestUrl = null;
-      var oldestAccess = DateTimeOffset.MaxValue;
-      foreach (var pair in _validators)
-      {
-        if (pair.Value.LastAccess < oldestAccess)
-        {
-          oldestUrl = pair.Key;
-          oldestAccess = pair.Value.LastAccess;
-        }
-      }
-
-      if (oldestUrl is not null)
-      {
-        _validators.Remove(oldestUrl);
-      }
+      _validators.Remove(_validators.MinBy(p => p.Value.LastAccess).Key);
     }
 
     private sealed class ValidatorEntry

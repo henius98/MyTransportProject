@@ -45,7 +45,7 @@ namespace MyTransportAppWASM.Services
 
       try
       {
-        var response = await _http.GetFromJsonAsync<Dictionary<string, string>>($"i18n/{langCode}.json");
+        var response = await _http.GetFromJsonAsync($"i18n/{langCode}.json", AppJsonSerializerContext.Default.DictionaryStringString);
         if (response != null && version == _loadVersion)
         {
           _translations = new Dictionary<string, string>(response, StringComparer.OrdinalIgnoreCase);

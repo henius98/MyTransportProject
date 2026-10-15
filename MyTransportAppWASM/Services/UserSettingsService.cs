@@ -96,21 +96,6 @@ namespace MyTransportAppWASM.Services
             return await GetLocalSettingsAsync(uid);
         }
 
-        public async Task SaveSettingsAsync(UserSettings settings)
-        {
-            var uid = await GetUserIdAsync();
-            await _settingsLock.WaitAsync();
-            try
-            {
-                if (uid != await GetUserIdAsync()) return;
-                await SaveSettingsForUserAsync(uid, settings);
-            }
-            finally
-            {
-                _settingsLock.Release();
-            }
-        }
-
         private async Task SaveSettingsForUserAsync(string? uid, UserSettings settings, object? changes = null)
         {
             await SyncToLocalStorage(uid, settings);
@@ -150,11 +135,6 @@ namespace MyTransportAppWASM.Services
         public async Task UpdateHasSeenWelcomeAsync(bool hasSeen)
         {
             await UpdateSettingsAsync(settings => settings with { HasSeenWelcome = hasSeen }, "hasSeenWelcome", hasSeen);
-        }
-
-        public async Task UpdateDefaultLocationAsync(UserLocation location)
-        {
-            await UpdateSettingsAsync(settings => settings with { DefaultLocation = location with { } }, "defaultLocation", location);
         }
 
         private async Task UpdateSettingsAsync(Func<UserSettings, UserSettings> update, string field, object value)

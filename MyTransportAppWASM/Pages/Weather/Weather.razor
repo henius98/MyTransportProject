@@ -3,11 +3,12 @@
 @using MyTransportAppWASM.Services.Interfaces
 @using MyTransportAppWASM.Services
 @using MyTransportAppWASM.Pages.Weather.Components
-@inject IGeocodingService GeocodingService
+@inject IPlaceResolutionService PlaceResolutionService
 @inject ILocationService LocationService
+@inject IWeatherPlannerService WeatherPlannerService
+@inject IStateHydrationService Hydration
 @inject IConfiguration Config
 @inject IJSRuntime JS
-@inject LanguageService Language
 @implements IDisposable
 
 <PageTitle>Trip Weather Planner</PageTitle>
@@ -104,34 +105,39 @@
                   @(isLoading ? "Loading..." : "Get Forecast")
                 </button>
               </div>
-              @if (isFetched)
+              @if (isFetched && plan != null)
               {
                 <div class="mt-4 d-flex flex-wrap gap-2 mb-0">
-                  <span class="chip">📍 @DisplayLocation(query)</span>
-                  @if (query.Departure.HasValue || query.Return.HasValue)
+                  <span class="chip">📍 @DisplayLocation(plan.Query)</span>
+                  @if (plan.Query.Departure.HasValue || plan.Query.Return.HasValue)
                   {
-                    <span class="chip">📅 @DisplayDateRange(query.Departure, query.Return)</span>
+                    <span class="chip">📅 @DisplayDateRange(plan.Query.Departure, plan.Query.Return)</span>
                   }
                 </div>
               }
             </div>
-            @if (isFetched)
+            @if (isFetched && plan != null)
             {
               <div class="mt-4">
                 <h2 class="mb-3 fw-semibold text-primary h4" style="letter-spacing: -0.01em;">Real-Time Forecast</h2>
                 <div class="planner mb-4">
-                  @if (_options.MetMalaysia.Enabled && !string.IsNullOrWhiteSpace(query.LocationId))
+                  @if (_options.MetMalaysia.Enabled && !string.IsNullOrWhiteSpace(plan.Query.LocationId))
                   {
-                    <MetMalaysiaWeatherCard Options="_options.MetMalaysia" Query="query" Label="Realtime" FetchOutlook="false" />
+                    <MetMalaysiaWeatherCard Options="_options.MetMalaysia" Result="@plan.GetRealtime("MetMalaysia")"
+                                            IsRefreshing="@IsRefreshing("MetMalaysia", false)"
+                                            OnRefresh='() => RefreshProviderAsync("MetMalaysia", false)' />
                   }
                   @if (_options.OpenMeteo.Enabled)
                   {
-                    <OpenMeteoWeatherCard Options="_options.OpenMeteo" Query="query" Label="Realtime" FetchOutlook="false" />
+                    <OpenMeteoWeatherCard Options="_options.OpenMeteo" Query="plan.Query" Result="@plan.GetRealtime("Open-Meteo")"
+                                          IsRefreshing="@IsRefreshing("Open-Meteo", false)"
+                                          OnRefresh='() => RefreshProviderAsync("Open-Meteo", false)' FetchOutlook="false" />
                   }
-                  @if (_options.SingaporeNEA.Enabled && IsNearSingapore(query.Latitude, query.Longitude))
+                  @if (_options.SingaporeNEA.Enabled && IsNearSingapore(plan.Query.Latitude, plan.Query.Longitude))
                   {
-                    <SingaporeNeaWeatherCard Options="_options.SingaporeNEA" Query="query" Label="Realtime"
-                                             FetchOutlook="false" />
+                    <SingaporeNeaWeatherCard Options="_options.SingaporeNEA" Result="@plan.GetRealtime("Singapore NEA")"
+                                             IsRefreshing="@IsRefreshing("Singapore NEA", false)"
+                                             OnRefresh='() => RefreshProviderAsync("Singapore NEA", false)' />
                   }
                 </div>
               </div>
@@ -140,21 +146,27 @@
         </div>
 
         <div class="col-lg-8 col-xl-9">
-          @if (isFetched && query.Return.HasValue)
+          @if (isFetched && plan != null && plan.Query.Return.HasValue)
           {
             <h2 class="mb-3 fw-semibold text-primary h4" style="letter-spacing: -0.01em;">Multi-Day Outlook</h2>
             <div class="planner">
-              @if (_options.MetMalaysia.Enabled && !string.IsNullOrWhiteSpace(query.LocationId))
+              @if (_options.MetMalaysia.Enabled && !string.IsNullOrWhiteSpace(plan.Query.LocationId))
               {
-                <MetMalaysiaWeatherCard Options="_options.MetMalaysia" Query="query" Label="Outlook" FetchOutlook="true" />
+                <MetMalaysiaWeatherCard Options="_options.MetMalaysia" Result="@plan.GetOutlook("MetMalaysia")"
+                                        IsRefreshing="@IsRefreshing("MetMalaysia", true)"
+                                        OnRefresh='() => RefreshProviderAsync("MetMalaysia", true)' />
               }
               @if (_options.OpenMeteo.Enabled)
               {
-                <OpenMeteoWeatherCard Options="_options.OpenMeteo" Query="query" Label="Outlook" FetchOutlook="true" />
+                <OpenMeteoWeatherCard Options="_options.OpenMeteo" Query="plan.Query" Result="@plan.GetOutlook("Open-Meteo")"
+                                      IsRefreshing="@IsRefreshing("Open-Meteo", true)"
+                                      OnRefresh='() => RefreshProviderAsync("Open-Meteo", true)' FetchOutlook="true" />
               }
-              @if (_options.SingaporeNEA.Enabled && IsNearSingapore(query.Latitude, query.Longitude))
+              @if (_options.SingaporeNEA.Enabled && IsNearSingapore(plan.Query.Latitude, plan.Query.Longitude))
               {
-                <SingaporeNeaWeatherCard Options="_options.SingaporeNEA" Query="query" Label="Outlook" FetchOutlook="true" />
+                <SingaporeNeaWeatherCard Options="_options.SingaporeNEA" Result="@plan.GetOutlook("Singapore NEA")"
+                                         IsRefreshing="@IsRefreshing("Singapore NEA", true)"
+                                         OnRefresh='() => RefreshProviderAsync("Singapore NEA", true)' />
               }
             </div>
           }
@@ -164,13 +176,14 @@
 @code {
   private WeatherQuery query = new();
   private WeatherOptions _options = new();
+  private WeatherPlanResult? plan;
+  private readonly HashSet<string> refreshingProviders = new(StringComparer.OrdinalIgnoreCase);
   private DateTime? departureDate = MalaysiaTime.Today;
   private DateTime? returnDate = MalaysiaTime.Today.AddDays(3);
   private bool isLoading, isFetched;
   private bool isLocationPanelExpanded = true;
   private string? errorMessage;
   private string locationSearchText = string.Empty;
-  private bool locationSearchPending;
   private DateTime MinimumForecastDate => MalaysiaTime.Today;
   private DateTime MaximumForecastDate =>
     MinimumForecastDate.AddDays(WeatherForecastLimits.OpenMeteoForecastDays - 1);
@@ -189,25 +202,35 @@
     await JS.InvokeVoidAsync("dialogHelper.showModal", "helpDialog");
   }
 
+  private bool _isDisposed;
+  private readonly CancellationTokenSource _cts = new();
+
   public void Dispose()
   {
-    Language.OnLanguageChanged -= StateHasChanged;
+    _isDisposed = true;
+    _cts.Cancel();
+    _cts.Dispose();
   }
 
   protected override async Task OnInitializedAsync()
   {
-    Language.OnLanguageChanged += StateHasChanged;
     _options = Config.GetSection("WeatherProviders").Get<WeatherOptions>() ?? new();
     query.Latitude = Config.GetValue<double?>("DefaultLocation:Latitude") ?? 3.1390;
     query.Longitude = Config.GetValue<double?>("DefaultLocation:Longitude") ?? 101.6869;
-    await ResolveNearestMetLocationAsync(updatePlaceName: true);
-    locationSearchText = query.PlaceName ?? string.Empty;
+    try
+    {
+      await WeatherPlannerService.ResolveNearestLocationAsync(query, updatePlaceName: true, _cts.Token);
+      locationSearchText = query.PlaceName ?? string.Empty;
+    }
+    catch (OperationCanceledException)
+    {
+    }
   }
 
   private void HandleSearchChanged(string value)
   {
     locationSearchText = value;
-    locationSearchPending = !string.IsNullOrWhiteSpace(value);
+    query.PendingSearchText = string.IsNullOrWhiteSpace(value) ? null : value;
     errorMessage = null;
   }
 
@@ -218,7 +241,7 @@
     query.Latitude = suggestion.Lat;
     query.Longitude = suggestion.Lng;
     locationSearchText = suggestion.Name;
-    locationSearchPending = false;
+    query.PendingSearchText = null;
     if (suggestion.FormattedAddress != null && suggestion.FormattedAddress.StartsWith("MET ID: "))
     {
       query.LocationId = suggestion.FormattedAddress.Substring(8).Trim();
@@ -240,68 +263,33 @@
     if (isLoading) return;
 
     errorMessage = null;
-
-    if (!locationSearchPending && (!double.IsFinite(query.Latitude) || !double.IsFinite(query.Longitude)
-      || query.Latitude is < -90 or > 90 || query.Longitude is < -180 or > 180))
-    {
-      errorMessage = "Enter a valid latitude (-90 to 90) and longitude (-180 to 180).";
-      return;
-    }
-
-    if ((departureDate.HasValue && (departureDate.Value.Date < MinimumForecastDate
-        || departureDate.Value.Date > MaximumForecastDate))
-      || (returnDate.HasValue && (returnDate.Value.Date < MinimumForecastDate
-        || returnDate.Value.Date > MaximumForecastDate)))
-    {
-      errorMessage = $"Select dates within the {WeatherForecastLimits.OpenMeteoForecastDays}-day forecast window ending "
-        + $"{MaximumForecastDate:dd MMM yyyy}.";
-      return;
-    }
-
-    if (departureDate.HasValue && returnDate.HasValue && returnDate.Value.Date < departureDate.Value.Date)
-    {
-      errorMessage = "Return date must be on or after the departure date.";
-      return;
-    }
-
     isLoading = true;
     StateHasChanged();
 
     try
     {
-      if (locationSearchPending)
-      {
-        var suggestions = await GeocodingService.GetSuggestionsAsync(locationSearchText);
-        var exactMatches = suggestions.Where(suggestion =>
-          string.Equals(suggestion.Name, locationSearchText.Trim(), StringComparison.OrdinalIgnoreCase)
-          || string.Equals(suggestion.FormattedAddress, $"MET ID: {locationSearchText.Trim()}",
-StringComparison.OrdinalIgnoreCase)).ToList();
-        if (exactMatches.Count == 1)
-        {
-          ApplySuggestion(exactMatches[0]);
-        }
-        else if (suggestions.Count == 1)
-        {
-          ApplySuggestion(suggestions[0]);
-        }
-        else
-        {
-          errorMessage = suggestions.Count == 0
-            ? "Enter a known forecast name or ID, or valid latitude (-90 to 90), longitude (-180 to 180)."
-            : "Several forecast locations match. Select a result from the location search.";
-          return;
-        }
-      }
-      if (string.IsNullOrWhiteSpace(query.LocationId))
-      {
-        await ResolveNearestMetLocationAsync(updatePlaceName: false);
-      }
       query.Departure = departureDate.HasValue ? MalaysiaTime.At(departureDate.Value) : null;
       query.Return = returnDate.HasValue ? MalaysiaTime.At(returnDate.Value) : null;
 
+      string stateKey = $"weather_plan_{query.Latitude:F4}_{query.Longitude:F4}_{query.LocationId}_{query.Departure:yyyyMMdd}_{query.Return:yyyyMMdd}";
+      var result = await Hydration.GetOrHydrateAsync(stateKey, () => WeatherPlannerService.GetPlanAsync(query, _cts.Token));
+      if (_isDisposed) return;
+
+      if (!result.IsValid)
+      {
+        errorMessage = result.ValidationError;
+        return;
+      }
+
       // Query parameters updated. Child components will trigger OnParametersSetAsync natively
+      plan = result;
+      // Plan updated. Child components receive pre-shaped results as presentational components.
+      locationSearchText = query.PlaceName ?? locationSearchText;
       isFetched = true;
       isLocationPanelExpanded = false;
+    }
+    catch (OperationCanceledException)
+    {
     }
     catch (Exception ex)
     {
@@ -310,7 +298,55 @@ StringComparison.OrdinalIgnoreCase)).ToList();
     finally
     {
       isLoading = false;
-      StateHasChanged();
+      if (!_isDisposed)
+      {
+        StateHasChanged();
+      }
+    }
+  }
+
+  private bool IsRefreshing(string provider, bool isOutlook) =>
+    refreshingProviders.Contains($"{provider}:{(isOutlook ? "Outlook" : "Realtime")}");
+
+  private async Task RefreshProviderAsync(string provider, bool isOutlook)
+  {
+    if (plan == null) return;
+    var key = $"{provider}:{(isOutlook ? "Outlook" : "Realtime")}";
+    if (!refreshingProviders.Add(key)) return;
+    try
+    {
+      var updated = await WeatherPlannerService.RefreshProviderAsync(provider, plan.Query, isOutlook, _cts.Token);
+      if (_isDisposed) return;
+      if (plan != null)
+      {
+        if (isOutlook)
+        {
+          var list = plan.Outlooks.Where(p => !string.Equals(p.Provider, provider, StringComparison.OrdinalIgnoreCase)).ToList();
+          list.Add(updated);
+          plan = plan with { Outlooks = list };
+        }
+        else
+        {
+          var list = plan.Realtime.Where(p => !string.Equals(p.Provider, provider, StringComparison.OrdinalIgnoreCase)).ToList();
+          list.Add(updated);
+          plan = plan with { Realtime = list };
+        }
+      }
+    }
+    catch (OperationCanceledException)
+    {
+    }
+    catch (Exception ex)
+    {
+      Console.Error.WriteLine($"Failed to refresh {provider}: {ex.Message}");
+    }
+    finally
+    {
+      refreshingProviders.Remove(key);
+      if (!_isDisposed)
+      {
+        StateHasChanged();
+      }
     }
   }
 
@@ -319,57 +355,43 @@ StringComparison.OrdinalIgnoreCase)).ToList();
     query.PlaceName = null;
     query.LocationId = null;
     locationSearchText = string.Empty;
-    locationSearchPending = false;
+    query.PendingSearchText = null;
   }
 
   private async Task ResetToLocalLocation()
   {
     errorMessage = null;
     var pos = await LocationService.GetCurrentLocationAsync(forceRefresh: true);
+    if (_isDisposed) return;
+
     if (pos != null)
     {
       query.Latitude = pos.Latitude;
       query.Longitude = pos.Longitude;
       query.LocationId = null;
-      var address = await GeocodingService.ReverseGeocodeAsync(pos.Latitude, pos.Longitude);
+      var address = await PlaceResolutionService.ReverseGeocodeAsync(pos.Latitude, pos.Longitude);
+      if (_isDisposed) return;
+
       query.PlaceName = string.IsNullOrWhiteSpace(address) ? "Current Location" : address;
       locationSearchText = query.PlaceName;
-      locationSearchPending = false;
-      await ResolveNearestMetLocationAsync(updatePlaceName: false);
+      query.PendingSearchText = null;
+      try
+      {
+        await WeatherPlannerService.ResolveNearestLocationAsync(query, updatePlaceName: false, _cts.Token);
+      }
+      catch (OperationCanceledException)
+      {
+        return;
+      }
     }
     else
     {
       errorMessage = "Could not determine your current location. Please check your browser permissions.";
       return;
     }
+
+    if (_isDisposed) return;
     await LoadPlanAsync();
-  }
-
-  private async Task ResolveNearestMetLocationAsync(bool updatePlaceName)
-  {
-    var locations = await GeocodingService.GetAllLocationsAsync();
-    var nearest = locations
-      .Where(location => !string.IsNullOrWhiteSpace(location.LocationId))
-      .MinBy(location => DistanceSquared(
-        query.Latitude,
-        query.Longitude,
-        location.Latitude,
-        location.Longitude));
-
-    query.LocationId = nearest?.LocationId;
-
-    if (updatePlaceName && !string.IsNullOrWhiteSpace(nearest?.LocationName))
-    {
-      query.PlaceName = nearest.LocationName;
-    }
-  }
-
-  private static double DistanceSquared(double lat1, double lon1, double lat2, double lon2)
-  {
-    var latitudeScale = Math.Cos((lat1 + lat2) * Math.PI / 360);
-    var latitudeDelta = lat2 - lat1;
-    var longitudeDelta = (lon2 - lon1) * latitudeScale;
-    return latitudeDelta * latitudeDelta + longitudeDelta * longitudeDelta;
   }
 
   private static string FormatDateInputValue(DateTime value) =>
@@ -388,6 +410,6 @@ StringComparison.OrdinalIgnoreCase)).ToList();
     return (startText == "?" && endText == "?") ? string.Empty : $"{startText} → {endText}";
   }
 
-  private static bool IsNearSingapore(double lat, double lon) => lat >= 1.15 && lat <= 1.50 && lon >= 103.55 && lon <=
-104.15;
+  private static bool IsNearSingapore(double lat, double lon) =>
+    MyTransportAppWASM.Services.WeatherPlannerService.IsNearSingapore(lat, lon);
 }
