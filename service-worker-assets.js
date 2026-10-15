@@ -1,5 +1,5 @@
 self.assetsManifest = {
-  "version": "LygShekl",
+  "version": "J+yWxW6W",
   "assets": [
     {
       "hash": "sha256-hBCaseD+ngCeN4aQf/ReGn1jmDIN68kWrN82SPlmb/U=",
@@ -110,12 +110,12 @@ self.assetsManifest = {
       "url": "_framework/Microsoft.JSInterop.l8l4kwym1f.wasm"
     },
     {
-      "hash": "sha256-eu9K0+IVvcD1dxTcTyTSUW78CQ0BQwji9BAn5xUV03Y=",
-      "url": "_framework/MyTransportAppWASM.608wclqmqo.wasm"
+      "hash": "sha256-NbgTAAZcWaVXXyv8OD6rX5wKE5A8qx06KPIChcttpwU=",
+      "url": "_framework/MyTransportAppWASM.542eazkfyo.wasm"
     },
     {
-      "hash": "sha256-JZubWe1uaWV0YPaPGVpw+zrbzpfRHgTw5t9iiSvPnXM=",
-      "url": "_framework/MyTransportAppWASM.Gtfs.15r3vwfstv.wasm"
+      "hash": "sha256-e5D9lzzy3M1cZLla4LDQLSrwSZcafHkTqnNNQ8eGmxI=",
+      "url": "_framework/MyTransportAppWASM.Gtfs.bwjnkm2044.wasm"
     },
     {
       "hash": "sha256-Va9nE0gDS7SldNaIGRvhhOv9kAUW3jRrQOAXxo0zZaA=",
@@ -246,7 +246,7 @@ self.assetsManifest = {
       "url": "_framework/blazor.webassembly.js"
     },
     {
-      "hash": "sha256-IsILseyc//VuVRnlpyAy9Cl48HAgcWMjaQj1KzzuaQo=",
+      "hash": "sha256-yQLq7l0Mq3VCmGby+8ZfJnazbRmXV4CHJ+0nYp7Lbm4=",
       "url": "_framework/dotnet.js"
     },
     {
@@ -312,6 +312,10 @@ self.assetsManifest = {
     {
       "hash": "sha256-Wn/SMjiwL/aS69yD3aNB8WzQG90MxWTDIUYBhlmhv0g=",
       "url": "firebase-messaging-sw.js"
+    },
+    {
+      "hash": "sha256-eBf6f6DYHujkoncbzkVed+ubK8KiXarKzE1XBnJN8Sg=",
+      "url": "google7acbbf44324eedd0.html"
     },
     {
       "hash": "sha256-feWeYfaOMhiIqj9HzoV8pr3QNyqINAkU1lZ4vhYyWfg=",
