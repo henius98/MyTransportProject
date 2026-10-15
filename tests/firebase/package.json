@@ -6,11 +6,20 @@
     "test": "firebase emulators:exec --only firestore --project demo-mytransport --config ../../firebase.json \"node --test rules.test.mjs\""
   },
   "devDependencies": {
-    "@firebase/rules-unit-testing": "3.0.4",
-    "firebase": "10.14.1",
-    "firebase-tools": "15.32.1"
+    "@firebase/rules-unit-testing": "6.0.0",
+    "firebase": "13.0.0",
+    "firebase-tools": "15.34.0"
   },
   "overrides": {
-    "undici": "^6.28.0"
+    "undici": "6.29.1",
+    "@grpc/grpc-js": "^1.14.6",
+    "@opentelemetry/core": "^2.12.0",
+    "uuid": "^11.1.1",
+    "chokidar": "^4.0.3"
+  },
+  "allowScripts": {
+    "@firebase/util@1.15.3": true,
+    "protobufjs@7.6.6": true,
+    "re2@1.26.1": true
   }
 }
