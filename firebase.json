@@ -17,8 +17,8 @@
   "firestore": {
     "database": "(default)",
     "location": "asia-southeast1",
-    "rules": "firestore.rules",
-    "indexes": "firestore.indexes.json"
+    "rules": "firestore/firestore.rules",
+    "indexes": "firestore/firestore.indexes.json"
   },
   "emulators": {
     "firestore": {

@@ -34,7 +34,7 @@
 - **Dynamic Bus Syncing**: Identifies transit providers within a certain radius of the user's location. Fetches their GTFS feeds, parses them, and pushes marker updates (`lat`, `lng`, `bearing`, `speed`) directly to the Google Map via JS Interop (`syncMarkers`).
 - **Routing**: Integrates Google Maps Directions API (`showRouteByName`) allowing Transit, Walking, Driving, and Bicycling modes.
 
-### **Weather Planner (`WeatherPlannerService.cs`)**
+### **Weather Planner (`Services/Weather/WeatherPlannerService.cs`)**
 
 - **Multi-layered Forecasts**:
   1. _Baseline_: Current weather conditions (temperature, precipitation, probability of rain).

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { createContext, SourceTextModule, SyntheticModule } from "node:vm";
 
-const source = await readFile(new URL("../../MyTransportAppWASM/wwwroot/js/firebase-config.js", import.meta.url), "utf8");
+const source = await readFile(new URL("../../../MyTransportAppWASM/wwwroot/js/firebase-config.js", import.meta.url), "utf8");
 const firebaseConfig = {
     apiKey: "base-api-key", authDomain: "base.firebaseapp.com", projectId: "base-project", appId: "base-app",
     storageBucket: "base.appspot.com"

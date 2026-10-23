@@ -144,8 +144,8 @@ Select these services when prompted:
 
 When asked:
 
-- **Firestore Rules file:** `firestore.rules` (already exists)
-- **Firestore Indexes file:** `firestore.indexes.json`
+- **Firestore Rules file:** `firestore/firestore.rules` (already exists)
+- **Firestore Indexes file:** `firestore/firestore.indexes.json`
 - **Functions language:** JavaScript
 - **Functions directory:** `functions`
 - **Use ESLint:** No
@@ -262,7 +262,7 @@ gcloud services enable tasks.googleapis.com
 The app uses Firebase Auth via JS interop:
 
 - [`wwwroot/js/firebase-auth.js`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/wwwroot/js/firebase-auth.js) — JS module for Google sign-in (popup + One Tap)
-- [`Services/FirebaseAuthenticationStateProvider.cs`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/Services/FirebaseAuthenticationStateProvider.cs) — Blazor `AuthenticationStateProvider` that calls the JS module
+- [`Services/Firebase/FirebaseAuthenticationStateProvider.cs`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/Services/Firebase/FirebaseAuthenticationStateProvider.cs) — Blazor `AuthenticationStateProvider` that calls the JS module
 
 No additional code changes needed — just ensure the Firebase config values are correct.
 
@@ -278,7 +278,7 @@ No additional code changes needed — just ensure the Firebase config values are
 
 ### 9.2 Deploy Security Rules
 
-The project has comprehensive rules in [`firestore.rules`](file:///var/home/henius/src/MyTransportProject/firestore.rules) covering:
+The project has comprehensive rules in [`firestore/firestore.rules`](file:///var/home/henius/src/MyTransportProject/firestore/firestore.rules) covering:
 
 | Collection                           | Access                                |
 | ------------------------------------ | ------------------------------------- |
@@ -297,7 +297,7 @@ firebase deploy --only firestore:rules
 
 - [`wwwroot/js/firebase-firestore.js`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/wwwroot/js/firebase-firestore.js) — JS module for Firestore reads/writes
 - [`wwwroot/js/firebase-task-extensions.js`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/wwwroot/js/firebase-task-extensions.js) — JS module for task extension CRUD
-- [`Services/UserSettingsService.cs`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/Services/UserSettingsService.cs) — C# service that calls Firestore via JS interop
+- [`Services/Firebase/UserSettingsService.cs`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/Services/Firebase/UserSettingsService.cs) — C# service that calls Firestore via JS interop
 
 ---
 
@@ -592,7 +592,7 @@ gcloud services list --enabled          # List enabled APIs
 | [`appsettings.json`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/wwwroot/appsettings.json)                         | Production config template (empty Firebase values)         |
 | [`appsettings.Development.json`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/wwwroot/appsettings.Development.json) | Local dev config with real Firebase values                 |
 | [`firebase.json`](file:///var/home/henius/src/MyTransportProject/firebase.json)                                                          | Firebase services config (Functions, Firestore, Emulators) |
-| [`firestore.rules`](file:///var/home/henius/src/MyTransportProject/firestore.rules)                                                      | Firestore security rules                                   |
+| [`firestore/firestore.rules`](file:///var/home/henius/src/MyTransportProject/firestore/firestore.rules)                                        | Firestore security rules                                   |
 | [`firebase-messaging-sw.js`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/wwwroot/firebase-messaging-sw.js)         | FCM service worker for push notifications                  |
 | [`functions/index.js`](file:///var/home/henius/src/MyTransportProject/functions/index.js)                                                | Cloud Functions entry point                                |
 | [`functions/google-connections.js`](file:///var/home/henius/src/MyTransportProject/functions/google-connections.js)                      | Google OAuth token exchange function                       |

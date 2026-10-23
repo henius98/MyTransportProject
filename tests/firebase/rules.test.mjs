@@ -15,7 +15,7 @@ before(async () => {
     projectId: "demo-mytransport",
     firestore: {
       rules: await readFile(
-        new URL("../../firestore.rules", import.meta.url),
+        new URL("../../firestore/firestore.rules", import.meta.url),
         "utf8",
       ),
     },
