@@ -107,7 +107,7 @@ export async function loadGoogleMaps(apiKey) {
 
 	mapsApiPromise = new Promise((resolve, reject) => {
 		const script = document.createElement("script");
-		script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&v=weekly&libraries=places&loading=async`;
+		script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&v=quarterly&libraries=places,marker&loading=async`;
 		script.async = true;
 		script.defer = true;
 
@@ -200,7 +200,34 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 			}
 		});
 	} catch (markerErr) {
-		console.warn("Could not create user marker:", markerErr);
+		console.warn("Could not create user marker with AdvancedMarkerElement, falling back:", markerErr);
+		try {
+			if (google.maps.Marker) {
+				userMarker = new google.maps.Marker({
+					position: { lat, lng },
+					map,
+					title: "Me",
+					draggable: true,
+					label: "🚶",
+				});
+				userMarker.addListener("dragend", async (e) => {
+					const newLat = e.latLng.lat();
+					const newLng = e.latLng.lng();
+					try {
+						const address = await reverseGeocode(newLat, newLng);
+						if (dotNetHelper) {
+							await dotNetHelper.invokeMethodAsync("UpdateOrigin", address);
+							await dotNetHelper.invokeMethodAsync("UpdateUserPosition", newLat, newLng);
+							setAutocompleteValue("origin-input", address);
+						}
+					} catch (err) {
+						console.error("Dragend geocode failed:", err);
+					}
+				});
+			}
+		} catch (fallbackErr) {
+			console.warn("User marker fallback failed:", fallbackErr);
+		}
 	}
 
 	return map;
@@ -303,8 +330,14 @@ export async function updateUserMarker(lat, lng) {
 	try {
 		await loadGoogleMaps();
 		if (!map || !userMarker) return;
-		userMarker.position = { lat, lng };
-		map.panTo({ lat, lng });
+		if (typeof userMarker.setPosition === "function") {
+			userMarker.setPosition({ lat, lng });
+		} else {
+			userMarker.position = { lat, lng };
+		}
+		try {
+			map.panTo?.({ lat, lng });
+		} catch (_) { }
 	} catch (err) {
 		console.error("updateUserMarker err: " + err)
 	}
@@ -360,40 +393,66 @@ export async function showRoute(origin, destination, travelMode = "TRANSIT") {
 
 	// Draw origin/destination markers
 	try {
-		const { PinElement, AdvancedMarkerElement } = await google.maps.importLibrary("marker");
 		const route = routes[0];
 		routeMarkers = [];
 
 		if (route.legs && route.legs.length > 0) {
-			// Add Start Marker
-			const startLeg = route.legs[0];
-			const startPin = new PinElement({
-				glyphText: 'A',
-				background: '#4285F4',
-				borderColor: '#FFFFFF'
-			});
-			const startMarker = new AdvancedMarkerElement({
-				position: startLeg.startLocation.latLng,
-				content: startPin,
-				title: "Origin"
-			});
-			startMarker.map = map;
-			routeMarkers.push(startMarker);
-
-			// Add End Marker (and intermediate ones if they existed, but for now we follow the legs)
+			const startPos = route.legs[0].startLocation.latLng;
 			const lastLeg = route.legs[route.legs.length - 1];
-			const endPin = new PinElement({
-				glyphText: 'B',
-				background: '#EA4335',
-				borderColor: '#FFFFFF'
-			});
-			const endMarker = new AdvancedMarkerElement({
-				position: lastLeg.endLocation.latLng,
-				content: endPin,
-				title: "Destination"
-			});
-			endMarker.map = map;
-			routeMarkers.push(endMarker);
+			const endPos = lastLeg.endLocation.latLng;
+
+			let addedWithAdvanced = false;
+			try {
+				const { PinElement, AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+				if (AdvancedMarkerElement && PinElement) {
+					const startPin = new PinElement({
+						glyphText: 'A',
+						background: '#4285F4',
+						borderColor: '#FFFFFF'
+					});
+					const startMarker = new AdvancedMarkerElement({
+						position: startPos,
+						content: startPin,
+						title: "Origin"
+					});
+					startMarker.map = map;
+					routeMarkers.push(startMarker);
+
+					const endPin = new PinElement({
+						glyphText: 'B',
+						background: '#EA4335',
+						borderColor: '#FFFFFF'
+					});
+					const endMarker = new AdvancedMarkerElement({
+						position: endPos,
+						content: endPin,
+						title: "Destination"
+					});
+					endMarker.map = map;
+					routeMarkers.push(endMarker);
+					addedWithAdvanced = true;
+				}
+			} catch (_) { }
+
+			if (!addedWithAdvanced && google.maps.Marker) {
+				try {
+					const startMarker = new google.maps.Marker({
+						position: startPos,
+						map,
+						title: "Origin",
+						label: "A"
+					});
+					routeMarkers.push(startMarker);
+
+					const endMarker = new google.maps.Marker({
+						position: endPos,
+						map,
+						title: "Destination",
+						label: "B"
+					});
+					routeMarkers.push(endMarker);
+				} catch (_) { }
+			}
 		}
 	} catch (err) {
 		console.error("Manual marker creation failed:", err);
@@ -615,21 +674,30 @@ export async function syncMarkers(locations) {
 			
 			if (activeMarkers[markerKey]) {
 				const marker = activeMarkers[markerKey];
-				const previous = marker.busData;
-				if (!previous || previous.lat !== loc.lat || previous.lng !== loc.lng) {
-					marker.position = { lat: loc.lat, lng: loc.lng };
+				if (typeof marker.setPosition === "function") {
+					marker.setPosition({ lat: loc.lat, lng: loc.lng });
+					if (typeof marker.setTitle === "function") marker.setTitle(title);
+				} else {
+					const previous = marker.busData;
+					if (!previous || previous.lat !== loc.lat || previous.lng !== loc.lng) {
+						marker.position = { lat: loc.lat, lng: loc.lng };
+					}
+					marker.title = title;
+					if (marker.content) {
+						updateTransportMarkerElement(marker.content, loc);
+					}
 				}
-				marker.title = title;
-				updateTransportMarkerElement(marker.content, loc);
 				marker.busData = loc;
 			} else {
 				const pos = { lat: loc.lat, lng: loc.lng };
-				const el = document.createElement("div");
-				updateTransportMarkerElement(el, loc);
-				el.style.fontSize = "28px";
+				let marker = null;
 
 				try {
-					const marker = new AdvancedMarkerElement({
+					const el = document.createElement("div");
+					updateTransportMarkerElement(el, loc);
+					el.style.fontSize = "28px";
+
+					marker = new AdvancedMarkerElement({
 						position: pos,
 						map,
 						title,
@@ -657,8 +725,39 @@ export async function syncMarkers(locations) {
 
 					activeMarkers[markerKey] = marker;
 				} catch (markerErr) {
-					console.warn("syncMarkers: AdvancedMarkerElement unavailable:", markerErr);
-					continue;
+					// AdvancedMarkerElement failed; attempt fallback to google.maps.Marker
+					try {
+						if (google.maps.Marker) {
+							const markerType = getTransportMarker(loc);
+							marker = new google.maps.Marker({
+								position: pos,
+								map,
+								title,
+								label: {
+									text: loc.icon || markerType.icon,
+									fontSize: "20px",
+								},
+							});
+							marker.busData = loc;
+							marker.addListener("click", () => {
+								if (currentInfoWindowAnchor === marker) {
+									infoWindow.close();
+									currentInfoWindowAnchor = null;
+									return;
+								}
+								const currentLoc = marker.busData;
+								infoWindow.setContent(buildVehicleInfoContent(id, currentLoc));
+								infoWindow.open({
+									anchor: marker,
+									map,
+								});
+								currentInfoWindowAnchor = marker;
+							});
+							activeMarkers[markerKey] = marker;
+						}
+					} catch (fallbackErr) {
+						console.warn("syncMarkers: both AdvancedMarkerElement and fallback failed:", fallbackErr);
+					}
 				}
 			}
 		}
