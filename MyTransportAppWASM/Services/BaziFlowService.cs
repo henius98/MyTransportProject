@@ -4,7 +4,7 @@ using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM.Services
 {
-    public class BaziFlowService : IBaziFlowService
+    public sealed class BaziFlowService : IBaziFlowService
     {
         private readonly HttpClient _httpClient;
         private readonly IBrowserStorageService _localStorage;
@@ -30,12 +30,20 @@ namespace MyTransportAppWASM.Services
 
         public async Task<bool> HasApiKeyAsync(CancellationToken cancellationToken = default)
         {
+            if (_httpClient.BaseAddress is null)
+            {
+                return false;
+            }
             var key = await GetApiKeyAsync(cancellationToken);
             return !string.IsNullOrEmpty(key);
         }
 
         public async Task<ProfileData?> GetProfileAsync(CancellationToken cancellationToken = default)
         {
+            if (_httpClient.BaseAddress is null)
+            {
+                return null;
+            }
             try
             {
                 var response = await _httpClient.GetFromJsonAsync(
@@ -57,6 +65,10 @@ namespace MyTransportAppWASM.Services
 
         public async Task<bool> CreateProfileAsync(CreateProfileRequest request, CancellationToken cancellationToken = default)
         {
+            if (_httpClient.BaseAddress is null)
+            {
+                return false;
+            }
             try
             {
                 using var response = await _httpClient.PostAsJsonAsync(
@@ -79,6 +91,10 @@ namespace MyTransportAppWASM.Services
 
         public async Task<FortuneData?> GetDateFortuneAsync(string date, CancellationToken cancellationToken = default)
         {
+            if (_httpClient.BaseAddress is null)
+            {
+                return null;
+            }
             try
             {
                 var request = new DateFortuneRequest { Date = date };
@@ -95,14 +111,8 @@ namespace MyTransportAppWASM.Services
                         cancellationToken);
                     if (result?.Data != null)
                     {
-                        if (result.Data.FavorableDirections == null || result.Data.FavorableDirections.Count == 0)
-                        {
-                            result.Data.FavorableDirections = new List<string> { "North", "East", "Southeast" };
-                        }
-                        if (result.Data.LuckyHours == null || result.Data.LuckyHours.Count == 0)
-                        {
-                            result.Data.LuckyHours = new List<int> { 7, 8, 9, 17, 18 };
-                        }
+                        result.Data.FavorableDirections ??= [];
+                        result.Data.LuckyHours ??= [];
                     }
                     return result?.Data;
                 }

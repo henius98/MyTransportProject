@@ -1,10 +1,21 @@
 let mapsApiPromise = null;
 let map, userMarker, infoWindow;
+let currentInfoWindowAnchor = null;
+let activeDotNetHelper = null;
 let storedApiKey = null;
 const activeMarkers = Object.create(null);
 const autocompletes = Object.create(null);
 const advancedMarkerEventHandlers = new WeakMap();
 let displayTimeZone = null;
+
+// Global auth failure handler for Google Maps JS API
+window.gm_authFailure = function () {
+	console.warn("Google Maps authentication failed (gm_authFailure triggered).");
+	if (activeDotNetHelper) {
+		activeDotNetHelper.invokeMethodAsync("OnMapAuthError", "Google Maps authorization failed: please verify your API key and allowed referers.")
+			.catch(() => {});
+	}
+};
 const transportMarkerTypes = {
 	bus: { icon: "🚌", className: "bus-marker", label: "Bus" },
 	lrt: { icon: "🚈", className: "lrt-marker", label: "LRT" },
@@ -67,13 +78,23 @@ function addAdvancedMarkerEventListener(marker, eventName, handler) {
 }
 
 function removeAdvancedMarker(marker) {
+	if (!marker) return;
 	const handlers = advancedMarkerEventHandlers.get(marker) || [];
 	for (const { eventName, handler } of handlers) {
-		marker.removeEventListener(eventName, handler);
+		try {
+			marker.removeEventListener(eventName, handler);
+		} catch (_) { }
 	}
 	advancedMarkerEventHandlers.delete(marker);
-	if (infoWindow?.get("anchor") === marker) infoWindow.close();
-	marker.map = null;
+	if (currentInfoWindowAnchor === marker) {
+		try {
+			infoWindow?.close();
+		} catch (_) { }
+		currentInfoWindowAnchor = null;
+	}
+	try {
+		marker.map = null;
+	} catch (_) { }
 }
 
 export async function loadGoogleMaps(apiKey) {
@@ -117,6 +138,7 @@ export async function loadGoogleMaps(apiKey) {
 }
 
 export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dotNetHelper, theme = 'DARK', timeZone) {
+	activeDotNetHelper = dotNetHelper;
 	await loadGoogleMaps(apiKey);
 	if (!timeZone) throw new Error("Display time zone not provided.");
 	displayTimeZone = timeZone;
@@ -145,36 +167,41 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 	// Close infoWindow when clicking anywhere else on the map
 	map.addListener("click", () => {
 		infoWindow.close();
+		currentInfoWindowAnchor = null;
 	});
 
 	const pin = document.createElement("div");
 	pin.textContent = "🚶";
 	pin.style.fontSize = "33px";
 
-	userMarker = new AdvancedMarkerElement({
-		position: { lat, lng },
-		map,
-		title: "Me",
-		gmpDraggable: true,
-		content: pin,
-	});
+	try {
+		userMarker = new AdvancedMarkerElement({
+			position: { lat, lng },
+			map,
+			title: "Me",
+			gmpDraggable: true,
+			content: pin,
+		});
 
-	// Add gmp-dragend listener to update origin in Blazor
-	addAdvancedMarkerEventListener(userMarker, "gmp-dragend", async () => {
-		const newPos = userMarker.position;
-		try {
-			const address = await reverseGeocode(newPos.lat, newPos.lng);
-			if (dotNetHelper) {
-				await dotNetHelper.invokeMethodAsync("UpdateOrigin", address);
-				await dotNetHelper.invokeMethodAsync("UpdateUserPosition", newPos.lat, newPos.lng);
-				
-				// Update the origin autocomplete widget value visually
-				setAutocompleteValue("origin-input", address);
+		// Add gmp-dragend listener to update origin in Blazor
+		addAdvancedMarkerEventListener(userMarker, "gmp-dragend", async () => {
+			const newPos = userMarker.position;
+			try {
+				const address = await reverseGeocode(newPos.lat, newPos.lng);
+				if (dotNetHelper) {
+					await dotNetHelper.invokeMethodAsync("UpdateOrigin", address);
+					await dotNetHelper.invokeMethodAsync("UpdateUserPosition", newPos.lat, newPos.lng);
+					
+					// Update the origin autocomplete widget value visually
+					setAutocompleteValue("origin-input", address);
+				}
+			} catch (err) {
+				console.error("Dragend geocode failed:", err);
 			}
-		} catch (err) {
-			console.error("Dragend geocode failed:", err);
-		}
-	});
+		});
+	} catch (markerErr) {
+		console.warn("Could not create user marker:", markerErr);
+	}
 
 	return map;
 }
@@ -190,58 +217,82 @@ export async function setMapTheme(theme) {
  * The new widget is a custom HTML element appended inside the container identified by elementId.
  */
 export async function initAutocomplete(elementId, dotNetHelper, methodName, apiKey) {
-	await loadGoogleMaps(apiKey);
-	const { PlaceAutocompleteElement } = await google.maps.importLibrary("places");
-
 	const container = document.getElementById(elementId);
 	if (!container) return;
 
-	// Create the new PlaceAutocompleteElement widget
-	const placeAutocomplete = new PlaceAutocompleteElement({});
-	placeAutocomplete.setAttribute(
-		"aria-label",
-		methodName === "UpdateOrigin" ? "Origin" : "Destination",
-	);
+	try {
+		await loadGoogleMaps(apiKey);
+		const { PlaceAutocompleteElement } = await google.maps.importLibrary("places");
 
-	// Style the widget to fill its parent container
-	placeAutocomplete.style.width = "100%";
+		// Create the new PlaceAutocompleteElement widget
+		const placeAutocomplete = new PlaceAutocompleteElement({});
+		placeAutocomplete.setAttribute(
+			"aria-label",
+			methodName === "UpdateOrigin" ? "Origin" : "Destination",
+		);
 
-	// Clear the container and append the new element
-	container.innerHTML = "";
-	container.appendChild(placeAutocomplete);
-	autocompletes[elementId] = placeAutocomplete;
+		// Style the widget to fill its parent container
+		placeAutocomplete.style.width = "100%";
 
-	// Listen for place selection via the new gmp-select event
-	placeAutocomplete.addEventListener("gmp-select", async ({ placePrediction }) => {
-		const place = placePrediction.toPlace();
-		await place.fetchFields({ fields: ["displayName", "formattedAddress", "location"] });
+		// Clear the container and append the new element
+		container.innerHTML = "";
+		container.appendChild(placeAutocomplete);
+		autocompletes[elementId] = placeAutocomplete;
 
-		const displayText = place.displayName || place.formattedAddress;
+		// Listen for place selection via the new gmp-select event
+		placeAutocomplete.addEventListener("gmp-select", async ({ placePrediction }) => {
+			const place = placePrediction.toPlace();
+			await place.fetchFields({ fields: ["displayName", "formattedAddress", "location"] });
 
-		if (dotNetHelper) {
-			dotNetHelper.invokeMethodAsync(methodName, displayText);
+			const displayText = place.displayName || place.formattedAddress;
 
-			if (methodName === "UpdateOrigin" && place.location) {
-				const lat = place.location.lat();
-				const lng = place.location.lng();
-				updateUserMarker(lat, lng);
-				dotNetHelper.invokeMethodAsync("UpdateUserPosition", lat, lng);
+			if (dotNetHelper) {
+				dotNetHelper.invokeMethodAsync(methodName, displayText);
+
+				if (methodName === "UpdateOrigin" && place.location) {
+					const lat = place.location.lat();
+					const lng = place.location.lng();
+					updateUserMarker(lat, lng);
+					dotNetHelper.invokeMethodAsync("UpdateUserPosition", lat, lng);
+				}
 			}
-		}
-	});
+		});
+	} catch (err) {
+		console.warn(`PlaceAutocompleteElement unavailable for ${elementId}, falling back to text input:`, err);
+		container.innerHTML = "";
+		const fallbackInput = document.createElement("input");
+		fallbackInput.type = "text";
+		fallbackInput.className = "w-100";
+		fallbackInput.style.border = "none";
+		fallbackInput.style.background = "transparent";
+		fallbackInput.style.outline = "none";
+		fallbackInput.style.color = "inherit";
+		fallbackInput.style.font = "inherit";
+		fallbackInput.placeholder = methodName === "UpdateOrigin" ? "Enter origin..." : "Enter destination...";
+		fallbackInput.setAttribute("aria-label", methodName === "UpdateOrigin" ? "Origin" : "Destination");
+		fallbackInput.addEventListener("input", async (e) => {
+			if (dotNetHelper) {
+				await dotNetHelper.invokeMethodAsync(methodName, e.target.value);
+			}
+		});
+		container.appendChild(fallbackInput);
+		autocompletes[elementId] = fallbackInput;
+	}
 }
 
 /**
- * Updates the text value of a PlaceAutocompleteElement widget.
+ * Updates the text value of a PlaceAutocompleteElement widget or fallback input.
  */
 export function setAutocompleteValue(elementId, value) {
 	const widget = autocompletes[elementId];
 	if (widget) {
-		widget.value = value || "";
+		if ("value" in widget) {
+			widget.value = value || "";
+		}
 		
 		// Also find the internal input and trigger an input event if needed
 		// although setting .value on the web component should suffice for display.
-		const internalInput = widget.querySelector('input');
+		const internalInput = widget.querySelector ? widget.querySelector('input') : null;
 		if (internalInput) {
 			internalInput.value = value || "";
 		}
@@ -544,10 +595,9 @@ export async function syncMarkers(locations) {
 		return;
 	}
 
-	await loadGoogleMaps();
-	const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
-
 	try {
+		await loadGoogleMaps();
+		const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
 		const currentIds = new Set();
 
 		for (const loc of locations) {
@@ -556,14 +606,15 @@ export async function syncMarkers(locations) {
 				console.warn("syncMarkers: skipping invalid vehicle location", loc);
 				continue;
 			}
-			currentIds.add(id);
+			const markerKey = loc.providerName ? `${loc.providerName}:${id}` : String(id);
+			currentIds.add(markerKey);
 
 			const speedKmh = (loc.speed || 0) * 3.6;
 			loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
 			const title = `Route ${loc.routeId || 'Unknown'} - ${id}`;
 			
-			if (activeMarkers[id]) {
-				const marker = activeMarkers[id];
+			if (activeMarkers[markerKey]) {
+				const marker = activeMarkers[markerKey];
 				const previous = marker.busData;
 				if (!previous || previous.lat !== loc.lat || previous.lng !== loc.lng) {
 					marker.position = { lat: loc.lat, lng: loc.lng };
@@ -577,31 +628,38 @@ export async function syncMarkers(locations) {
 				updateTransportMarkerElement(el, loc);
 				el.style.fontSize = "28px";
 
-				const marker = new AdvancedMarkerElement({
-					position: pos,
-					map,
-					title,
-					content: el,
-					gmpClickable: true,
-				});
-
-				marker.busData = loc;
-
-				addAdvancedMarkerEventListener(marker, "gmp-click", () => {
-					if (infoWindow.get("anchor") === marker) {
-						infoWindow.close();
-						return;
-					}
-
-					const currentLoc = marker.busData;
-					infoWindow.setContent(buildVehicleInfoContent(id, currentLoc));
-					infoWindow.open({
-						anchor: marker,
+				try {
+					const marker = new AdvancedMarkerElement({
+						position: pos,
 						map,
+						title,
+						content: el,
+						gmpClickable: true,
 					});
-				});
 
-				activeMarkers[id] = marker;
+					marker.busData = loc;
+
+					addAdvancedMarkerEventListener(marker, "gmp-click", () => {
+						if (currentInfoWindowAnchor === marker) {
+							infoWindow.close();
+							currentInfoWindowAnchor = null;
+							return;
+						}
+
+						const currentLoc = marker.busData;
+						infoWindow.setContent(buildVehicleInfoContent(id, currentLoc));
+						infoWindow.open({
+							anchor: marker,
+							map,
+						});
+						currentInfoWindowAnchor = marker;
+					});
+
+					activeMarkers[markerKey] = marker;
+				} catch (markerErr) {
+					console.warn("syncMarkers: AdvancedMarkerElement unavailable:", markerErr);
+					continue;
+				}
 			}
 		}
 

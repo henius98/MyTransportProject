@@ -5,6 +5,7 @@ namespace MyTransportAppWASM.Models
     public TransportProvider() : this("", "", 0, 0, 0) { }
 
     public bool HasRealtimeFeed => !string.IsNullOrWhiteSpace(Endpoint);
+    public bool HasStaticData => !string.IsNullOrWhiteSpace(StaticData?.BaseUrl);
   }
 
   public record TransportStaticData(string BaseUrl, string RouteInfoPath, string GeoJSONUrlPath, string DeparturePath);
@@ -34,6 +35,8 @@ namespace MyTransportAppWASM.Models
 
   public record BusLocation
   {
+    [System.Text.Json.Serialization.JsonPropertyName("providerName")]
+    public string? ProviderName { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("transportType")]
     public string? TransportType { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("routeId")]

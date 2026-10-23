@@ -11,18 +11,35 @@ public sealed class TransportStaticDataServiceTests
     "https://worker.example/rapid-bus-kl", "/data/routes", "/map", "/departures");
 
   [Fact]
-  public void RailProviderUsesScheduledWorkerWithoutRealtimeFeed()
+  public void ProductionSettingsOmitLocalhostWhileDevelopmentSettingsConfigureLocalWorker()
   {
-    var settingsPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
-      "../../../../../MyTransportAppWASM/wwwroot/appsettings.json"));
-    var settings = new ConfigurationBuilder().AddJsonFile(settingsPath).Build();
-    var provider = Assert.Single(settings.GetSection("TransportProviders").Get<List<TransportProvider>>()!,
+    var wwwrootDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+      "../../../../../MyTransportAppWASM/wwwroot"));
+    var prodPath = Path.Combine(wwwrootDir, "appsettings.json");
+    var devPath = Path.Combine(wwwrootDir, "appsettings.Development.example.json");
+
+    var prodSettings = new ConfigurationBuilder().AddJsonFile(prodPath).Build();
+    var prodProviders = prodSettings.GetSection("TransportProviders").Get<List<TransportProvider>>()!;
+    Assert.All(prodProviders, p =>
+    {
+      Assert.False(p.HasStaticData);
+      Assert.DoesNotContain("localhost", p.StaticData?.BaseUrl ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    });
+    Assert.DoesNotContain("localhost", prodSettings["BaziFlow:BaseUrl"] ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+    var devSettings = new ConfigurationBuilder()
+      .AddJsonFile(prodPath)
+      .AddJsonFile(devPath)
+      .Build();
+    var railProvider = Assert.Single(devSettings.GetSection("TransportProviders").Get<List<TransportProvider>>()!,
       provider => provider.Name == "Rapid Rail KL");
 
-    Assert.False(provider.HasRealtimeFeed);
-    Assert.Equal("Rail", provider.TransportType);
-    Assert.Equal("http://localhost:8787/rapid-rail-kl", provider.StaticData?.BaseUrl);
-    Assert.Equal("/departures", provider.StaticData?.DeparturePath);
+    Assert.False(railProvider.HasRealtimeFeed);
+    Assert.True(railProvider.HasStaticData);
+    Assert.Equal("Rail", railProvider.TransportType);
+    Assert.Equal("http://localhost:8787/rapid-rail-kl", railProvider.StaticData?.BaseUrl);
+    Assert.Equal("/departures", railProvider.StaticData?.DeparturePath);
+    Assert.Equal("http://localhost:8080", devSettings["BaziFlow:BaseUrl"]);
   }
 
   [Fact]

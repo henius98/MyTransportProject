@@ -13,6 +13,7 @@ namespace MyTransportAppWASM
       // Automatically loads appsettings.json and appsettings.{Environment}.json from wwwroot.
       // The framework fetches these via HTTP and merges them into builder.Configuration.
       var builder = WebAssemblyHostBuilder.CreateDefault(args);
+      builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
       builder.RootComponents.Add<App>("#app");
       builder.RootComponents.Add<HeadOutlet>("head::after");
 
@@ -51,7 +52,11 @@ namespace MyTransportAppWASM
       builder.Services.AddTransient<BaziFlowAuthHandler>();
       builder.Services.AddHttpClient<IBaziFlowService, BaziFlowService>(client =>
       {
-          client.BaseAddress = new Uri(builder.Configuration["BaziFlow:BaseUrl"] ?? "http://localhost:8080");
+          var baziBaseUrl = builder.Configuration["BaziFlow:BaseUrl"];
+          if (Uri.TryCreate(baziBaseUrl, UriKind.Absolute, out var baziUri))
+          {
+              client.BaseAddress = baziUri;
+          }
           ConfigureExternalApiClient(client);
       })
       .AddHttpMessageHandler<BaziFlowAuthHandler>();
@@ -85,14 +90,7 @@ namespace MyTransportAppWASM
       builder.Services.AddScoped<IGoogleTasksWorkflowService, GoogleTasksWorkflowService>();
       builder.Services.AddScoped<IUserSettingsService, UserSettingsService>();
       builder.Services.AddScoped<AppStateService>();
-      builder.Services.AddSingleton<IFormFactor, FormFactor>();
       builder.Services.AddTransient<MyTransportAppWASM.Utils.CountdownTimer>();
-      builder.Services.AddScoped<IGeocodingService>(sp =>
-          new GeocodingService(
-              sp.GetRequiredService<IPlaceResolutionService>(),
-              sp.GetRequiredService<IWeatherStationCatalogService>()));
-      builder.Services.AddScoped<IStateHydrationService>(sp =>
-          new StateHydrationService(sp.GetService<Microsoft.AspNetCore.Components.PersistentComponentState>()));
 
 
 
@@ -106,7 +104,7 @@ namespace MyTransportAppWASM
       }
       catch (Exception ex)
       {
-        Console.Error.WriteLine($"Initial language load failed: {ex.Message}");
+        Console.WriteLine($"Initial language load failed: {ex.Message}");
       }
 
       await host.RunAsync();

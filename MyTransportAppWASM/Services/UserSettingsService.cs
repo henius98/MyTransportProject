@@ -7,7 +7,7 @@ using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM.Services
 {
-    public class UserSettingsService : IUserSettingsService, IDisposable
+    public sealed class UserSettingsService : IUserSettingsService, IDisposable
     {
         private readonly IBrowserStorageService _localStorage;
         private readonly AuthenticationStateProvider _authStateProvider;
@@ -70,7 +70,6 @@ namespace MyTransportAppWASM.Services
 
             if (!string.IsNullOrEmpty(uid))
             {
-                await GetLocalSettingsAsync(null);
                 try
                 {
                     var firestoreSettings = await _jsRuntime.InvokeAsync<UserSettings?>("window.firebaseFirestoreInterop.getUserSettings", TimeSpan.FromSeconds(10), uid);
@@ -88,7 +87,7 @@ namespace MyTransportAppWASM.Services
                 {
                     // A failed read must not be treated as a missing document, otherwise stale
                     // local settings could overwrite a user's Firestore settings.
-                    Console.Error.WriteLine($"Could not load cloud settings; using this device's settings: {ex.Message}");
+                    Console.WriteLine($"Could not load cloud settings; using this device's settings: {ex.Message}");
                     SetSyncError("Cloud preferences are unavailable. Using settings saved on this device.");
                 }
             }
@@ -109,7 +108,7 @@ namespace MyTransportAppWASM.Services
                 }
                 catch (Exception ex) when (ex is JSException or OperationCanceledException)
                 {
-                    Console.Error.WriteLine($"Settings were saved on this device but not synced: {ex.Message}");
+                    Console.WriteLine($"Settings were saved on this device but not synced: {ex.Message}");
                     if (uid == await GetUserIdAsync())
                         SetSyncError("Preferences saved on this device. Cloud sync failed; try changing the preference again when connected.");
                 }

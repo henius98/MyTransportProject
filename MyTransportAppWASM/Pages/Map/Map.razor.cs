@@ -35,16 +35,22 @@ public partial class Map : IAsyncDisposable
   private readonly SemaphoreSlim _refreshGate = new(1, 1);
   private List<MyTransportAppWASM.Models.EnrichedRoute> _routeOptions = new();
   private int _activeRouteId = -1;
+  private bool _mapAuthFailed;
   private Task _autocompleteTask = Task.CompletedTask;
   private Task _pollingTask = Task.CompletedTask;
 
   private string MapContainerClass => Theme?.IsDarkMode == true ? "theme-dark" : "theme-light";
   private string MapOverlayClass => $"map-overlay {(isCollapsed ? "collapsed" : "")}".Trim();
+  private bool IsErrorStatus =>
+    !string.IsNullOrEmpty(locationStatus) &&
+    (locationStatus.Contains("fail", StringComparison.OrdinalIgnoreCase) ||
+     locationStatus.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+     locationStatus.Contains("unavailable", StringComparison.OrdinalIgnoreCase));
 
   private void ToggleCollapse() => isCollapsed = !isCollapsed;
 
   private TransportStaticData? SelectedStaticData =>
-    _selectedStaticProviderIndex >= 0 && _selectedStaticProviderIndex < _transportProviders.Count
+    _selectedStaticProviderIndex >= 0 && _selectedStaticProviderIndex < _transportProviders.Count && _transportProviders[_selectedStaticProviderIndex].HasStaticData
       ? _transportProviders[_selectedStaticProviderIndex].StaticData : null;
 
   private async Task SelectStaticProvider(ChangeEventArgs args)
@@ -72,7 +78,7 @@ public partial class Map : IAsyncDisposable
     {
       if (_isDisposed || SelectedStaticData != source) return;
       _staticStatus = "Static routes unavailable.";
-      Console.Error.WriteLine($"Static route list failed: {ex.Message}");
+      Console.WriteLine($"Static route list failed: {ex.Message}");
     }
   }
 
@@ -101,7 +107,7 @@ public partial class Map : IAsyncDisposable
     {
       if (_isDisposed || SelectedStaticData != source || _selectedStaticRouteId != routeId) return;
       _staticStatus = "Static route map unavailable.";
-      Console.Error.WriteLine($"Static route map failed: {ex.Message}");
+      Console.WriteLine($"Static route map failed: {ex.Message}");
     }
   }
 
@@ -130,7 +136,7 @@ public partial class Map : IAsyncDisposable
     {
       if (_isDisposed || SelectedStaticData != source || _selectedStaticRouteId != routeId || _selectedStaticStopId != stopId) return;
       _staticStatus = "Departures unavailable.";
-      Console.Error.WriteLine($"Static departures failed: {ex.Message}");
+      Console.WriteLine($"Static departures failed: {ex.Message}");
       StateHasChanged();
     }
   }
@@ -173,7 +179,7 @@ public partial class Map : IAsyncDisposable
       }
       catch (Exception ex)
       {
-        if (!_isDisposed) Console.Error.WriteLine($"Theme update failed: {ex.Message}");
+        if (!_isDisposed) Console.WriteLine($"Theme update failed: {ex.Message}");
       }
     }
   }
@@ -200,7 +206,7 @@ public partial class Map : IAsyncDisposable
     }
     catch (Exception ex)
     {
-      Console.Error.WriteLine($"Init error: {ex.Message}");
+      Console.WriteLine($"Init error: {ex.Message}");
     }
   }
 
@@ -262,7 +268,7 @@ public partial class Map : IAsyncDisposable
     catch (JSException ex)
     {
       locationStatus = "Map error";
-      Console.Error.WriteLine($"initGoogleMaps failed: {ex.Message}");
+      Console.WriteLine($"initGoogleMaps failed: {ex.Message}");
     }
   }
 
@@ -302,8 +308,17 @@ public partial class Map : IAsyncDisposable
     catch (Exception ex)
     {
       if (_isDisposed) return;
-      Console.Error.WriteLine($"Reverse geocode failed: {ex.Message}");
+      Console.WriteLine($"Reverse geocode failed: {ex.Message}");
     }
+  }
+
+  [JSInvokable]
+  public void OnMapAuthError(string message)
+  {
+    if (_isDisposed) return;
+    _mapAuthFailed = true;
+    locationStatus = message;
+    StateHasChanged();
   }
 
   [JSInvokable]
@@ -354,7 +369,7 @@ public partial class Map : IAsyncDisposable
     }
     catch (Exception ex)
     {
-      if (!_isDisposed) Console.Error.WriteLine($"Autocomplete init failed: {ex.Message}");
+      if (!_isDisposed) Console.WriteLine($"Autocomplete init failed: {ex.Message}");
     }
   }
 
@@ -377,7 +392,7 @@ public partial class Map : IAsyncDisposable
     catch (Exception ex)
     {
       if (_isDisposed) return;
-      Console.Error.WriteLine($"Manual location update failed: {ex.Message}");
+      Console.WriteLine($"Manual location update failed: {ex.Message}");
     }
   }
 
@@ -403,7 +418,10 @@ public partial class Map : IAsyncDisposable
 
       await mapModule.InvokeVoidAsync("syncMarkers", result.Vehicles);
 
-      locationStatus = result.StatusMessage;
+      if (!_mapAuthFailed)
+      {
+        locationStatus = result.StatusMessage;
+      }
       StateHasChanged();
     }
     catch (OperationCanceledException)
@@ -417,7 +435,7 @@ public partial class Map : IAsyncDisposable
     catch (Exception ex)
     {
       if (_isDisposed) return;
-      Console.Error.WriteLine($"RefreshBusPosition failed: {ex.Message}");
+      Console.WriteLine($"RefreshBusPosition failed: {ex.Message}");
     }
     finally
     {
@@ -489,7 +507,7 @@ public partial class Map : IAsyncDisposable
     {
       if (_isDisposed) return;
       locationStatus = "Route calculation failed.";
-      Console.Error.WriteLine($"Route display failed: {ex.Message}");
+      Console.WriteLine($"Route display failed: {ex.Message}");
       StateHasChanged();
     }
   }
@@ -506,7 +524,7 @@ public partial class Map : IAsyncDisposable
     }
     catch (Exception ex)
     {
-      Console.Error.WriteLine($"SelectRoute failed: {ex.Message}");
+      Console.WriteLine($"SelectRoute failed: {ex.Message}");
     }
   }
 
@@ -524,7 +542,7 @@ public partial class Map : IAsyncDisposable
     catch (Exception ex)
     {
       if (_isDisposed) return;
-      Console.Error.WriteLine($"Clear route failed: {ex.Message}");
+      Console.WriteLine($"Clear route failed: {ex.Message}");
     }
   }
 

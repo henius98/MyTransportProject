@@ -1,6 +1,7 @@
 import {createHash, timingSafeEqual} from "node:crypto";
 import {HttpsError} from "firebase-functions/https";
 
+const MAX_DEVICES_PER_USER = 20;
 const devices = (db) => db.collection("pushDevices");
 const deviceId = (token) => createHash("sha256").update(token).digest("hex");
 
@@ -21,6 +22,16 @@ export async function handlePushRegistration(request, {db}) {
   const ref = devices(db).doc(deviceId(token));
   if (action === "add") {
     await ref.set({uid: request.auth.uid, token, updatedAt: Date.now()});
+    const snapshot = await devices(db)
+        .where("uid", "==", request.auth.uid)
+        .limit(50)
+        .get();
+    if (snapshot.docs.length > MAX_DEVICES_PER_USER) {
+      const stale = [...snapshot.docs]
+          .sort((a, b) => (b.data().updatedAt ?? 0) - (a.data().updatedAt ?? 0))
+          .slice(MAX_DEVICES_PER_USER);
+      await Promise.all(stale.map((doc) => doc.ref.delete()));
+    }
   } else {
     const saved = await ref.get();
     if (saved.exists && saved.data().uid === request.auth.uid) {
@@ -68,7 +79,10 @@ export async function handlePushWebhook(
     return response.status(400).json({error: "Invalid notification"});
   }
 
-  const snapshot = await devices(db).where("uid", "==", uid).limit(500).get();
+  const snapshot = await devices(db)
+      .where("uid", "==", uid)
+      .limit(MAX_DEVICES_PER_USER)
+      .get();
   if (snapshot.empty) return response.status(200).json({sent: 0, failed: 0});
   const registrations = snapshot.docs;
   const result = await messaging.sendEachForMulticast({

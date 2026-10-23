@@ -27,11 +27,12 @@ function fixture() {
           assert.deepEqual([field, operator], ["uid", "=="]);
           return {
             limit: (count) => {
-              assert.equal(count, 500);
+              assert.ok(count === 20 || count === 50);
               return {
                 get: async () => {
                   const docs = [...records.entries()]
                       .filter(([, data]) => data.uid === uid)
+                      .slice(0, count)
                       .map(([id, data]) => ({
                         data: () => data,
                         ref: db.collection(name).doc(id),
@@ -166,4 +167,29 @@ test("invalid URLs are rejected and expired device tokens are removed", async ()
     secret: "secret",
   });
   assert.equal(records.size, 0);
+});
+
+test("registering more than 20 devices for one user prunes the oldest registrations", async () => {
+  const {db, records} = fixture();
+  const realNow = Date.now;
+  let fakeTime = 1_000_000;
+  Date.now = () => (fakeTime += 1000);
+  try {
+    for (let i = 0; i < 22; i++) {
+      await handlePushRegistration(
+          {
+            auth: {uid: "alice"},
+            data: {action: "add", token: `${token}-device-${String(i).padStart(2, "0")}`},
+          },
+          {db},
+      );
+    }
+  } finally {
+    Date.now = realNow;
+  }
+  assert.equal(records.size, 20);
+  const remainingTokens = [...records.values()].map((r) => r.token);
+  assert.ok(!remainingTokens.includes(`${token}-device-00`));
+  assert.ok(!remainingTokens.includes(`${token}-device-01`));
+  assert.ok(remainingTokens.includes(`${token}-device-21`));
 });

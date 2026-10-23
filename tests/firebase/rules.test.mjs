@@ -87,3 +87,35 @@ test("optional preference fields can be omitted or null", async () => {
     }),
   );
 });
+
+test("taskExtensions enforces max 20 string dependency IDs", async () => {
+  const db = environment.authenticatedContext("alice").firestore();
+  const extRef = doc(db, "users/alice/taskExtensions/list1__task1");
+  await assertSucceeds(
+    setDoc(extRef, {
+      taskListId: "list1",
+      taskId: "task1",
+      estimatedMinutes: 30,
+      dependsOn: ["dep-1", "dep-2"],
+      startedAt: null,
+    }),
+  );
+  await assertFails(
+    setDoc(extRef, {
+      taskListId: "list1",
+      taskId: "task1",
+      estimatedMinutes: 30,
+      dependsOn: Array.from({ length: 21 }, (_, i) => `dep-${i}`),
+      startedAt: null,
+    }),
+  );
+  await assertFails(
+    setDoc(extRef, {
+      taskListId: "list1",
+      taskId: "task1",
+      estimatedMinutes: 30,
+      dependsOn: [{ nested: "invalid" }],
+      startedAt: null,
+    }),
+  );
+});

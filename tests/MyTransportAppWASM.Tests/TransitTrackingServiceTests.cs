@@ -134,12 +134,12 @@ public class TransitTrackingServiceTests
     var routes = await service.EnrichRoutesAsync([googleRoute]);
 
     Assert.Equal(2, routes.Count);
-    Assert.True(routes[0].IsAuspicious);
+    Assert.False(routes[0].IsAuspicious);
     Assert.False(routes[1].IsAuspicious);
   }
 
   [Fact]
-  public async Task EnrichRoutesAsync_WhenNotLuckyHour_AlternatesAuspiciousBadge()
+  public async Task EnrichRoutesAsync_WhenNotLuckyHour_DoesNotMarkRoutesAuspicious()
   {
     var gtfs = new Mock<IGtfsService>();
     var routing = new Mock<ILiveRoutingService>();
@@ -165,9 +165,31 @@ public class TransitTrackingServiceTests
     var routes = await service.EnrichRoutesAsync([googleRoute]);
 
     Assert.Equal(2, routes.Count);
-    // Alternating demonstration: index 0 is auspicious, index 1 is not
-    Assert.True(routes[0].IsAuspicious);
+    Assert.False(routes[0].IsAuspicious);
     Assert.False(routes[1].IsAuspicious);
+  }
+
+  [Fact]
+  public async Task RefreshVehiclesAsync_TagsVehiclesWithProviderName_AcrossMultipleProviders()
+  {
+    var gtfs = new Mock<IGtfsService>();
+    var routing = new Mock<ILiveRoutingService>();
+    var bazi = new Mock<IBaziFlowService>();
+
+    var providerA = new TransportProvider("Rapid Bus KL", "https://feed.test/kl", 3.139, 101.6869, 30.0, "Bus");
+    var providerB = new TransportProvider("Rapid Bus MRT Feeder", "https://feed.test/mrt", 3.139, 101.6869, 30.0, "Bus");
+
+    gtfs.Setup(g => g.GetBusPositionsAsync(providerA.Endpoint, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        .ReturnsAsync(new GtfsFetchResult(GtfsFetchStatus.Updated, [new BusLocation { VehicleId = "101", RouteId = "U60" }]));
+    gtfs.Setup(g => g.GetBusPositionsAsync(providerB.Endpoint, It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+        .ReturnsAsync(new GtfsFetchResult(GtfsFetchStatus.Updated, [new BusLocation { VehicleId = "101", RouteId = "T400" }]));
+
+    var service = new TransitTrackingService(gtfs.Object, routing.Object, bazi.Object, [providerA, providerB]);
+    var result = await service.RefreshVehiclesAsync(3.140, 101.6870, force: true);
+
+    Assert.Equal(2, result.Vehicles.Count);
+    Assert.Contains(result.Vehicles, v => v.ProviderName == "Rapid Bus KL" && v.VehicleId == "101");
+    Assert.Contains(result.Vehicles, v => v.ProviderName == "Rapid Bus MRT Feeder" && v.VehicleId == "101");
   }
 
   [Fact]

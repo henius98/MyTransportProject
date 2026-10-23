@@ -6,7 +6,6 @@
 @inject IPlaceResolutionService PlaceResolutionService
 @inject ILocationService LocationService
 @inject IWeatherPlannerService WeatherPlannerService
-@inject IStateHydrationService Hydration
 @inject IConfiguration Config
 @inject IJSRuntime JS
 @implements IDisposable
@@ -271,8 +270,7 @@
       query.Departure = departureDate.HasValue ? MalaysiaTime.At(departureDate.Value) : null;
       query.Return = returnDate.HasValue ? MalaysiaTime.At(returnDate.Value) : null;
 
-      string stateKey = $"weather_plan_{query.Latitude:F4}_{query.Longitude:F4}_{query.LocationId}_{query.Departure:yyyyMMdd}_{query.Return:yyyyMMdd}";
-      var result = await Hydration.GetOrHydrateAsync(stateKey, () => WeatherPlannerService.GetPlanAsync(query, _cts.Token));
+      var result = await WeatherPlannerService.GetPlanAsync(query, _cts.Token);
       if (_isDisposed) return;
 
       if (!result.IsValid)
@@ -293,7 +291,7 @@
     }
     catch (Exception ex)
     {
-      Console.Error.WriteLine(ex);
+      Console.WriteLine(ex);
     }
     finally
     {
@@ -338,7 +336,7 @@
     }
     catch (Exception ex)
     {
-      Console.Error.WriteLine($"Failed to refresh {provider}: {ex.Message}");
+      Console.WriteLine($"Failed to refresh {provider}: {ex.Message}");
     }
     finally
     {

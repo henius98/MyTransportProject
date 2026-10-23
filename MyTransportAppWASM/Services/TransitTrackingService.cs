@@ -7,7 +7,7 @@ using MyTransportAppWASM.Utils;
 
 namespace MyTransportAppWASM.Services;
 
-public class TransitTrackingService : ITransitTrackingService, IDisposable
+public sealed class TransitTrackingService : ITransitTrackingService, IDisposable
 {
   private readonly IGtfsService _gtfsService;
   private readonly ILiveRoutingService _liveRoutingService;
@@ -194,9 +194,8 @@ public class TransitTrackingService : ITransitTrackingService, IDisposable
           bool isLuckyHour = _cachedFortune.LuckyHours?.Contains(currentHour) == true;
           for (int i = 0; i < enriched.Count; i++)
           {
-            // For demonstration purposes, mark as auspicious if it's a lucky hour,
-            // or alternate to show the badge regardless.
-            enriched[i].IsAuspicious = isLuckyHour || (i % 2 == 0);
+            // Mark as auspicious when the current hour falls within the day's lucky hours.
+            enriched[i].IsAuspicious = isLuckyHour;
           }
         }
       }
@@ -207,7 +206,7 @@ public class TransitTrackingService : ITransitTrackingService, IDisposable
     }
     catch (Exception ex)
     {
-      Console.Error.WriteLine($"Fortune enrichment failed: {ex.Message}");
+      Console.WriteLine($"Fortune enrichment failed: {ex.Message}");
     }
 
     return enriched;
@@ -261,6 +260,7 @@ public class TransitTrackingService : ITransitTrackingService, IDisposable
 
     foreach (var vehicle in vehicles)
     {
+      vehicle.ProviderName = provider.Name;
       vehicle.TransportType = provider.TransportType;
     }
 

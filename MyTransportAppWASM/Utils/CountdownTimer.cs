@@ -11,28 +11,33 @@ namespace MyTransportAppWASM.Utils;
 /// </summary>
 public sealed class CountdownTimer : IDisposable
 {
-  private CancellationTokenSource _cts = new();
+  private CancellationTokenSource? _cts = new();
   public int RemainingSeconds { get; private set; }
 
   public async Task StartAsync(int totalSeconds, Action StateChanged, Action onCompleted)
   {
     // Safely cancel and dispose the OLD token before making a new one
-    if (!_cts.IsCancellationRequested)
-    {
-      try { _cts.Cancel(); } catch { }
-    }
-    _cts.Dispose();
+    Dispose();
 
     // Issue a fresh token for this run
-    _cts = new CancellationTokenSource();
-    CancellationToken token = _cts.Token;
+    var cts = new CancellationTokenSource();
+    _cts = cts;
+    CancellationToken token = cts.Token;
 
     RemainingSeconds = totalSeconds;
     StateChanged.Invoke();
 
     while (RemainingSeconds > 0)
     {
-      await Task.Delay(1000, token).ConfigureAwait(false);
+      try
+      {
+        await Task.Delay(1000, token).ConfigureAwait(false);
+      }
+      catch (OperationCanceledException)
+      {
+        return;
+      }
+
       if (token.IsCancellationRequested) return;
 
       RemainingSeconds--;
@@ -41,17 +46,23 @@ public sealed class CountdownTimer : IDisposable
 
     if (!token.IsCancellationRequested)
     {
+      Interlocked.CompareExchange(ref _cts, null, cts)?.Dispose();
       onCompleted();
-      Dispose();
     }
   }
 
   public void Dispose()
   {
-    if (!_cts.IsCancellationRequested)
+    var cts = Interlocked.Exchange(ref _cts, null);
+    if (cts is null)
     {
-      _cts.Cancel();
+      return;
     }
-    _cts.Dispose();
+
+    if (!cts.IsCancellationRequested)
+    {
+      try { cts.Cancel(); } catch (ObjectDisposedException) { }
+    }
+    cts.Dispose();
   }
 }

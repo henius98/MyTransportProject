@@ -1,7 +1,7 @@
 @using MyTransportAppWASM.Models
 @using MyTransportAppWASM.Utils
 
-@if (TransportProviders.Any(provider => provider.StaticData != null))
+@if (TransportProviders.Any(provider => provider.HasStaticData))
 {
     <div class="static-routes mt-3">
         <h3 class="fs-6 mb-2">Routes and estimated departures</h3>
@@ -10,7 +10,7 @@
             <option value="-1">Choose a provider</option>
             @for (var index = 0; index < TransportProviders.Count; index++)
             {
-                if (TransportProviders[index].StaticData != null)
+                if (TransportProviders[index].HasStaticData)
                 {
                     <option value="@index">@TransportProviders[index].Name</option>
                 }
