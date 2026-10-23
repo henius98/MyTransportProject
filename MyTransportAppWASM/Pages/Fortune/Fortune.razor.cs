@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+using System.Globalization;
 using Microsoft.AspNetCore.Components;
 using MyTransportAppWASM.Models.BaziFlow;
 
@@ -42,7 +44,7 @@ namespace MyTransportAppWASM.Pages.Fortune
                     if (profileData?.Profile != null)
                     {
                         profile = profileData.Profile;
-                        var dateStr = MalaysiaTime.Now.ToString("yyyy-MM-dd");
+                        var dateStr = MalaysiaTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
                         fortune = await BaziFlowService.GetDateFortuneAsync(dateStr, _cts.Token);
                         if (_disposed) return;
                     }
@@ -127,15 +129,18 @@ namespace MyTransportAppWASM.Pages.Fortune
         {
             _disposed = true;
             _cts.Cancel();
-            _cts.Dispose();
         }
 
         public class SetupModel
         {
+            [Required(ErrorMessage = "API Key is required")]
             public string ApiKey { get; set; } = string.Empty;
             public int Gender { get; set; } = 1;
-            public string BirthDate { get; set; } = MalaysiaTime.Now.AddYears(-30).ToString("yyyy-MM-dd");
+            [Required(ErrorMessage = "Birth Date is required")]
+            public string BirthDate { get; set; } = MalaysiaTime.Now.AddYears(-30).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            [Range(0, 23, ErrorMessage = "Birth Hour must be between 0 and 23")]
             public int BirthHour { get; set; } = 12;
+            [Range(0, 59, ErrorMessage = "Birth Minute must be between 0 and 59")]
             public int BirthMinute { get; set; } = 0;
         }
     }

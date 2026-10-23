@@ -72,6 +72,17 @@ public class GoogleTasksWorkflowServiceTests
                 Title = "Task",
                 Dependencies = [new GoogleTaskReference { TaskListId = ListId, TaskId = "task-1" }]
             }));
+
+        // Exceeds max 20 dependencies
+        var depEx = await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.SaveTaskWithWorkflowAsync(UserId, ListId, new GoogleTaskSaveRequest
+            {
+                Title = "Task",
+                Dependencies = Enumerable.Range(1, 21)
+                    .Select(i => new GoogleTaskReference { TaskListId = ListId, TaskId = $"dep-{i}" })
+                    .ToList()
+            }));
+        Assert.Equal("Choose at most 20 dependency tasks.", depEx.Message);
     }
 
     [Fact]

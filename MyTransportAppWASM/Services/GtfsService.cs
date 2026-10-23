@@ -6,7 +6,7 @@ using MyTransportAppWASM.Models;
 
 namespace MyTransportAppWASM.Services
 {
-  public class GtfsService : IGtfsService
+  public sealed class GtfsService : IGtfsService
   {
     private const int DefaultCapacity = 2 * 1024 * 1024;
     private const int MaximumFeedSize = 64 * 1024 * 1024;

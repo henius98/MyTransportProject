@@ -36,6 +36,14 @@ service cloud.firestore {
         return request.auth != null && request.auth.uid == uid;
       }
 
+      function validDependency(dep) {
+        return dep is map
+          && dep.keys().hasOnly(['taskListId', 'taskId'])
+          && dep.keys().hasAll(['taskListId', 'taskId'])
+          && dep.taskListId is string && dep.taskListId.size() > 0 && dep.taskListId.size() <= 1024
+          && dep.taskId is string && dep.taskId.size() > 0 && dep.taskId.size() <= 1024;
+      }
+
       function validExtension() {
         let data = request.resource.data;
         let minutes = data.estimatedMinutes;
@@ -47,8 +55,8 @@ service cloud.firestore {
           && (minutes == null || (minutes is int && minutes > 0 && minutes <= 1440))
           && data.dependsOn is list && data.dependsOn.size() <= 20
           && (data.dependsOn.size() == 0 || (
-            data.dependsOn[0] is string && data.dependsOn[0].size() > 0 && data.dependsOn[0].size() <= 1024
-            && data.dependsOn[data.dependsOn.size() - 1] is string && data.dependsOn[data.dependsOn.size() - 1].size() > 0 && data.dependsOn[data.dependsOn.size() - 1].size() <= 1024))
+            validDependency(data.dependsOn[0])
+            && validDependency(data.dependsOn[data.dependsOn.size() - 1])))
           && (started == null || (started is string && started.size() <= 40));
       }
 

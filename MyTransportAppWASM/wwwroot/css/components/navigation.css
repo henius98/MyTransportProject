@@ -1,6 +1,12 @@
 /* User Profile & Navigation Shared Styles */
 .profile {
   position: relative;
+  z-index: 1050;
+}
+
+.profile > button {
+  position: relative;
+  z-index: 1051;
 }
 
 .user-menu-dropdown {
@@ -20,7 +26,7 @@
   padding: 1.25rem;
 }
 
-.btn btn--social {
+.btn.btn--social {
   background: #ffffff;
   color: #000000;
   border: 1px solid #dadce0;
@@ -39,7 +45,7 @@
   margin-bottom: 1rem;
 }
 
-.btn btn--social:hover {
+.btn.btn--social:hover {
   background-color: #f8f9fa;
   box-shadow:
     0 1px 3px rgba(60, 64, 67, 0.3),

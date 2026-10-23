@@ -4,7 +4,7 @@ using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM.Services;
 
-public class GoogleTasksWorkflowService : IGoogleTasksWorkflowService
+public sealed class GoogleTasksWorkflowService : IGoogleTasksWorkflowService
 {
     private readonly IGoogleWorkspaceService _workspace;
 
@@ -80,9 +80,9 @@ public class GoogleTasksWorkflowService : IGoogleTasksWorkflowService
             throw new ArgumentOutOfRangeException(null, "Enter an estimated duration between 1 and 1440 minutes.");
         }
 
-        if (request.Dependencies.Count > 100)
+        if (request.Dependencies.Count > 20)
         {
-            throw new ArgumentException("Choose at most 100 dependency tasks.");
+            throw new ArgumentException("Choose at most 20 dependency tasks.");
         }
 
         if (request.TaskId != null && request.Dependencies.Any(dep => dep.TaskListId == listId && dep.TaskId == request.TaskId))

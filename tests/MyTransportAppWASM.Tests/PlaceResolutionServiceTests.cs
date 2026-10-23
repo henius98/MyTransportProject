@@ -149,7 +149,7 @@ public class PlaceResolutionServiceTests
     Assert.NotNull(handler.LastRequest);
     Assert.True(handler.LastRequest.Headers.Contains("X-Goog-Api-Key"));
     Assert.Equal("fake-key", handler.LastRequest.Headers.GetValues("X-Goog-Api-Key").Single());
-    Assert.DoesNotContain("key=", handler.LastRequest.RequestUri?.Query ?? "");
+    Assert.Contains("key=fake-key", handler.LastRequest.RequestUri?.Query ?? "");
   }
 
   [Fact]

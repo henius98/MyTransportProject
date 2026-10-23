@@ -1,6 +1,6 @@
 namespace MyTransportAppWASM.Services
 {
-    public class AppStateService
+    public sealed class AppStateService
     {
         public string? ReturnUrl { get; set; }
 

@@ -4,7 +4,7 @@ using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM.Services.Handlers
 {
-    public class BaziFlowAuthHandler : DelegatingHandler
+    public sealed class BaziFlowAuthHandler : DelegatingHandler
     {
         private readonly IBrowserStorageService _localStorage;
         private readonly string? _expectedHost;

@@ -9,7 +9,7 @@ namespace MyTransportAppWASM.Services
   /// Manages loading, caching, and spatial querying of the MetMalaysia recreation centres catalog.
   /// Decouples static station assets from dynamic geocoding services.
   /// </summary>
-  public class WeatherStationCatalogService : IWeatherStationCatalogService
+  public sealed class WeatherStationCatalogService : IWeatherStationCatalogService
   {
     private readonly HttpClient _httpClient;
     private Task<List<MetLocation>?>? _stationsTask;

@@ -8,7 +8,7 @@ using MyTransportAppWASM.Utils;
 
 namespace MyTransportAppWASM.Services
 {
-  public class WeatherPlannerService : IWeatherPlannerService
+  public sealed class WeatherPlannerService : IWeatherPlannerService
   {
     private readonly HttpClient _httpClient;
     private readonly IMemoryCache _cache;
@@ -116,7 +116,7 @@ namespace MyTransportAppWASM.Services
         query.Longitude = chosen.Lng;
         query.PendingSearchText = null;
         query.LocationId = chosen.FormattedAddress != null && chosen.FormattedAddress.StartsWith("MET ID: ", StringComparison.Ordinal)
-          ? chosen.FormattedAddress.Substring(8).Trim()
+          ? chosen.FormattedAddress.AsSpan(8).Trim().ToString()
           : null;
       }
 
@@ -387,14 +387,6 @@ namespace MyTransportAppWASM.Services
         .Replace("{lat}", query.Latitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
         .Replace("{lon}", query.Longitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
 
-      if (formatted.Contains("{place}", StringComparison.OrdinalIgnoreCase))
-      {
-        string placeStr = string.IsNullOrWhiteSpace(query.PlaceName) || query.PlaceName == "Current Location"
-          ? "Kuala Lumpur"
-          : query.PlaceName.Split(',')[0].Trim();
-        formatted = formatted.Replace("{place}", Uri.EscapeDataString(placeStr), StringComparison.OrdinalIgnoreCase);
-      }
-
       if (!string.IsNullOrWhiteSpace(options.ApiKey))
       {
         formatted = formatted
@@ -421,8 +413,8 @@ namespace MyTransportAppWASM.Services
         var currentMalaysiaTime = MalaysiaTime.Now;
         var start = isOutlook ? query.Departure ?? currentMalaysiaTime : currentMalaysiaTime;
         var end = isOutlook ? query.Return ?? start.AddDays(7) : currentMalaysiaTime;
-        template = template.Replace("{date_start}", start.ToString("yyyy-MM-dd"), StringComparison.OrdinalIgnoreCase);
-        template = template.Replace("{date_end}", end.ToString("yyyy-MM-dd"), StringComparison.OrdinalIgnoreCase);
+        template = template.Replace("{date_start}", start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
+        template = template.Replace("{date_end}", end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
       }
 
       if (!string.IsNullOrWhiteSpace(options.ApiKey))

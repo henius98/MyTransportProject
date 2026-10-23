@@ -4,7 +4,7 @@ using Microsoft.JSInterop;
 
 namespace MyTransportAppWASM.Services
 {
-    public class FirebaseAuthenticationStateProvider : AuthenticationStateProvider, IAsyncDisposable
+    public sealed class FirebaseAuthenticationStateProvider : AuthenticationStateProvider, IAsyncDisposable
     {
         private readonly IJSRuntime _jsRuntime;
         private DotNetObjectReference<FirebaseAuthenticationStateProvider>? _dotNetRef;
@@ -137,7 +137,7 @@ namespace MyTransportAppWASM.Services
         }
     }
 
-    public class FirebaseUser
+    public sealed class FirebaseUser
     {
         public string Uid { get; set; } = "";
         public string? Email { get; set; }

@@ -221,6 +221,7 @@ namespace MyTransportAppWASM.Services
         public void Dispose()
         {
             _authStateProvider.AuthenticationStateChanged -= HandleAuthenticationStateChanged;
+            _settingsLock.Dispose();
         }
     }
 }

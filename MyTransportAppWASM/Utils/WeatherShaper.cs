@@ -138,7 +138,7 @@ namespace MyTransportAppWASM.Utils
     {
       foreach (var prop in element.EnumerateObject())
       {
-        if (MatchesAnyName(prop.Name, names)) return prop.Value;
+        if (MatchesAnyName(prop, names)) return prop.Value;
       }
       return null;
     }
@@ -259,8 +259,8 @@ namespace MyTransportAppWASM.Utils
     {
       if (probability is null) return null;
       double value = probability.Value;
-      if (value > 1 && value <= 100) return value / 100d;
-      if (value > 0 && value <= 1) return value;
+      if (value >= 1 && value <= 100) return value / 100d;
+      if (value > 0 && value < 1) return value;
       return 0;
     }
 
@@ -288,37 +288,69 @@ namespace MyTransportAppWASM.Utils
 
       foreach (JsonProperty property in element.EnumerateObject())
       {
-        string propertyName = property.Name;
         JsonElement value = property.Value;
+        if (value.ValueKind == JsonValueKind.Object)
+        {
+          CollectFields(value, depth + 1, ref fields);
+          continue;
+        }
 
-        if (fields.Temperature is null && MatchesAnyName(propertyName, TemperatureNames) && TryGetFirstDouble(value, out var temperature))
-          fields.Temperature = temperature;
-        if (fields.MaximumTemperature is null && MatchesAnyName(propertyName, MaximumTemperatureNames) && TryGetFirstDouble(value, out var maximumTemperature))
-          fields.MaximumTemperature = maximumTemperature;
-        if (fields.MinimumTemperature is null && MatchesAnyName(propertyName, MinimumTemperatureNames) && TryGetFirstDouble(value, out var minimumTemperature))
-          fields.MinimumTemperature = minimumTemperature;
-        if (fields.Precipitation is null && MatchesAnyName(propertyName, PrecipitationNames) && TryGetFirstDouble(value, out var precipitation))
-          fields.Precipitation = precipitation;
-        if (fields.Probability is null && MatchesAnyName(propertyName, ProbabilityNames) && TryGetFirstDouble(value, out var probability))
-          fields.Probability = probability;
-        if (fields.WeatherCode is null && MatchesAnyName(propertyName, WeatherCodeNames) && TryGetFirstDouble(value, out var weatherCode))
-          fields.WeatherCode = weatherCode;
+        switch (ClassifyProperty(property))
+        {
+          case WeatherFieldKind.Temperature:
+            if (fields.Temperature is null && TryGetFirstDouble(value, out var temperature))
+              fields.Temperature = temperature;
+            break;
+          case WeatherFieldKind.MaximumTemperature:
+            if (fields.MaximumTemperature is null && TryGetFirstDouble(value, out var maximumTemperature))
+              fields.MaximumTemperature = maximumTemperature;
+            break;
+          case WeatherFieldKind.MinimumTemperature:
+            if (fields.MinimumTemperature is null && TryGetFirstDouble(value, out var minimumTemperature))
+              fields.MinimumTemperature = minimumTemperature;
+            break;
+          case WeatherFieldKind.Precipitation:
+            if (fields.Precipitation is null && TryGetFirstDouble(value, out var precipitation))
+              fields.Precipitation = precipitation;
+            break;
+          case WeatherFieldKind.Probability:
+            if (fields.Probability is null && TryGetFirstDouble(value, out var probability))
+              fields.Probability = probability;
+            break;
+          case WeatherFieldKind.WeatherCode:
+            if (fields.WeatherCode is null && TryGetFirstDouble(value, out var weatherCode))
+              fields.WeatherCode = weatherCode;
+            break;
+          case WeatherFieldKind.Wind:
+            if (fields.Wind is null && value.ValueKind == JsonValueKind.String)
+              fields.Wind = value.GetString();
+            break;
+          case WeatherFieldKind.MorningForecast:
+            if (fields.MorningForecast is null && value.ValueKind == JsonValueKind.String)
+              fields.MorningForecast = value.GetString();
+            break;
+          case WeatherFieldKind.AfternoonForecast:
+            if (fields.AfternoonForecast is null && value.ValueKind == JsonValueKind.String)
+              fields.AfternoonForecast = value.GetString();
+            break;
+          case WeatherFieldKind.NightForecast:
+            if (fields.NightForecast is null && value.ValueKind == JsonValueKind.String)
+              fields.NightForecast = value.GetString();
+            break;
+          case WeatherFieldKind.Summary:
+            if (fields.Summary is null && value.ValueKind == JsonValueKind.String)
+              fields.Summary = value.GetString();
+            break;
+          case WeatherFieldKind.Time:
+            if (fields.Time is null && TryGetDate(value, out var time))
+              fields.Time = time;
+            break;
+        }
 
-        if (fields.Wind is null && MatchesAnyName(propertyName, WindNames) && value.ValueKind == JsonValueKind.String)
-          fields.Wind = value.GetString();
-        if (fields.MorningForecast is null && MatchesAnyName(propertyName, MorningForecastNames) && value.ValueKind == JsonValueKind.String)
-          fields.MorningForecast = value.GetString();
-        if (fields.AfternoonForecast is null && MatchesAnyName(propertyName, AfternoonForecastNames) && value.ValueKind == JsonValueKind.String)
-          fields.AfternoonForecast = value.GetString();
-        if (fields.NightForecast is null && MatchesAnyName(propertyName, NightForecastNames) && value.ValueKind == JsonValueKind.String)
-          fields.NightForecast = value.GetString();
-        if (fields.Summary is null && MatchesAnyName(propertyName, SummaryNames) && value.ValueKind == JsonValueKind.String)
-          fields.Summary = value.GetString();
-
-        if (fields.Time is null && MatchesAnyName(propertyName, TimeNames) && TryGetDate(value, out var time))
-          fields.Time = time;
-
-        CollectFields(value, depth + 1, ref fields);
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+          CollectFields(value, depth + 1, ref fields);
+        }
       }
     }
 
@@ -412,9 +444,59 @@ namespace MyTransportAppWASM.Utils
       public string? Summary;
     }
 
+    private enum WeatherFieldKind
+    {
+      None,
+      Temperature,
+      MaximumTemperature,
+      MinimumTemperature,
+      Precipitation,
+      Probability,
+      WeatherCode,
+      Wind,
+      MorningForecast,
+      AfternoonForecast,
+      NightForecast,
+      Summary,
+      Time
+    }
+
+    private static readonly string[] IgnoredPropertyNames = ["location", "name", "location_name", "id"];
+
+    private static WeatherFieldKind ClassifyProperty(JsonProperty property)
+    {
+      if (MatchesAnyName(property, IgnoredPropertyNames)) return WeatherFieldKind.None;
+      if (MatchesAnyName(property, TimeNames)) return WeatherFieldKind.Time;
+      if (MatchesAnyName(property, MaximumTemperatureNames)) return WeatherFieldKind.MaximumTemperature;
+      if (MatchesAnyName(property, MinimumTemperatureNames)) return WeatherFieldKind.MinimumTemperature;
+      if (MatchesAnyName(property, PrecipitationNames)) return WeatherFieldKind.Precipitation;
+      if (MatchesAnyName(property, ProbabilityNames)) return WeatherFieldKind.Probability;
+      if (MatchesAnyName(property, MorningForecastNames)) return WeatherFieldKind.MorningForecast;
+      if (MatchesAnyName(property, AfternoonForecastNames)) return WeatherFieldKind.AfternoonForecast;
+      if (MatchesAnyName(property, NightForecastNames)) return WeatherFieldKind.NightForecast;
+      if (MatchesAnyName(property, WindNames)) return WeatherFieldKind.Wind;
+      if (MatchesAnyName(property, TemperatureNames)) return WeatherFieldKind.Temperature;
+      if (MatchesAnyName(property, WeatherCodeNames)) return WeatherFieldKind.WeatherCode;
+      if (MatchesAnyName(property, SummaryNames)) return WeatherFieldKind.Summary;
+
+      return WeatherFieldKind.None;
+    }
+
     /// <summary>
-    /// Manual loop to match property names — avoids LINQ .Any() delegate allocation on hot path.
+    /// Manual loop to match property names — avoids LINQ .Any() delegate and property.Name string allocation on hot path.
+    /// Falls back to case-insensitive check so PascalCase / uppercase JSON properties from external APIs are not missed.
     /// </summary>
+    private static bool MatchesAnyName(JsonProperty property, string[] names)
+    {
+      for (int i = 0; i < names.Length; i++)
+      {
+        if (property.NameEquals(names[i]))
+          return true;
+      }
+
+      return MatchesAnyName(property.Name, names);
+    }
+
     private static bool MatchesAnyName(string propertyName, string[] names)
     {
       for (int i = 0; i < names.Length; i++)
@@ -422,6 +504,7 @@ namespace MyTransportAppWASM.Utils
         if (string.Equals(names[i], propertyName, StringComparison.OrdinalIgnoreCase))
           return true;
       }
+
       return false;
     }
 

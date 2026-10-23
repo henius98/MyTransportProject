@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 
 namespace MyTransportAppWASM.Services
 {
-  public class LanguageOption
+  public sealed class LanguageOption
   {
     public string Code { get; set; } = string.Empty;
     public string NativeLabel { get; set; } = string.Empty;
@@ -14,7 +14,7 @@ namespace MyTransportAppWASM.Services
     public string FullName { get; set; } = string.Empty;
   }
 
-  public class LanguageService
+  public sealed class LanguageService
   {
     public static readonly IReadOnlyList<LanguageOption> SupportedLanguages = new[]
     {

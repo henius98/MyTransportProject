@@ -10,7 +10,7 @@ namespace MyTransportAppWASM.Services
   /// Unified place resolution service: resolves coordinate inputs,
   /// searches the weather station catalog, and queries Google Places (New) / Geocoding APIs.
   /// </summary>
-  public class PlaceResolutionService : IPlaceResolutionService
+  public sealed class PlaceResolutionService : IPlaceResolutionService
   {
     private readonly HttpClient _httpClient;
     private readonly IWeatherStationCatalogService _stationCatalog;
@@ -134,7 +134,7 @@ namespace MyTransportAppWASM.Services
         return null;
       }
 
-      string url = FormattableString.Invariant($"https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lng}");
+      string url = FormattableString.Invariant($"https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lng}&key={Uri.EscapeDataString(_apiKey)}");
 
       try
       {

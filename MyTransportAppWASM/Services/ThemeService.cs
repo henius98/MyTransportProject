@@ -3,7 +3,7 @@ using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM.Services;
 
-public class ThemeService
+public sealed class ThemeService
 {
   private readonly IJSRuntime _js;
   private readonly IUserSettingsService _userSettingsService;

@@ -90,7 +90,6 @@ namespace MyTransportAppWASM
       builder.Services.AddScoped<IGoogleTasksWorkflowService, GoogleTasksWorkflowService>();
       builder.Services.AddScoped<IUserSettingsService, UserSettingsService>();
       builder.Services.AddScoped<AppStateService>();
-      builder.Services.AddTransient<MyTransportAppWASM.Utils.CountdownTimer>();
 
 
 

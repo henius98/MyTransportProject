@@ -10,6 +10,7 @@ let activeMap = null;
 
 export function initializeMap(svg, viewport, tooltip) {
   disposeMap();
+  if (!svg || !viewport || !tooltip) return;
 
   const controller = new AbortController();
   const view = { x: 0, y: 0, width: 1000, height: 332 };

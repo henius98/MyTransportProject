@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using MyTransportAppWASM.Models;
@@ -161,7 +162,7 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
     {
       if (await _baziFlowService.HasApiKeyAsync(cancellationToken))
       {
-        var todayKey = MalaysiaTime.Now.ToString("yyyy-MM-dd");
+        var todayKey = MalaysiaTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         string fortuneCacheKey = $"transit_fortune_{todayKey}";
         if (_cache != null)
         {

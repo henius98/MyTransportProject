@@ -1,8 +1,9 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace MyTransportAppWASM.Services.Handlers
 {
-    public class WeatherRateLimitingHandler : DelegatingHandler
+    public sealed class WeatherRateLimitingHandler : DelegatingHandler
     {
         private static readonly long RequestIntervalTicks = Stopwatch.Frequency / 2;
         private static readonly SemaphoreSlim _scheduleLock = new(1, 1);
@@ -17,10 +18,10 @@ namespace MyTransportAppWASM.Services.Handlers
             try
             {
                 var now = Stopwatch.GetTimestamp();
-                _nextRequestByHost.TryGetValue(host, out var nextRequest);
+                ref var nextRequest = ref CollectionsMarshal.GetValueRefOrAddDefault(_nextRequestByHost, host, out _);
                 var scheduledRequest = Math.Max(now, nextRequest);
                 delay = Stopwatch.GetElapsedTime(now, scheduledRequest);
-                _nextRequestByHost[host] = scheduledRequest + RequestIntervalTicks;
+                nextRequest = scheduledRequest + RequestIntervalTicks;
             }
             finally
             {
@@ -37,7 +38,9 @@ namespace MyTransportAppWASM.Services.Handlers
 
         public static void ResetForTesting()
         {
-            _scheduleLock.WaitAsync().GetAwaiter().GetResult();
+#pragma warning disable CA1416 // Executed exclusively by host test runner
+            _scheduleLock.Wait();
+#pragma warning restore CA1416
             try
             {
                 _nextRequestByHost.Clear();

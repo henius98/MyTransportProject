@@ -1,7 +1,6 @@
 @page "/not-found"
 @layout MainLayout
 @inject NavigationManager Navigation
-@inject MyTransportAppWASM.Utils.CountdownTimer _timer
 @implements IDisposable
 
 <div class="modal__backdrop" @onclick="GoHome">
@@ -29,22 +28,44 @@
                 </div>
                 <div class="stats__divider"></div>
                 <div class="stats__item">
-                    <span class="stats__value">@_timer.RemainingSeconds</span>
+                    <span class="stats__value">@secondsLeft</span>
                     <span class="stats__label">Seconds Left</span>
                 </div>
             </div>
 
-            <button class="btn btn btn--primary" style="width: 100%; padding: 1rem;" @onclick="GoHome">
+            <button class="btn btn--primary" style="width: 100%; padding: 1rem;" @onclick="GoHome">
                 <span style="margin-right: 8px;">🏠</span> Return to Home
             </button>
         </div>
     </div>
 
 @code {
-    protected override Task OnInitializedAsync()
+    private int secondsLeft = 10;
+    private readonly CancellationTokenSource _cts = new();
+
+    protected override void OnInitialized()
     {
-        _ = _timer.StartAsync(10, StateHasChanged, () => GoHome());
-        return Task.CompletedTask;
+        _ = RunCountdownAsync();
+    }
+
+    private async Task RunCountdownAsync()
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        try
+        {
+            while (secondsLeft > 0 && await timer.WaitForNextTickAsync(_cts.Token))
+            {
+                secondsLeft--;
+                await InvokeAsync(StateHasChanged);
+            }
+            if (!_cts.IsCancellationRequested)
+            {
+                GoHome();
+            }
+        }
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
+        {
+        }
     }
 
     private void GoHome()
@@ -54,6 +75,6 @@
 
     public void Dispose()
     {
-        _timer.Dispose();
+        _cts.Cancel();
     }
 }

@@ -80,7 +80,7 @@ namespace MyTransportAppWASM.Models
     public Dictionary<string, string> Endpoints { get; set; } = new(StringComparer.OrdinalIgnoreCase);
   }
 
-  public class WeatherOptions
+  public sealed class WeatherOptions
   {
     public MetMalaysiaWeatherProviderOptions MetMalaysia { get; set; } = new();
     public KeyedWeatherProviderOptions OpenMeteo { get; set; } = new();

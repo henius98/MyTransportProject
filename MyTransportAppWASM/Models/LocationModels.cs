@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 namespace MyTransportAppWASM.Models
 {
-  public class MetLocation
+  public sealed class MetLocation
   {
     [JsonPropertyName("location_id")]
     public string? LocationId { get; set; }
@@ -23,13 +23,13 @@ namespace MyTransportAppWASM.Models
     public string TextQuery { get; set; } = string.Empty;
   }
 
-  internal class PlacesNewResponse
+  internal sealed class PlacesNewResponse
   {
     [JsonPropertyName("places")]
     public Place[]? Places { get; set; }
   }
 
-  internal class Place
+  internal sealed class Place
   {
     [JsonPropertyName("formattedAddress")]
     public string FormattedAddress { get; set; } = string.Empty;
@@ -41,7 +41,7 @@ namespace MyTransportAppWASM.Models
     public DisplayName? DisplayName { get; set; }
   }
 
-  internal class LatLng
+  internal sealed class LatLng
   {
     [JsonPropertyName("latitude")]
     public double Latitude { get; set; }
@@ -50,7 +50,7 @@ namespace MyTransportAppWASM.Models
     public double Longitude { get; set; }
   }
 
-  internal class DisplayName
+  internal sealed class DisplayName
   {
     [JsonPropertyName("text")]
     public string Text { get; set; } = string.Empty;

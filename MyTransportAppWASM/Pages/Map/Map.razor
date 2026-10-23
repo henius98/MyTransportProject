@@ -65,8 +65,8 @@
                     </button>
                 </div>
 
-                <div class="tracker-status" role="status" aria-live="polite">
-                    <span class="pulse-dot" aria-hidden="true"></span>
+                <div class="tracker-status @(IsErrorStatus ? "tracker-status--error" : "")" role="status" aria-live="polite">
+                    <span class="pulse-dot @(IsErrorStatus ? "pulse-dot--error" : "")" aria-hidden="true"></span>
                     <span>@(string.IsNullOrEmpty(locationStatus) ? "Ready" : locationStatus)</span>
                 </div>
 

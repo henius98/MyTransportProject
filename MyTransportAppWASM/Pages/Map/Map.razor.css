@@ -155,6 +155,14 @@
   color: var(--text-dim);
 }
 
+.tracker-status.tracker-status--error,
+.theme-light .tracker-status.tracker-status--error,
+.theme-dark .tracker-status.tracker-status--error,
+.theme-light .tracker-status--error,
+.theme-dark .tracker-status--error {
+  color: #ea4335;
+}
+
 .route-option {
   width: 100%;
   background: var(--card-bg);
@@ -178,6 +186,14 @@
 
 .theme-light .pulse-dot {
   background: #34a853; /* Standard green for light mode */
+}
+
+.pulse-dot.pulse-dot--error,
+.theme-light .pulse-dot.pulse-dot--error,
+.theme-dark .pulse-dot.pulse-dot--error,
+.theme-light .pulse-dot--error,
+.theme-dark .pulse-dot--error {
+  background: #ea4335;
 }
 
 ::deep .bus-info-window {

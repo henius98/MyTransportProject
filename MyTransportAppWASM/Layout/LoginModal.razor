@@ -144,9 +144,17 @@
 
   private bool IsSafeReturnUrl(string? returnUrl)
   {
-    return Uri.TryCreate(returnUrl, UriKind.Absolute, out var target)
-        && Uri.TryCreate(Navigation.BaseUri, UriKind.Absolute, out var appBase)
-        && appBase.IsBaseOf(target);
+    if (string.IsNullOrWhiteSpace(returnUrl)) return false;
+    try
+    {
+      var target = Navigation.ToAbsoluteUri(returnUrl);
+      var appBase = new Uri(Navigation.BaseUri, UriKind.Absolute);
+      return appBase.IsBaseOf(target);
+    }
+    catch (UriFormatException)
+    {
+      return false;
+    }
   }
 
   public void Dispose()

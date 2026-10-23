@@ -88,7 +88,7 @@ test("optional preference fields can be omitted or null", async () => {
   );
 });
 
-test("taskExtensions enforces max 20 string dependency IDs", async () => {
+test("taskExtensions enforces max 20 task dependency references", async () => {
   const db = environment.authenticatedContext("alice").firestore();
   const extRef = doc(db, "users/alice/taskExtensions/list1__task1");
   await assertSucceeds(
@@ -96,7 +96,10 @@ test("taskExtensions enforces max 20 string dependency IDs", async () => {
       taskListId: "list1",
       taskId: "task1",
       estimatedMinutes: 30,
-      dependsOn: ["dep-1", "dep-2"],
+      dependsOn: [
+        { taskListId: "list1", taskId: "dep-1" },
+        { taskListId: "list1", taskId: "dep-2" },
+      ],
       startedAt: null,
     }),
   );
@@ -105,7 +108,16 @@ test("taskExtensions enforces max 20 string dependency IDs", async () => {
       taskListId: "list1",
       taskId: "task1",
       estimatedMinutes: 30,
-      dependsOn: Array.from({ length: 21 }, (_, i) => `dep-${i}`),
+      dependsOn: Array.from({ length: 21 }, (_, i) => ({ taskListId: "list1", taskId: `dep-${i}` })),
+      startedAt: null,
+    }),
+  );
+  await assertFails(
+    setDoc(extRef, {
+      taskListId: "list1",
+      taskId: "task1",
+      estimatedMinutes: 30,
+      dependsOn: ["string-dep-not-allowed"],
       startedAt: null,
     }),
   );
@@ -115,6 +127,33 @@ test("taskExtensions enforces max 20 string dependency IDs", async () => {
       taskId: "task1",
       estimatedMinutes: 30,
       dependsOn: [{ nested: "invalid" }],
+      startedAt: null,
+    }),
+  );
+  await assertFails(
+    setDoc(extRef, {
+      taskListId: "list1",
+      taskId: "task1",
+      estimatedMinutes: 30,
+      dependsOn: [{ taskListId: "", taskId: "dep-1" }],
+      startedAt: null,
+    }),
+  );
+  await assertFails(
+    setDoc(extRef, {
+      taskListId: "list1",
+      taskId: "task1",
+      estimatedMinutes: 30,
+      dependsOn: [{ taskListId: "list1", taskId: "" }],
+      startedAt: null,
+    }),
+  );
+  await assertFails(
+    setDoc(extRef, {
+      taskListId: "list1",
+      taskId: "task1",
+      estimatedMinutes: 30,
+      dependsOn: [{ taskListId: "list1", taskId: "dep-1", extra: "not-allowed" }],
       startedAt: null,
     }),
   );

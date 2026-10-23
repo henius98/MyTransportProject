@@ -4,7 +4,7 @@ using MyTransportAppWASM.Utils;
 
 namespace MyTransportAppWASM.Services
 {
-  public class LiveRoutingService : ILiveRoutingService
+  public sealed class LiveRoutingService : ILiveRoutingService
   {
     public List<EnrichedRoute> EnrichRoutes(List<GoogleRoute> googleRoutes, List<BusLocation> liveVehicles)
     {
@@ -81,10 +81,18 @@ namespace MyTransportAppWASM.Services
       }
 
       // Rank the routes: those with live buses and lowest live duration first, then those without live buses
-      return result
-        .OrderByDescending(r => r.HasLiveBus)
-        .ThenBy(r => r.LiveTotalDurationSeconds)
-        .ToList();
+      result.Sort(static (a, b) =>
+      {
+        var liveBusComparison = b.HasLiveBus.CompareTo(a.HasLiveBus);
+        if (liveBusComparison != 0)
+        {
+          return liveBusComparison;
+        }
+
+        return a.LiveTotalDurationSeconds.CompareTo(b.LiveTotalDurationSeconds);
+      });
+
+      return result;
     }
 
     private static Dictionary<string, List<BusLocation>> IndexVehiclesByRoute(List<BusLocation> liveVehicles)

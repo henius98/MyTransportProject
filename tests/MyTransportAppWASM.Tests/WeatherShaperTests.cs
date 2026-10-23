@@ -231,4 +231,48 @@ public class WeatherShaperTests
 
         Assert.Same(fallback, result);
     }
+
+    [Fact]
+    public void ShapeSlices_MatchesPascalCaseAndCaseInsensitiveProperties()
+    {
+        using var document = JsonDocument.Parse("""
+            [
+              {
+                "Date": "2026-08-26T00:00:00Z",
+                "Temperature": 28.5,
+                "Precipitation": 2.0,
+                "Probability": 60,
+                "Summary": "Light Rain"
+              }
+            ]
+            """);
+
+        var result = WeatherShaper.ShapeSlices(document, [], "Realtime");
+
+        var slice = Assert.Single(result);
+        Assert.Equal(28.5, slice.TemperatureC);
+        Assert.Equal(2.0, slice.PrecipitationMm);
+        Assert.Equal(0.60, slice.ProbabilityOfRain!.Value, 6);
+        Assert.Equal("Light Rain", slice.Summary);
+    }
+
+    [Fact]
+    public void ShapeSlices_NormalizesOnePercentProbabilityToFraction()
+    {
+        using var document = JsonDocument.Parse("""
+            [
+              {
+                "Date": "2026-08-26T00:00:00Z",
+                "Temperature": 28.5,
+                "Probability": 1,
+                "Summary": "Light Rain"
+              }
+            ]
+            """);
+
+        var result = WeatherShaper.ShapeSlices(document, [], "Realtime");
+
+        var slice = Assert.Single(result);
+        Assert.Equal(0.01, slice.ProbabilityOfRain!.Value, 6);
+    }
 }
