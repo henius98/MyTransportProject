@@ -47,7 +47,7 @@ namespace MyTransportAppWASM
       });
       builder.Services.AddScoped<IWeatherStationCatalogService>(services => new WeatherStationCatalogService(
           services.GetRequiredService<IHttpClientFactory>().CreateClient("StaticAssets")));
-      builder.Services.AddHttpClient<IPlaceResolutionService, PlaceResolutionService>(ConfigureExternalApiClient);
+      builder.Services.AddScoped<IPlaceResolutionService, PlaceResolutionService>();
 
       builder.Services.AddTransient<BaziFlowAuthHandler>();
       builder.Services.AddHttpClient<IBaziFlowService, BaziFlowService>(client =>

@@ -110,14 +110,13 @@ Google sign-in requests only the standard sign-in profile. Calendar and Tasks re
 
 See [Firebase Google sign-in](https://firebase.google.com/docs/auth/web/google-signin) and [Firestore security rules](https://firebase.google.com/docs/firestore/security/rules-conditions).
 
-### Google Calendar, Tasks, and Keep
+### Google Calendar and Tasks
 
-Signed-in users can open **My Google** from the navigation menu:
+Signed-in users can open Google services from the navigation menu:
 
-- `/google`: service overview, including shortcuts to Gmail, Drive, and Docs.
 - `/google/calendar`: calendar selection, event browsing, and creating, editing, or deleting events. Read-only calendars can be viewed; recurring event edits affect the selected occurrence.
 - `/google/tasks`: task-list selection and creating, editing, completing, reopening, or deleting tasks.
-- `/google/notes`: opens Google Keep in a new tab to view and edit existing notes. Google's public Keep API is designed for managed enterprise accounts; this app does not claim to sync personal Keep notes.
+- Keep notes are accessible via direct link to Google Keep in the navigation menu.
 
 Enable **Google Calendar API** and **Google Tasks API** in the Google Cloud project used by Firebase Authentication's Google OAuth client. In **Google Auth Platform → Data Access**, configure these scopes on that OAuth client's consent screen:
 

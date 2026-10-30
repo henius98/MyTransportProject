@@ -10,7 +10,10 @@ async function setup() {
     const state = { uid: "alice", calls: [], popups: 0, imports: 0, loads: 0 };
     const context = createContext({});
     const sdk = new SyntheticModule(["getFunctions", "httpsCallable"], function () {
-        this.setExport("getFunctions", app => app);
+        this.setExport("getFunctions", (app, region) => {
+            state.functionsRegion = region;
+            return app;
+        });
         this.setExport("httpsCallable", (_functions, name) => {
             assert.equal(name, "googleConnection");
             return async data => {
@@ -71,6 +74,7 @@ test("code authorization uses backend configuration, an account hint, and exchan
     ]);
     assert.equal(state.imports, 1);
     assert.equal(state.loads, 1);
+    assert.equal(state.functionsRegion, "asia-southeast1");
 });
 
 test("restore and invalidation use authenticated callable requests without sending a user-supplied UID", async () => {

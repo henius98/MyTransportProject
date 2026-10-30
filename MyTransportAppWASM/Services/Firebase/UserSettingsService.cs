@@ -204,11 +204,24 @@ namespace MyTransportAppWASM.Services
                 JsonSerializer.Serialize(settings, AppJsonSerializerContext.Default.UserSettings));
         }
 
-        private void HandleAuthenticationStateChanged(Task<AuthenticationState> _)
+        private void HandleAuthenticationStateChanged(Task<AuthenticationState> task)
         {
-            _cachedSettings = null;
-            _cachedUserId = null;
-            SetSyncError(null);
+            _ = InvalidateCacheAsync();
+        }
+
+        private async Task InvalidateCacheAsync()
+        {
+            await _settingsLock.WaitAsync();
+            try
+            {
+                _cachedSettings = null;
+                _cachedUserId = null;
+                SetSyncError(null);
+            }
+            finally
+            {
+                _settingsLock.Release();
+            }
         }
 
         private void SetSyncError(string? message)

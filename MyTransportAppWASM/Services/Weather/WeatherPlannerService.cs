@@ -88,7 +88,7 @@ namespace MyTransportAppWASM.Services
       {
         var searchText = query.PendingSearchText!.Trim();
         var suggestions = _placeResolutionService != null
-          ? await _placeResolutionService.GetSuggestionsAsync(query.PendingSearchText!)
+          ? await _placeResolutionService.GetSuggestionsAsync(query.PendingSearchText!, cancellationToken)
           : [];
         var exactMatches = suggestions.Where(suggestion =>
           string.Equals(suggestion.Name, searchText, StringComparison.OrdinalIgnoreCase)

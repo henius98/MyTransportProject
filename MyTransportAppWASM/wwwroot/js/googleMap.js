@@ -93,6 +93,12 @@ function removeAdvancedMarker(marker) {
 		currentInfoWindowAnchor = null;
 	}
 	try {
+		if (window.google?.maps?.event?.clearInstanceListeners) {
+			google.maps.event.clearInstanceListeners(marker);
+		}
+	} catch (_) { }
+	try {
+		if (typeof marker.setMap === "function") marker.setMap(null);
 		marker.map = null;
 	} catch (_) { }
 }
@@ -107,7 +113,7 @@ export async function loadGoogleMaps(apiKey) {
 
 	mapsApiPromise = new Promise((resolve, reject) => {
 		const script = document.createElement("script");
-		script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&v=quarterly&libraries=places,marker&loading=async`;
+		script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&v=quarterly&loading=async`;
 		script.async = true;
 		script.defer = true;
 
@@ -186,11 +192,13 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 		// Add gmp-dragend listener to update origin in Blazor
 		addAdvancedMarkerEventListener(userMarker, "gmp-dragend", async () => {
 			const newPos = userMarker.position;
+			const lat = typeof newPos?.lat === "function" ? newPos.lat() : newPos?.lat;
+			const lng = typeof newPos?.lng === "function" ? newPos.lng() : newPos?.lng;
 			try {
-				const address = await reverseGeocode(newPos.lat, newPos.lng);
+				const address = await reverseGeocode(lat, lng);
 				if (dotNetHelper) {
 					await dotNetHelper.invokeMethodAsync("UpdateOrigin", address);
-					await dotNetHelper.invokeMethodAsync("UpdateUserPosition", newPos.lat, newPos.lng);
+					await dotNetHelper.invokeMethodAsync("UpdateUserPosition", lat, lng);
 					
 					// Update the origin autocomplete widget value visually
 					setAutocompleteValue("origin-input", address);
@@ -211,8 +219,8 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 					label: "🚶",
 				});
 				userMarker.addListener("dragend", async (e) => {
-					const newLat = e.latLng.lat();
-					const newLng = e.latLng.lng();
+					const newLat = typeof e?.latLng?.lat === "function" ? e.latLng.lat() : e?.latLng?.lat;
+					const newLng = typeof e?.latLng?.lng === "function" ? e.latLng.lng() : e?.latLng?.lng;
 					try {
 						const address = await reverseGeocode(newLat, newLng);
 						if (dotNetHelper) {
@@ -355,6 +363,15 @@ export function clearRoute() {
 	currentActiveRouteId = -1;
 }
 
+function toLatLngLiteral(pos) {
+	if (!pos) return null;
+	const lat = typeof pos.lat === "function" ? pos.lat() : pos.lat;
+	const lng = typeof pos.lng === "function" ? pos.lng() : pos.lng;
+	const numLat = Number(lat);
+	const numLng = Number(lng);
+	return (Number.isFinite(numLat) && Number.isFinite(numLng)) ? { lat: numLat, lng: numLng } : null;
+}
+
 /**
  * Computes and renders a route using the new Routes library (Route.computeRoutes).
  * Replaces legacy DirectionsService.route() + DirectionsRenderer.setDirections().
@@ -368,11 +385,14 @@ export async function showRoute(origin, destination, travelMode = "TRANSIT") {
 	// Clear any existing route before drawing a new one
 	clearRoute();
 
+	const originLoc = toLatLngLiteral(origin) || origin;
+	const destinationLoc = toLatLngLiteral(destination) || destination;
+
 	const request = {
-		origin,
-		destination,
+		origin: originLoc,
+		destination: destinationLoc,
 		travelMode,
-		fields: ["path"],
+		fields: ["path", "legs"],
 	};
 
 	const { routes } = await Route.computeRoutes(request);
@@ -396,11 +416,14 @@ export async function showRoute(origin, destination, travelMode = "TRANSIT") {
 		const route = routes[0];
 		routeMarkers = [];
 
-		if (route.legs && route.legs.length > 0) {
-			const startPos = route.legs[0].startLocation.latLng;
-			const lastLeg = route.legs[route.legs.length - 1];
-			const endPos = lastLeg.endLocation.latLng;
+		const startPos = (route.legs && route.legs.length > 0)
+			? (route.legs[0].startLocation?.latLng || route.legs[0].startLocation)
+			: originLoc;
+		const endPos = (route.legs && route.legs.length > 0)
+			? (route.legs[route.legs.length - 1].endLocation?.latLng || route.legs[route.legs.length - 1].endLocation)
+			: destinationLoc;
 
+		if (startPos && endPos) {
 			let addedWithAdvanced = false;
 			try {
 				const { PinElement, AdvancedMarkerElement } = await google.maps.importLibrary("marker");
@@ -462,10 +485,17 @@ export async function showRoute(origin, destination, travelMode = "TRANSIT") {
 export async function showRouteByName(originName, destinationName, travelMode = "TRANSIT") {
 	await loadGoogleMaps();
 	try {
-		const [originLoc, destinationLoc] = await Promise.all([
+		const [originRes, destinationRes] = await Promise.all([
 			geocodePlaceName(originName),
 			geocodePlaceName(destinationName)
 		]);
+
+		const originLoc = toLatLngLiteral(originRes);
+		const destinationLoc = toLatLngLiteral(destinationRes);
+
+		if (!originLoc || !destinationLoc) {
+			throw new Error("Unable to resolve origin or destination location.");
+		}
 
 		await showRoute(originLoc, destinationLoc, travelMode);
 	} catch (err) {
@@ -477,10 +507,17 @@ export async function showRouteByName(originName, destinationName, travelMode = 
 export async function getTransitRoutes(originName, destinationName) {
 	await loadGoogleMaps();
 	try {
-		const [originLoc, destinationLoc] = await Promise.all([
+		const [originRes, destinationRes] = await Promise.all([
 			geocodePlaceName(originName),
 			geocodePlaceName(destinationName)
 		]);
+
+		const originLoc = toLatLngLiteral(originRes);
+		const destinationLoc = toLatLngLiteral(destinationRes);
+
+		if (!originLoc || !destinationLoc) {
+			throw new Error("Unable to resolve origin or destination location.");
+		}
 
 		const { Route } = await google.maps.importLibrary("routes");
 		const { GeometryLibrary } = await google.maps.importLibrary("geometry");
@@ -490,7 +527,7 @@ export async function getTransitRoutes(originName, destinationName) {
 			destination: destinationLoc,
 			travelMode: "TRANSIT",
 			computeAlternativeRoutes: true,
-			fields: ["*"],
+			fields: ["path", "durationMillis", "distanceMeters", "legs.steps.transitDetails"],
 		};
 
 		const { routes } = await Route.computeRoutes(request);
@@ -602,15 +639,25 @@ export function setActiveRoute(routeId) {
 }
 
 
-export async function geocodePlaceName(name) {
-	await loadGoogleMaps();
+export async function geocodePlaceName(name, apiKey) {
+	if (!name || typeof name !== "string" || !name.trim()) return null;
+	await loadGoogleMaps(apiKey);
 	const { Geocoder } = await google.maps.importLibrary("geocoding");
 	const geocoder = new Geocoder();
 
 	return new Promise((resolve, reject) => {
 		geocoder.geocode({ address: name }, (results, status) => {
-			if (status === "OK" && results[0]) {
-				resolve(results[0].geometry.location);
+			if (status === "OK" && results && results.length > 0) {
+				const loc = results[0].geometry.location;
+				const lat = typeof loc?.lat === "function" ? loc.lat() : loc?.lat;
+				const lng = typeof loc?.lng === "function" ? loc.lng() : loc?.lng;
+				resolve({
+					lat,
+					lng,
+					formattedAddress: results[0].formatted_address || ""
+				});
+			} else if (status === "ZERO_RESULTS" || (status === "OK" && (!results || results.length === 0))) {
+				resolve(null);
 			} else {
 				reject(new Error("Geocode failed: " + status));
 			}
@@ -618,15 +665,20 @@ export async function geocodePlaceName(name) {
 	});
 }
 
-export async function reverseGeocode(lat, lng) {
-	await loadGoogleMaps();
+export async function reverseGeocode(lat, lng, apiKey) {
+	const numLat = Number(lat);
+	const numLng = Number(lng);
+	if (!Number.isFinite(numLat) || !Number.isFinite(numLng)) return null;
+	await loadGoogleMaps(apiKey);
 	const { Geocoder } = await google.maps.importLibrary("geocoding");
 	const geocoder = new Geocoder();
 
 	return new Promise((resolve, reject) => {
-		geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-			if (status === "OK" && results[0]) {
+		geocoder.geocode({ location: { lat: numLat, lng: numLng } }, (results, status) => {
+			if (status === "OK" && results && results.length > 0) {
 				resolve(results[0].formatted_address);
+			} else if (status === "ZERO_RESULTS" || (status === "OK" && (!results || results.length === 0))) {
+				resolve(null);
 			} else {
 				reject(new Error("Reverse geocode failed: " + status));
 			}

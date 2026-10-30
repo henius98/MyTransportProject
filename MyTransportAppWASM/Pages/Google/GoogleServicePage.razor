@@ -10,30 +10,8 @@
             <p class="google-status" role="status">Checking your Google sign-in…</p>
         </Authorizing>
         <Authorized>
-            @if (!IsTasksDashboard && !IsCalendarDashboard)
-            {
-                <header class="google-heading">
-                    <p class="google-eyebrow">Your Google account</p>
-                    <h1>@Title</h1>
-                    <p class="google-muted">@Description</p>
-                </header>
-
-                <nav class="google-tabs" aria-label="Google services">
-                    <NavLink href="google" Match="NavLinkMatch.All">Overview</NavLink>
-                    <NavLink href="google/calendar">Calendar</NavLink>
-                    <NavLink href="google/tasks">Tasks</NavLink>
-                    <NavLink href="google/notes">Keep notes</NavLink>
-                </nav>
-            }
             @if (context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value is { Length: > 0 } uid)
             {
-                @if (!IsTasksDashboard && !IsCalendarDashboard)
-                {
-                    <div class="google-account-line">
-                        <span class="bi bi-person-circle" aria-hidden="true"></span>
-                        <span>@(context.User.FindFirst(ClaimTypes.Email)?.Value ?? context.User.Identity?.Name)</span>
-                    </div>
-                }
                 @if (string.IsNullOrEmpty(Service))
                 {
                     <div @key="uid">@ChildContent(uid)</div>
@@ -47,26 +25,10 @@
             }
         </Authorized>
         <NotAuthorized>
-            @if (!IsTasksDashboard && !IsCalendarDashboard)
-            {
-                <header class="google-heading">
-                    <p class="google-eyebrow">Your Google account</p>
-                    <h1>@Title</h1>
-                    <p class="google-muted">@Description</p>
-                </header>
-
-                <nav class="google-tabs" aria-label="Google services">
-                    <NavLink href="google" Match="NavLinkMatch.All">Overview</NavLink>
-                    <NavLink href="google/calendar">Calendar</NavLink>
-                    <NavLink href="google/tasks">Tasks</NavLink>
-                    <NavLink href="google/notes">Keep notes</NavLink>
-                </nav>
-            }
-
             <div class="google-panel google-empty">
                 <span class="bi bi-google google-service-icon" aria-hidden="true"></span>
                 <h2>Sign in to use your Google services</h2>
-                <p class="google-muted">View your events, manage your tasks, and find your notes from one place.</p>
+                <p class="google-muted">View your events and manage your tasks from one place.</p>
                 <button type="button" class="btn btn--primary" @onclick="SignIn">Sign in with Google</button>
             </div>
         </NotAuthorized>
@@ -75,7 +37,6 @@
 
 @code {
     [Parameter, EditorRequired] public string Title { get; set; } = "";
-    [Parameter] public string Description { get; set; } = "";
     [Parameter] public string? Service { get; set; }
     [Parameter, EditorRequired] public RenderFragment<string> ChildContent { get; set; } = default!;
 

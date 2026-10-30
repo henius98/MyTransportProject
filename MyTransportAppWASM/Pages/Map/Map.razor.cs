@@ -272,24 +272,9 @@ public partial class Map : IAsyncDisposable
     }
   }
 
-  private async Task<string?> ResolveAddressAsync(double lat, double lng)
+  private Task<string?> ResolveAddressAsync(double lat, double lng)
   {
-    string? resolved = null;
-    if (mapModule != null)
-    {
-      try
-      {
-        resolved = await mapModule.InvokeAsync<string>("reverseGeocode", lat, lng);
-      }
-      catch (JSException)
-      {
-      }
-    }
-    if (string.IsNullOrEmpty(resolved))
-    {
-      resolved = await PlaceResolution.ReverseGeocodeAsync(lat, lng);
-    }
-    return resolved;
+    return PlaceResolution.ReverseGeocodeAsync(lat, lng);
   }
 
   private async Task UpdateOriginFromLocation(double lat, double lng)
@@ -559,7 +544,14 @@ public partial class Map : IAsyncDisposable
 
     // Cancel the polling loop and any in-flight HTTP calls
     await _cts.CancelAsync();
-    await Task.WhenAll(_autocompleteTask, _pollingTask);
+    try
+    {
+      await Task.WhenAll(_autocompleteTask, _pollingTask);
+    }
+    catch (Exception)
+    {
+      // Normal during disposal or cancellation
+    }
     _cts.Dispose();
     _refreshGate.Dispose();
 

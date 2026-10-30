@@ -7,7 +7,7 @@ async function getFirestoreContext() {
     if (!firestoreContextPromise) {
         const pending = Promise.all([
             getFirebaseApp(),
-            import(`${firebaseSdkBase}/firebase-firestore.js`)
+            import(`${firebaseSdkBase}/firebase-firestore-lite.js`)
         ]).then(([app, sdk]) => ({ db: sdk.getFirestore(app), sdk }));
         firestoreContextPromise = pending;
         void pending.catch(() => {

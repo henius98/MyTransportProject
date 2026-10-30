@@ -1,6 +1,6 @@
 using System.Globalization;
-using System.Net.Http.Json;
 using Microsoft.Extensions.Configuration;
+using Microsoft.JSInterop;
 using MyTransportAppWASM.Models;
 using MyTransportAppWASM.Services.Interfaces;
 
@@ -8,66 +8,86 @@ namespace MyTransportAppWASM.Services
 {
   /// <summary>
   /// Unified place resolution service: resolves coordinate inputs,
-  /// searches the weather station catalog, and queries Google Places (New) / Geocoding APIs.
+  /// searches the weather station catalog, and queries Google Geocoding via JS.
   /// </summary>
-  public sealed class PlaceResolutionService : IPlaceResolutionService
+  public sealed class PlaceResolutionService : IPlaceResolutionService, IAsyncDisposable
   {
-    private readonly HttpClient _httpClient;
     private readonly IWeatherStationCatalogService _stationCatalog;
+    private readonly IJSRuntime? _jsRuntime;
     private readonly string _apiKey;
+    private readonly object _lock = new();
+    private Task<IJSObjectReference>? _moduleTask;
+    private bool _disposed;
 
     public PlaceResolutionService(
-      HttpClient httpClient,
       IConfiguration configuration,
       IWeatherStationCatalogService stationCatalog)
+      : this(configuration, stationCatalog, null)
     {
-      _httpClient = httpClient;
+    }
+
+    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
+    public PlaceResolutionService(
+      IConfiguration configuration,
+      IWeatherStationCatalogService stationCatalog,
+      IJSRuntime? jsRuntime)
+    {
       _stationCatalog = stationCatalog;
       _apiKey = configuration["GoogleMaps:ApiKey"] ?? string.Empty;
+      _jsRuntime = jsRuntime;
+    }
+
+    private async ValueTask<IJSObjectReference?> GetMapModuleAsync(CancellationToken cancellationToken = default)
+    {
+      if (_disposed || _jsRuntime == null)
+        return null;
+
+      Task<IJSObjectReference> moduleTask;
+      lock (_lock)
+      {
+        if (_disposed) return null;
+        if (_moduleTask == null || _moduleTask.IsFaulted || _moduleTask.IsCanceled)
+        {
+          _moduleTask = _jsRuntime.InvokeAsync<IJSObjectReference>("import", cancellationToken: CancellationToken.None, ["./js/googleMap.js"]).AsTask();
+        }
+        moduleTask = _moduleTask;
+      }
+
+      return await moduleTask.WaitAsync(cancellationToken);
     }
 
     public async Task<(double Lat, double Lng, string FormattedAddress)?> GeocodeAsync(string address, CancellationToken cancellationToken = default)
     {
+      cancellationToken.ThrowIfCancellationRequested();
+
       if (string.IsNullOrWhiteSpace(address) || string.IsNullOrWhiteSpace(_apiKey))
         return null;
 
-      // Using the Places API (New) Text Search endpoint
-      const string url = "https://places.googleapis.com/v1/places:searchText";
-
-      try
+      // Geocode address via Google Maps JavaScript Geocoder to avoid browser CORS restrictions
+      if (_jsRuntime != null)
       {
-        var requestBody = new GeocodingRequest { TextQuery = address };
-
-        using var request = new HttpRequestMessage(HttpMethod.Post, url);
-        request.Headers.Add("X-Goog-Api-Key", _apiKey);
-        // Field mask is required for Places API (New)
-        request.Headers.Add("X-Goog-FieldMask", "places.formattedAddress,places.location,places.displayName");
-
-        request.Content = JsonContent.Create(requestBody, AppJsonSerializerContext.Default.GeocodingRequest);
-
-        using var response = await _httpClient.SendAsync(request, cancellationToken);
-        if (response.IsSuccessStatusCode)
+        try
         {
-          var data = await response.Content.ReadFromJsonAsync(AppJsonSerializerContext.Default.PlacesNewResponse, cancellationToken);
-          if (data?.Places?.Length > 0)
+          var module = await GetMapModuleAsync(cancellationToken);
+          if (module != null)
           {
-            var place = data.Places[0];
-            return (place.Location.Latitude, place.Location.Longitude, place.FormattedAddress);
+            var place = await module.InvokeAsync<GeocodeResult?>("geocodePlaceName", cancellationToken, address, _apiKey);
+            if (place != null &&
+                double.IsFinite(place.Lat) && double.IsFinite(place.Lng) &&
+                place.Lat is >= -90 and <= 90 && place.Lng is >= -180 and <= 180)
+            {
+              return (place.Lat, place.Lng, place.FormattedAddress ?? string.Empty);
+            }
           }
         }
-        else
+        catch (OperationCanceledException)
         {
-          string errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-          Console.Error.WriteLine($"Places API (New) error: {response.StatusCode} - {errorContent}");
+          throw;
         }
-      }
-      catch (OperationCanceledException)
-      {
-        throw;
-      }
-      catch (Exception ex)
-      {
-        Console.Error.WriteLine($"Geocoding via Places (New) failed: {ex.Message}");
+        catch (Exception ex)
+        {
+          Console.Error.WriteLine($"Geocoding via JS failed: {ex.Message}");
+        }
       }
 
       return null;
@@ -112,7 +132,7 @@ namespace MyTransportAppWASM.Services
         Console.Error.WriteLine($"Failed to query weather stations for suggestions: {ex.Message}");
       }
 
-      // If no static station matched and API key is present, resolve real place via Google Places
+      // If no static station matched and API key is present, resolve real place via Google Geocoding
       if (!string.IsNullOrWhiteSpace(_apiKey))
       {
         var place = await GeocodeAsync(address, cancellationToken);
@@ -127,6 +147,8 @@ namespace MyTransportAppWASM.Services
 
     public async Task<string?> ReverseGeocodeAsync(double lat, double lng, CancellationToken cancellationToken = default)
     {
+      cancellationToken.ThrowIfCancellationRequested();
+
       if (string.IsNullOrWhiteSpace(_apiKey) ||
           !double.IsFinite(lat) || !double.IsFinite(lng) ||
           lat is < -90 or > 90 || lng is < -180 or > 180)
@@ -134,56 +156,52 @@ namespace MyTransportAppWASM.Services
         return null;
       }
 
-      string url = FormattableString.Invariant($"https://maps.googleapis.com/maps/api/geocode/json?latlng={lat},{lng}&key={Uri.EscapeDataString(_apiKey)}");
-
-      try
+      if (_jsRuntime != null)
       {
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Add("X-Goog-Api-Key", _apiKey);
-
-        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        if (response.IsSuccessStatusCode)
+        try
         {
-          await using var jsonStream = await response.Content.ReadAsStreamAsync(cancellationToken);
-          using var document = await System.Text.Json.JsonDocument.ParseAsync(jsonStream, cancellationToken: cancellationToken);
-          var root = document.RootElement;
-
-          if (root.TryGetProperty("status", out var status))
+          var module = await GetMapModuleAsync(cancellationToken);
+          if (module != null)
           {
-            var statusValue = status.GetString();
-            if (statusValue == "OK")
-            {
-              if (root.TryGetProperty("results", out var results) && results.GetArrayLength() > 0)
-              {
-                var firstResult = results[0];
-                if (firstResult.TryGetProperty("formatted_address", out var formattedAddress))
-                {
-                  return formattedAddress.GetString();
-                }
-              }
-            }
-            else if (statusValue != "ZERO_RESULTS")
-            {
-              Console.Error.WriteLine($"Geocoding API status: {statusValue}");
-            }
+            return await module.InvokeAsync<string?>("reverseGeocode", cancellationToken, lat, lng, _apiKey);
           }
         }
-        else
+        catch (OperationCanceledException)
         {
-          string errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-          Console.Error.WriteLine($"Geocoding API error: {response.StatusCode} - {errorContent}");
+          throw;
         }
-      }
-      catch (OperationCanceledException)
-      {
-        throw;
-      }
-      catch (Exception ex)
-      {
-        Console.Error.WriteLine($"Reverse Geocoding failed: {ex.Message}");
+        catch (Exception ex)
+        {
+          Console.Error.WriteLine($"Reverse Geocoding via JS failed: {ex.Message}");
+        }
       }
 
       return null;
     }
+
+    public async ValueTask DisposeAsync()
+    {
+      Task<IJSObjectReference>? moduleTask;
+      lock (_lock)
+      {
+        if (_disposed) return;
+        _disposed = true;
+        moduleTask = _moduleTask;
+        _moduleTask = null;
+      }
+
+      if (moduleTask != null)
+      {
+        try
+        {
+          var module = await moduleTask;
+          await module.DisposeAsync();
+        }
+        catch (Exception)
+        {
+        }
+      }
+    }
   }
 }
+

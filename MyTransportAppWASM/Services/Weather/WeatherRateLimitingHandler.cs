@@ -21,6 +21,12 @@ namespace MyTransportAppWASM.Services.Handlers
                 ref var nextRequest = ref CollectionsMarshal.GetValueRefOrAddDefault(_nextRequestByHost, host, out _);
                 var scheduledRequest = Math.Max(now, nextRequest);
                 delay = Stopwatch.GetElapsedTime(now, scheduledRequest);
+
+                if (delay > TimeSpan.FromSeconds(10))
+                {
+                    throw new TimeoutException($"Weather request to '{host}' exceeded the maximum queue wait time.");
+                }
+
                 nextRequest = scheduledRequest + RequestIntervalTicks;
             }
             finally

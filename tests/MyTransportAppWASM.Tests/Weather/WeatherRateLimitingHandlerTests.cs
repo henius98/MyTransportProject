@@ -130,5 +130,33 @@ namespace MyTransportAppWASM.Tests
             Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
             Assert.True(watch.ElapsedMilliseconds >= 400, $"Elapsed across instances was {watch.ElapsedMilliseconds}ms, expected >= 400ms");
         }
+
+        [Fact]
+        public async Task SendAsync_ThrowsTimeoutException_WhenQueueIsSaturated()
+        {
+            var handler = new WeatherRateLimitingHandler
+            {
+                InnerHandler = new Mock<HttpMessageHandler>().Object
+            };
+
+            var mock = Mock.Get(handler.InnerHandler);
+            mock.Protected()
+                .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+                .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
+
+            var client = new HttpClient(handler);
+
+            // Queue requests to simulate saturation exceeding 10 seconds (each adds 500ms)
+            // 21 requests * 500ms = 10.5s delay for the 22nd request
+            Task? lastTask = null;
+            for (int i = 0; i < 21; i++)
+            {
+                lastTask = client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://api.saturated-host.test/data"));
+            }
+
+            // 22nd request exceeds the 10-second queue threshold and should immediately throw TimeoutException
+            await Assert.ThrowsAsync<TimeoutException>(() =>
+                client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://api.saturated-host.test/data")));
+        }
     }
 }

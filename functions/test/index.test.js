@@ -14,4 +14,8 @@ test("exported functions are defined and configured with v2 global options", () 
   assert.equal(googleConnection.__endpoint?.maxInstances, 10);
   assert.equal(pushRegistration.__endpoint?.maxInstances, 10);
   assert.equal(pushWebhook.__endpoint?.maxInstances, 10);
+
+  assert.deepEqual(googleConnection.__endpoint?.region, ["asia-southeast1"]);
+  assert.deepEqual(pushRegistration.__endpoint?.region, ["asia-southeast1"]);
+  assert.deepEqual(pushWebhook.__endpoint?.region, ["asia-southeast1"]);
 });

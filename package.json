@@ -8,6 +8,8 @@
     "test:node": "node --experimental-vm-modules --test tests/firebase/config/*.test.mjs && node --test tests/firebase/push/*.test.mjs && node --test tests/service-worker/*.test.mjs && node --experimental-vm-modules --test tests/google-services/*.test.mjs",
     "test": "dotnet test MyTransportApp.slnx && node --experimental-vm-modules --test tests/firebase/config/*.test.mjs && node --test tests/firebase/push/*.test.mjs && node --test tests/service-worker/*.test.mjs && node --experimental-vm-modules --test tests/google-services/*.test.mjs",
     "smoke": "bash scripts/smoke-test.sh",
-    "test:smoke": "bash scripts/smoke-test.sh"
+    "test:smoke": "bash scripts/smoke-test.sh",
+    "test:browser": "bash scripts/smoke-test.sh",
+    "with-server": "bash scripts/run-with-server.sh"
   }
 }

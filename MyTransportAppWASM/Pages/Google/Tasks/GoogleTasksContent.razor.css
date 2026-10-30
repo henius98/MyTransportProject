@@ -57,8 +57,6 @@
     font-size: 1rem;
 }
 .tasks-icon-button:hover { background: var(--tasks-hover); color: var(--tasks-text); }
-.tasks-back-link { margin-left: .7rem; color: var(--tasks-accent); font-size: .88rem; text-decoration: none; }
-.tasks-back-link:hover { text-decoration: underline; }
 
 .tasks-layout { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: calc(100vh - 11rem); }
 .tasks-sidebar { min-width: 0; overflow: hidden; padding: 1.4rem .75rem; border-right: 1px solid var(--tasks-border); }
@@ -210,7 +208,6 @@
 
 @media (max-width: 480px) {
     .tasks-topbar { padding: .5rem 1rem; }
-    .tasks-back-link { display: none; }
     .tasks-board { display: grid; overflow: visible; }
     .tasks-list-card { width: 100%; min-height: 280px; }
 }

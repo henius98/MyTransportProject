@@ -5,7 +5,7 @@ let contextPromise;
 
 async function context(uid) {
     if (!contextPromise) {
-        const pending = Promise.all([getFirebaseApp(), import(`${firebaseSdkBase}/firebase-firestore.js`)])
+        const pending = Promise.all([getFirebaseApp(), import(`${firebaseSdkBase}/firebase-firestore-lite.js`)])
             .then(([app, sdk]) => ({ db: sdk.getFirestore(app), sdk }));
         contextPromise = pending;
         void pending.catch(() => { if (contextPromise === pending) contextPromise = null; });

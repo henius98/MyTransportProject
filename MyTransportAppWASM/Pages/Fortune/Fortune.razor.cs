@@ -129,6 +129,7 @@ namespace MyTransportAppWASM.Pages.Fortune
         {
             _disposed = true;
             _cts.Cancel();
+            _cts.Dispose();
         }
 
         public class SetupModel

@@ -121,6 +121,41 @@ public class WeatherLocationInputTests
         Assert.Equal("Ds001", plan.Query.LocationId);
     }
 
+    [Fact]
+    public async Task GetPlanAsync_ForwardsCancellationToken_ToPlaceResolutionSuggestions()
+    {
+        var (placeResolution, stationCatalog) = CreateMocks();
+        using var cts = new CancellationTokenSource();
+        placeResolution.Setup(service => service.GetSuggestionsAsync("Kuala Lumpur", cts.Token))
+            .ReturnsAsync([(3.139, 101.6869, "MET ID: Ds002", "Kuala Lumpur")]);
+
+        var planner = CreatePlanner(placeResolution.Object, stationCatalog.Object);
+        var query = await CreateInitializedQueryAsync(planner);
+        query.PendingSearchText = "Kuala Lumpur";
+
+        var plan = await planner.GetPlanAsync(query, cts.Token);
+
+        Assert.True(plan.IsValid);
+        placeResolution.Verify(
+            service => service.GetSuggestionsAsync("Kuala Lumpur", cts.Token),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task GetPlanAsync_WhenCancelledDuringSuggestions_ThrowsOperationCanceledException()
+    {
+        var (placeResolution, stationCatalog) = CreateMocks();
+        using var cts = new CancellationTokenSource();
+        placeResolution.Setup(service => service.GetSuggestionsAsync("Kuala Lumpur", cts.Token))
+            .ThrowsAsync(new OperationCanceledException(cts.Token));
+
+        var planner = CreatePlanner(placeResolution.Object, stationCatalog.Object);
+        var query = await CreateInitializedQueryAsync(planner);
+        query.PendingSearchText = "Kuala Lumpur";
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => planner.GetPlanAsync(query, cts.Token));
+    }
+
     private static (Mock<IPlaceResolutionService> PlaceResolution, Mock<IWeatherStationCatalogService> StationCatalog) CreateMocks()
     {
         var placeResolution = new Mock<IPlaceResolutionService>();

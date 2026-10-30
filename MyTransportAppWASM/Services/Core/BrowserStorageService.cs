@@ -27,6 +27,11 @@ public sealed class BrowserStorageService(IJSRuntime jsRuntime) : IBrowserStorag
       // while also supporting raw strings written by theme-manager.js.
       if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
       {
+        if (!value.Contains('\\'))
+        {
+          return value[1..^1];
+        }
+
         try
         {
           using var document = JsonDocument.Parse(value);

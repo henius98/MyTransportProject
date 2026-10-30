@@ -30,7 +30,10 @@ const firestore = new SyntheticModule(Object.keys(sdk), function () {
 }, { context });
 await firestore.link(() => {});
 await firestore.evaluate();
-const module = new SourceTextModule(source, { context, importModuleDynamically: async () => firestore });
+const module = new SourceTextModule(source, { context, importModuleDynamically: async specifier => {
+    assert.equal(specifier, "unused/firebase-firestore-lite.js");
+    return firestore;
+} });
 await module.link(specifier => new SyntheticModule(
     specifier === "./firebase-config.js" ? ["getFirebaseApp", "firebaseSdkBase"] : ["requireSignedInUser"],
     function () {

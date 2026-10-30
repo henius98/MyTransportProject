@@ -15,9 +15,11 @@ self.addEventListener("notificationclick", event => {
   })());
 });
 
-const config = JSON.parse(new URL(self.location.href).searchParams.get("config"));
-importScripts("https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js");
-importScripts("https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js");
+const params = new URL(self.location.href).searchParams;
+const config = JSON.parse(params.get("config"));
+const sdkBase = params.get("sdkBase") || "https://www.gstatic.com/firebasejs/10.14.1";
+importScripts(`${sdkBase}/firebase-app-compat.js`);
+importScripts(`${sdkBase}/firebase-messaging-compat.js`);
 firebase.initializeApp(config);
 
 firebase.messaging().onBackgroundMessage(payload => {
