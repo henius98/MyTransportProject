@@ -616,5 +616,6 @@ MalaysiaTime.LocalDateTime(time) : DateTime.MinValue;
   {
     disposed = true;
     _cts.Cancel();
+    _cts.Dispose();
   }
 }

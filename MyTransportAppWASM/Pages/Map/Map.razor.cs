@@ -143,6 +143,7 @@ public partial class Map : IAsyncDisposable
 
   protected override Task OnInitializedAsync()
   {
+    _mapAuthFailed = false;
     Latitude = Config.GetValue<double?>("DefaultLocation:Latitude")
         ?? throw new InvalidOperationException("Missing configuration: DefaultLocation:Latitude");
     Longitude = Config.GetValue<double?>("DefaultLocation:Longitude")
@@ -237,6 +238,7 @@ public partial class Map : IAsyncDisposable
 
     try
     {
+      _mapAuthFailed = false;
       var apiKey = Config["GoogleMaps:ApiKey"];
       var initialLat = LocationService.LastKnownLocation?.Latitude ?? Latitude;
       var initialLng = LocationService.LastKnownLocation?.Longitude ?? Longitude;
@@ -386,7 +388,7 @@ public partial class Map : IAsyncDisposable
   private async Task RefreshBusPosition(bool force)
   {
     var pos = LocationService.LastKnownLocation;
-    if (mapModule == null || _isDisposed || pos == null) return;
+    if (mapModule == null || _isDisposed || pos == null || _mapAuthFailed) return;
     try
     {
       if (!await _refreshGate.WaitAsync(0)) return;
@@ -399,7 +401,7 @@ public partial class Map : IAsyncDisposable
     try
     {
       var result = await TransitTracking.RefreshVehiclesAsync(pos.Latitude, pos.Longitude, force, _cts.Token);
-      if (_isDisposed || mapModule == null) return;
+      if (_isDisposed || mapModule == null || _mapAuthFailed) return;
 
       await mapModule.InvokeVoidAsync("syncMarkers", result.Vehicles);
 

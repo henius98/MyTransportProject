@@ -3,6 +3,7 @@ let map, userMarker, infoWindow;
 let currentInfoWindowAnchor = null;
 let activeDotNetHelper = null;
 let storedApiKey = null;
+let mapAuthFailed = false;
 const activeMarkers = Object.create(null);
 const autocompletes = Object.create(null);
 const advancedMarkerEventHandlers = new WeakMap();
@@ -10,6 +11,7 @@ let displayTimeZone = null;
 
 // Global auth failure handler for Google Maps JS API
 window.gm_authFailure = function () {
+	mapAuthFailed = true;
 	console.warn("Google Maps authentication failed (gm_authFailure triggered).");
 	if (activeDotNetHelper) {
 		activeDotNetHelper.invokeMethodAsync("OnMapAuthError", "Google Maps authorization failed: please verify your API key and allowed referers.")
@@ -144,6 +146,7 @@ export async function loadGoogleMaps(apiKey) {
 }
 
 export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dotNetHelper, theme = 'DARK', timeZone) {
+	mapAuthFailed = false;
 	activeDotNetHelper = dotNetHelper;
 	await loadGoogleMaps(apiKey);
 	if (!timeZone) throw new Error("Display time zone not provided.");
@@ -698,7 +701,7 @@ function updateTransportMarkerElement(element, location) {
 }
 
 export async function syncMarkers(locations) {
-	if (!map || !infoWindow) return;
+	if (!map || !infoWindow || mapAuthFailed) return;
 	
 	// Safety check for Blazor interop
 	if (!locations || !Array.isArray(locations)) {
@@ -726,20 +729,24 @@ export async function syncMarkers(locations) {
 			
 			if (activeMarkers[markerKey]) {
 				const marker = activeMarkers[markerKey];
-				if (typeof marker.setPosition === "function") {
-					marker.setPosition({ lat: loc.lat, lng: loc.lng });
-					if (typeof marker.setTitle === "function") marker.setTitle(title);
-				} else {
-					const previous = marker.busData;
-					if (!previous || previous.lat !== loc.lat || previous.lng !== loc.lng) {
-						marker.position = { lat: loc.lat, lng: loc.lng };
+				try {
+					if (typeof marker.setPosition === "function") {
+						marker.setPosition({ lat: loc.lat, lng: loc.lng });
+						if (typeof marker.setTitle === "function") marker.setTitle(title);
+					} else {
+						const previous = marker.busData;
+						if (!previous || previous.lat !== loc.lat || previous.lng !== loc.lng) {
+							marker.position = { lat: loc.lat, lng: loc.lng };
+						}
+						marker.title = title;
+						if (marker.content) {
+							updateTransportMarkerElement(marker.content, loc);
+						}
 					}
-					marker.title = title;
-					if (marker.content) {
-						updateTransportMarkerElement(marker.content, loc);
-					}
+					marker.busData = loc;
+				} catch (updateErr) {
+					console.warn("syncMarkers: failed to update marker position:", markerKey, updateErr);
 				}
-				marker.busData = loc;
 			} else {
 				const pos = { lat: loc.lat, lng: loc.lng };
 				let marker = null;
