@@ -10,6 +10,7 @@
   --card-border: rgba(255, 255, 255, 0.04);
   --border-color: rgba(255, 255, 255, 0.08);
   --sidebar-bg: rgba(11, 12, 16, 0.85);
+  --infowindow-bg: rgba(18, 20, 26, 0.82);
   
   /* Primary Vibrant Colors */
   --primary-blue: #38bdf8;
@@ -44,6 +45,7 @@
   --card-bg: rgba(255, 255, 255, 0.7);
   --card-border: rgba(255, 255, 255, 0.8);
   --border-color: rgba(15, 23, 42, 0.08);
+  --infowindow-bg: rgba(255, 255, 255, 0.85);
   
   --primary-blue: #0284c7;
   --primary-blue-rgb: 2, 132, 199;

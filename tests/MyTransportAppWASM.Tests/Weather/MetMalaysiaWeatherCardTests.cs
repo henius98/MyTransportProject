@@ -7,10 +7,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using MyTransportAppWASM.Models;
-using MyTransportAppWASM.Pages.Weather.Components;
-using MyTransportAppWASM.Services;
-using MyTransportAppWASM.Utils;
 
 namespace MyTransportAppWASM.Tests;
 

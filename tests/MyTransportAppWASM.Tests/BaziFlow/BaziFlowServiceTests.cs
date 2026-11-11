@@ -1,8 +1,6 @@
 using System.Net;
 using System.Text;
 using Moq;
-using MyTransportAppWASM.Services;
-using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM.Tests
 {
@@ -74,7 +72,7 @@ namespace MyTransportAppWASM.Tests
 
             Assert.False(await service.HasApiKeyAsync());
             Assert.Null(await service.GetProfileAsync());
-            Assert.False(await service.CreateProfileAsync(new MyTransportAppWASM.Models.BaziFlow.CreateProfileRequest()));
+            Assert.False(await service.CreateProfileAsync(new CreateProfileRequest()));
             Assert.Null(await service.GetDateFortuneAsync("2026-10-12"));
         }
 

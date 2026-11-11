@@ -1,5 +1,4 @@
 using Microsoft.JSInterop;
-using MyTransportAppWASM.Services;
 
 namespace MyTransportAppWASM.Tests;
 

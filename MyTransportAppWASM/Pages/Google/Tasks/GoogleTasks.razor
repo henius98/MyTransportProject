@@ -1,8 +1,0 @@
-@page "/google/tasks"
-@namespace MyTransportAppWASM.Pages.Google
-
-<GoogleServicePage Title="Google Tasks" Service="tasks">
-    <ChildContent Context="uid">
-        <GoogleTasksContent @key="uid" UserId="@uid" />
-    </ChildContent>
-</GoogleServicePage>

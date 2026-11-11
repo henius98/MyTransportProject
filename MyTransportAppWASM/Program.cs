@@ -1,8 +1,6 @@
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using Microsoft.AspNetCore.Components.Authorization;
-using MyTransportAppWASM.Services.Interfaces;
-using MyTransportAppWASM.Services.Handlers;
 
 namespace MyTransportAppWASM
 {

@@ -1,0 +1,8 @@
+@page "/google/calendar"
+@namespace MyTransportAppWASM.Features.Google.Calendar
+
+<GoogleServicePage Title="Google Calendar" Service="calendar">
+    <ChildContent Context="uid">
+        <GoogleCalendarContent @key="uid" UserId="@uid" />
+    </ChildContent>
+</GoogleServicePage>

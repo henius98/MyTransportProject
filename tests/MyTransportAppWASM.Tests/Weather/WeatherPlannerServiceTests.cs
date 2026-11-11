@@ -3,8 +3,6 @@ using System.Text;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Internal;
 using Microsoft.Extensions.Options;
-using MyTransportAppWASM.Models;
-using MyTransportAppWASM.Services;
 
 namespace MyTransportAppWASM.Tests;
 
@@ -73,7 +71,7 @@ public class WeatherPlannerServiceTests
         {
             Latitude = 3.139,
             Longitude = 101.6869,
-            Return = isOutlook ? Utils.MalaysiaTime.At(Utils.MalaysiaTime.Today.AddDays(1)) : null
+            Return = isOutlook ? MalaysiaTime.At(MalaysiaTime.Today.AddDays(1)) : null
         };
 
         var plan = await service.GetPlanAsync(query);
@@ -93,7 +91,7 @@ public class WeatherPlannerServiceTests
         {
             Latitude = 3.139,
             Longitude = 101.6869,
-            Return = Utils.MalaysiaTime.At(Utils.MalaysiaTime.Today.AddDays(1))
+            Return = MalaysiaTime.At(MalaysiaTime.Today.AddDays(1))
         };
 
         await service.GetPlanAsync(realtimeOnlyQuery);
@@ -110,7 +108,7 @@ public class WeatherPlannerServiceTests
     [Fact]
     public async Task GetPlanAsync_PreservesMetMalaysiaDayPartLabels()
     {
-        var today = Utils.MalaysiaTime.Today.ToString("yyyy-MM-dd");
+        var today = MalaysiaTime.Today.ToString("yyyy-MM-dd");
         var metJson = $$"""
             [
               {
@@ -140,7 +138,7 @@ public class WeatherPlannerServiceTests
             Latitude = 3.139,
             Longitude = 101.6869,
             LocationId = "Ds001",
-            Return = Utils.MalaysiaTime.At(Utils.MalaysiaTime.Today.AddDays(1))
+            Return = MalaysiaTime.At(MalaysiaTime.Today.AddDays(1))
         };
 
         var plan = await service.GetPlanAsync(query);
@@ -223,8 +221,8 @@ public class WeatherPlannerServiceTests
             Latitude = 3.139,
             Longitude = 101.6869,
             LocationId = "Ds001",
-            Departure = Utils.MalaysiaTime.At(Utils.MalaysiaTime.Today),
-            Return = Utils.MalaysiaTime.At(Utils.MalaysiaTime.Today.AddDays(3))
+            Departure = MalaysiaTime.At(MalaysiaTime.Today),
+            Return = MalaysiaTime.At(MalaysiaTime.Today.AddDays(3))
         };
 
         var plan = await service.GetPlanAsync(query);
@@ -252,13 +250,13 @@ public class WeatherPlannerServiceTests
         {
             Latitude = 1.3521,
             Longitude = 103.8198,
-            Return = Utils.MalaysiaTime.At(Utils.MalaysiaTime.Today.AddDays(1))
+            Return = MalaysiaTime.At(MalaysiaTime.Today.AddDays(1))
         };
         var klQuery = new WeatherQuery
         {
             Latitude = 3.139,
             Longitude = 101.6869,
-            Return = Utils.MalaysiaTime.At(Utils.MalaysiaTime.Today.AddDays(1))
+            Return = MalaysiaTime.At(MalaysiaTime.Today.AddDays(1))
         };
 
         var singaporePlan = await service.GetPlanAsync(singaporeQuery);
@@ -299,7 +297,7 @@ public class WeatherPlannerServiceTests
         Assert.Equal(2, slices.Count);
         Assert.Equal(28.0, slices[0].TemperatureC);
         Assert.Equal(31.5, slices[1].TemperatureC);
-        Assert.All(slices, s => Assert.Equal(targetDate.Date, Utils.MalaysiaTime.Convert(s.Time).Date));
+        Assert.All(slices, s => Assert.Equal(targetDate.Date, MalaysiaTime.Convert(s.Time).Date));
     }
 
     [Fact]

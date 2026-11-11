@@ -2,7 +2,6 @@ using System.Net;
 using Moq;
 using Moq.Protected;
 using Xunit;
-using MyTransportAppWASM.Services.Handlers;
 
 namespace MyTransportAppWASM.Tests
 {

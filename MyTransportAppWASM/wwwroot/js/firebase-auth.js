@@ -3,6 +3,7 @@ import { clearConnections } from "./google-token-store.js";
 
 let unsubscribeAuthStateChanged = null;
 let authContextPromise = null;
+let resolvedAuthContext = null;
 let oneTapStarted = false;
 let oneTapCancelled = false;
 let googleIdentity = null;
@@ -77,6 +78,10 @@ async function initializeOneTap(clientId) {
 }
 
 export async function getAuthContext() {
+  if (resolvedAuthContext) {
+    return resolvedAuthContext;
+  }
+
   if (!authContextPromise) {
     const pending = Promise.all([
       getFirebaseApp(),
@@ -94,11 +99,14 @@ export async function getAuthContext() {
       });
       const provider = new sdk.GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
-      return { auth, provider, sdk };
+      const context = { auth, provider, sdk };
+      resolvedAuthContext = context;
+      return context;
     });
     authContextPromise = pending;
     void pending.catch(() => {
       if (authContextPromise === pending) authContextPromise = null;
+      resolvedAuthContext = null;
     });
   }
 
@@ -126,15 +134,84 @@ export async function requireSignedInUser(uid) {
 window.firebaseAuthInterop = {
   initializeOneTap,
   cancelOneTap,
-  signInWithGoogle: async function () {
+  signInWithGoogle: async function (explicitClientId) {
     try {
       cancelOneTap();
-      const { auth, provider, sdk } = await getAuthContext();
+      const { auth, provider, sdk } =
+        resolvedAuthContext || (await getAuthContext());
+      const app = await getFirebaseApp();
+      const clientId =
+        explicitClientId?.trim() ||
+        app.options?.googleClientId?.trim();
+
+      if (clientId) {
+        try {
+          const identity = await loadGoogleIdentity();
+          if (identity?.oauth2?.initTokenClient) {
+            const user = await new Promise((resolve, reject) => {
+              const tokenClient = identity.oauth2.initTokenClient({
+                client_id: clientId,
+                scope: "email profile openid",
+                callback: async (tokenResponse) => {
+                  if (tokenResponse.error) {
+                    const error = new Error(
+                      tokenResponse.error_description || tokenResponse.error,
+                    );
+                    error.code =
+                      tokenResponse.error === "access_denied"
+                        ? "auth/popup-closed-by-user"
+                        : tokenResponse.error;
+                    reject(error);
+                    return;
+                  }
+                  try {
+                    const credential = sdk.GoogleAuthProvider.credential(
+                      null,
+                      tokenResponse.access_token,
+                    );
+                    const result = await sdk.signInWithCredential(
+                      auth,
+                      credential,
+                    );
+                    resolve(result.user);
+                  } catch (err) {
+                    reject(err);
+                  }
+                },
+                error_callback: (err) => {
+                  const error = new Error(
+                    err.message || "Google sign-in was cancelled.",
+                  );
+                  error.code =
+                    err.type === "popup_failed_to_open"
+                      ? "auth/popup-blocked"
+                      : "auth/popup-closed-by-user";
+                  reject(error);
+                },
+              });
+              tokenClient.requestAccessToken({ prompt: "select_account" });
+            });
+            // Result includes credential and user info; only send the profile to Blazor.
+            return userProfile(user);
+          }
+        } catch (gisError) {
+          if (
+            gisError?.code === "auth/popup-closed-by-user" ||
+            gisError?.code === "auth/popup-blocked"
+          ) {
+            throw gisError;
+          }
+          console.warn("Google Identity Services unavailable; falling back to popup.", gisError);
+        }
+      }
+
       const result = await sdk.signInWithPopup(auth, provider);
       // Result includes credential and user info; only send the profile to Blazor.
       return userProfile(result.user);
     } catch (error) {
-      console.error("Firebase Auth Error:", error);
+      if (error?.code !== "auth/popup-closed-by-user") {
+        console.error("Firebase Auth Error:", error);
+      }
       throw error;
     }
   },

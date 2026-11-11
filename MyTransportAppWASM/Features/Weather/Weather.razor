@@ -1,0 +1,411 @@
+@page "/weather"
+@inject IPlaceResolutionService PlaceResolutionService
+@inject ILocationService LocationService
+@inject IWeatherPlannerService WeatherPlannerService
+@inject IConfiguration Config
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>Trip Weather Planner</PageTitle>
+
+<div class="d-flex align-items-center flex-wrap gap-3 mb-4">
+  <div class="d-flex align-items-center">
+    <h1 class="section-title mb-0">Trip Weather Planner</h1>
+    <button class="btn btn-link p-0 ms-3" @onclick="ShowHelpDialog" aria-label="How this works" title="How this works"
+            style="opacity: 0.8; transition: opacity 0.2s;">
+      <i class="bi bi-question-circle" style="font-size: 1.8rem;" aria-hidden="true"></i>
+    </button>
+  </div>
+  <p class="section-subtitle m-0 text-dim w-100">
+    Get an at-a-glance plan that blends live forecasts and outlooks based on your location.
+  </p>
+</div>
+<dialog id="helpDialog" closedby="any" aria-labelledby="help-title"
+        style="padding: 0; border: none; background: transparent; max-width: 90vw; outline: none;">
+  <form method="dialog" class="modal">
+    <button type="submit" class="modal__close" aria-label="Close help">&times;</button>
+    <div class="modal__icon" aria-hidden="true">💡</div>
+    <h2 id="help-title" class="fw-bold">How this works</h2>
+    <p class="text-start">Plan your trip with precision using our multi-source weather engine:</p>
+    <ul class="text-start mb-3 list-unstyled">
+      <li class="mb-2"><span aria-hidden="true">📍</span> <strong>Search:</strong> Enter a forecast location name,
+        MetMalaysia location ID, or latitude, longitude. Select a result or click Get Forecast.</li>
+        <li class="mb-2"><span aria-hidden="true">🌦️</span> <strong>Realtime:</strong> Real-time forecasts from
+          high-availability providers.</li>
+          <li class="mb-2"><span aria-hidden="true">📅</span> <strong>Outlooks:</strong> Multi-day weather trends for your
+            return trip.</li>
+          </ul>
+          <button type="submit" class="btn btn--primary w-100">Got it!</button>
+        </form>
+      </dialog>
+
+      <div class="row g-4 mt-2">
+        <div class="col-lg-4 col-xl-3">
+          <div class="position-sticky" style="top: 1rem; z-index: 10; max-height: calc(100vh - 4rem); overflow-y: auto;">
+            <div class="card">
+              <h2 class="mb-0 h3">
+                <button type="button" class="location-panel-toggle"
+                        @onclick="() => isLocationPanelExpanded = !isLocationPanelExpanded"
+                        aria-expanded="@(isLocationPanelExpanded ? "true" : "false")" aria-controls="location-panel-inputs"
+                        aria-describedby="location-hint-text">
+                  <span>
+                    Location
+                    <i class="bi bi-info-circle ms-1" aria-hidden="true" title="@LocationSourceHint"></i>
+                  </span>
+                  <i class="bi @(isLocationPanelExpanded ? "bi-chevron-up" : "bi-chevron-down")" aria-hidden="true"></i>
+                </button>
+                <span id="location-hint-text" class="visually-hidden">@LocationSourceHint</span>
+              </h2>
+              <div id="location-panel-inputs" class="mt-3" hidden="@(!isLocationPanelExpanded)">
+                @if (!string.IsNullOrEmpty(errorMessage))
+                {
+                  <div class="alert alert-warning py-2 px-3 mb-3" role="alert" style="font-size: 0.9rem; border-radius: 8px;">
+                    @errorMessage
+                  </div>
+                }
+                <div class="mb-3">
+                  <label class="form-label" for="placeSearch">Location name, ID, or coordinates</label>
+                  <search class="search-container d-flex gap-2 align-items-center">
+                    <LocationSearchAutocomplete id="placeSearch" Value="@locationSearchText"
+                                                ValueChanged="HandleSearchChanged" OnSuggestionSelected="HandleSuggestionSelected" />
+                    <button class="btn btn--secondary btn--icon" @onclick="ResetToLocalLocation" disabled="@isLoading"
+                            aria-label="Use My Location" title="My Location">
+                      <span aria-hidden="true">📍</span>
+                    </button>
+                  </search>
+                </div>
+                <div class="row g-3">
+                  <div class="col-6">
+                    <label class="form-label" for="latInput">Latitude</label>
+                    <InputNumber id="latInput" TValue="double" @bind-Value="query.Latitude" class="form-input"
+                                 @bind-Value:after="ClearSelectedPlace" Step="any" min="-90" max="90" />
+                  </div>
+                  <div class="col-6">
+                    <label class="form-label" for="lngInput">Longitude</label>
+                    <InputNumber id="lngInput" TValue="double" @bind-Value="query.Longitude" class="form-input"
+                                 @bind-Value:after="ClearSelectedPlace" Step="any" min="-180" max="180" />
+                  </div>
+                  <div class="col-6">
+                    <label class="form-label" for="departInput">Depart</label>
+                    <InputDate id="departInput" TValue="DateTime?" @bind-Value="departureDate" class="form-input"
+                               min="@MinimumForecastDateValue" max="@MaximumForecastDateValue" />
+                  </div>
+                  <div class="col-6">
+                    <label class="form-label" for="returnInput">Return</label>
+                    <InputDate id="returnInput" TValue="DateTime?" @bind-Value="returnDate" class="form-input"
+                               min="@MinimumReturnDateValue" max="@MaximumForecastDateValue" />
+                  </div>
+                </div>
+                <button class="btn btn--primary w-100 py-3 mt-4 fw-bold shadow-sm"
+                        style="font-size: 1.1rem; border-radius: 12px; transition: transform 0.2s;" @onclick="LoadPlanAsync"
+                        disabled="@isLoading">
+                  @(isLoading ? "Loading..." : "Get Forecast")
+                </button>
+              </div>
+              @if (isFetched && plan != null)
+              {
+                <div class="mt-4 d-flex flex-wrap gap-2 mb-0">
+                  <span class="chip">📍 @DisplayLocation(plan.Query)</span>
+                  @if (plan.Query.Departure.HasValue || plan.Query.Return.HasValue)
+                  {
+                    <span class="chip">📅 @DisplayDateRange(plan.Query.Departure, plan.Query.Return)</span>
+                  }
+                </div>
+              }
+            </div>
+            @if (isFetched && plan != null)
+            {
+              <div class="mt-4">
+                <h2 class="mb-3 fw-semibold text-primary h4" style="letter-spacing: -0.01em;">Real-Time Forecast</h2>
+                <div class="planner mb-4">
+                  @if (_options.MetMalaysia.Enabled && !string.IsNullOrWhiteSpace(plan.Query.LocationId))
+                  {
+                    <MetMalaysiaWeatherCard Options="_options.MetMalaysia" Result="@plan.GetRealtime("MetMalaysia")"
+                                            IsRefreshing="@IsRefreshing("MetMalaysia", false)"
+                                            OnRefresh='() => RefreshProviderAsync("MetMalaysia", false)' />
+                  }
+                  @if (_options.OpenMeteo.Enabled)
+                  {
+                    <OpenMeteoWeatherCard Options="_options.OpenMeteo" Query="plan.Query" Result="@plan.GetRealtime("Open-Meteo")"
+                                          IsRefreshing="@IsRefreshing("Open-Meteo", false)"
+                                          OnRefresh='() => RefreshProviderAsync("Open-Meteo", false)' FetchOutlook="false" />
+                  }
+                  @if (_options.SingaporeNEA.Enabled && IsNearSingapore(plan.Query.Latitude, plan.Query.Longitude))
+                  {
+                    <SingaporeNeaWeatherCard Options="_options.SingaporeNEA" Result="@plan.GetRealtime("Singapore NEA")"
+                                             IsRefreshing="@IsRefreshing("Singapore NEA", false)"
+                                             OnRefresh='() => RefreshProviderAsync("Singapore NEA", false)' />
+                  }
+                </div>
+              </div>
+            }
+          </div>
+        </div>
+
+        <div class="col-lg-8 col-xl-9">
+          @if (isFetched && plan != null && plan.Query.Return.HasValue)
+          {
+            <h2 class="mb-3 fw-semibold text-primary h4" style="letter-spacing: -0.01em;">Multi-Day Outlook</h2>
+            <div class="planner">
+              @if (_options.MetMalaysia.Enabled && !string.IsNullOrWhiteSpace(plan.Query.LocationId))
+              {
+                <MetMalaysiaWeatherCard Options="_options.MetMalaysia" Result="@plan.GetOutlook("MetMalaysia")"
+                                        IsRefreshing="@IsRefreshing("MetMalaysia", true)"
+                                        OnRefresh='() => RefreshProviderAsync("MetMalaysia", true)' />
+              }
+              @if (_options.OpenMeteo.Enabled)
+              {
+                <OpenMeteoWeatherCard Options="_options.OpenMeteo" Query="plan.Query" Result="@plan.GetOutlook("Open-Meteo")"
+                                      IsRefreshing="@IsRefreshing("Open-Meteo", true)"
+                                      OnRefresh='() => RefreshProviderAsync("Open-Meteo", true)' FetchOutlook="true" />
+              }
+              @if (_options.SingaporeNEA.Enabled && IsNearSingapore(plan.Query.Latitude, plan.Query.Longitude))
+              {
+                <SingaporeNeaWeatherCard Options="_options.SingaporeNEA" Result="@plan.GetOutlook("Singapore NEA")"
+                                         IsRefreshing="@IsRefreshing("Singapore NEA", true)"
+                                         OnRefresh='() => RefreshProviderAsync("Singapore NEA", true)' />
+              }
+            </div>
+          }
+        </div>
+      </div>
+
+@code {
+  private WeatherQuery query = new();
+  private WeatherOptions _options = new();
+  private WeatherPlanResult? plan;
+  private readonly HashSet<string> refreshingProviders = new(StringComparer.OrdinalIgnoreCase);
+  private DateTime? departureDate = MalaysiaTime.Today;
+  private DateTime? returnDate = MalaysiaTime.Today.AddDays(3);
+  private bool isLoading, isFetched;
+  private bool isLocationPanelExpanded = true;
+  private string? errorMessage;
+  private string locationSearchText = string.Empty;
+  private DateTime MinimumForecastDate => MalaysiaTime.Today;
+  private DateTime MaximumForecastDate =>
+    MinimumForecastDate.AddDays(WeatherForecastLimits.OpenMeteoForecastDays - 1);
+  private DateTime MinimumReturnDate => departureDate?.Date > MinimumForecastDate
+    ? departureDate.Value.Date
+    : MinimumForecastDate;
+  private string MinimumForecastDateValue => FormatDateInputValue(MinimumForecastDate);
+  private string MaximumForecastDateValue => FormatDateInputValue(MaximumForecastDate);
+  private string MinimumReturnDateValue => FormatDateInputValue(MinimumReturnDate);
+  private string LocationSourceHint => "Open-Meteo uses the coordinates below. MetMalaysia uses the selected forecast ID, "
+    + "or the nearest available location for coordinates. Singapore NEA is shown near Singapore."
+    + (string.IsNullOrWhiteSpace(query.LocationId) ? string.Empty : $" MetMalaysia location ID: {query.LocationId}");
+
+  private async Task ShowHelpDialog()
+  {
+    await JS.InvokeVoidAsync("dialogHelper.showModal", "helpDialog");
+  }
+
+  private bool _isDisposed;
+  private readonly CancellationTokenSource _cts = new();
+
+  public void Dispose()
+  {
+    _isDisposed = true;
+    _cts.Cancel();
+    _cts.Dispose();
+  }
+
+  protected override async Task OnInitializedAsync()
+  {
+    _options = Config.GetSection("WeatherProviders").Get<WeatherOptions>() ?? new();
+    query.Latitude = Config.GetValue<double?>("DefaultLocation:Latitude") ?? 3.1390;
+    query.Longitude = Config.GetValue<double?>("DefaultLocation:Longitude") ?? 101.6869;
+    try
+    {
+      await WeatherPlannerService.ResolveNearestLocationAsync(query, updatePlaceName: true, _cts.Token);
+      locationSearchText = query.PlaceName ?? string.Empty;
+    }
+    catch (OperationCanceledException)
+    {
+    }
+  }
+
+  private void HandleSearchChanged(string value)
+  {
+    locationSearchText = value;
+    query.PendingSearchText = string.IsNullOrWhiteSpace(value) ? null : value;
+    errorMessage = null;
+  }
+
+  private void ApplySuggestion((double Lat, double Lng, string FormattedAddress, string Name) suggestion)
+  {
+    errorMessage = null;
+    query.PlaceName = suggestion.Name;
+    query.Latitude = suggestion.Lat;
+    query.Longitude = suggestion.Lng;
+    locationSearchText = suggestion.Name;
+    query.PendingSearchText = null;
+    if (suggestion.FormattedAddress != null && suggestion.FormattedAddress.StartsWith("MET ID: "))
+    {
+      query.LocationId = suggestion.FormattedAddress.Substring(8).Trim();
+    }
+    else
+    {
+      query.LocationId = null;
+    }
+  }
+
+  private async Task HandleSuggestionSelected((double Lat, double Lng, string FormattedAddress, string Name) suggestion)
+  {
+    ApplySuggestion(suggestion);
+    await LoadPlanAsync();
+  }
+
+  private async Task LoadPlanAsync()
+  {
+    if (isLoading) return;
+
+    errorMessage = null;
+    isLoading = true;
+    StateHasChanged();
+
+    try
+    {
+      query.Departure = departureDate.HasValue ? MalaysiaTime.At(departureDate.Value) : null;
+      query.Return = returnDate.HasValue ? MalaysiaTime.At(returnDate.Value) : null;
+
+      var result = await WeatherPlannerService.GetPlanAsync(query, _cts.Token);
+      if (_isDisposed) return;
+
+      if (!result.IsValid)
+      {
+        errorMessage = result.ValidationError;
+        return;
+      }
+
+      // Query parameters updated. Child components will trigger OnParametersSetAsync natively
+      plan = result;
+      // Plan updated. Child components receive pre-shaped results as presentational components.
+      locationSearchText = query.PlaceName ?? locationSearchText;
+      isFetched = true;
+      isLocationPanelExpanded = false;
+    }
+    catch (OperationCanceledException)
+    {
+    }
+    catch (Exception ex)
+    {
+      Console.WriteLine(ex);
+    }
+    finally
+    {
+      isLoading = false;
+      if (!_isDisposed)
+      {
+        StateHasChanged();
+      }
+    }
+  }
+
+  private static string ProviderKey(string provider, bool isOutlook) =>
+    $"{provider}:{(isOutlook ? "Outlook" : "Realtime")}";
+
+  private static List<WeatherProviderResult> ReplaceProvider(
+    IReadOnlyList<WeatherProviderResult> items,
+    string provider,
+    WeatherProviderResult updated) =>
+    items.Where(p => !string.Equals(p.Provider, provider, StringComparison.OrdinalIgnoreCase)).Append(updated).ToList();
+
+  private bool IsRefreshing(string provider, bool isOutlook) =>
+    refreshingProviders.Contains(ProviderKey(provider, isOutlook));
+
+  private async Task RefreshProviderAsync(string provider, bool isOutlook)
+  {
+    if (plan == null) return;
+    var key = ProviderKey(provider, isOutlook);
+    if (!refreshingProviders.Add(key)) return;
+    try
+    {
+      var updated = await WeatherPlannerService.RefreshProviderAsync(provider, plan.Query, isOutlook, _cts.Token);
+      if (_isDisposed) return;
+      if (plan != null)
+      {
+        plan = isOutlook
+          ? plan with { Outlooks = ReplaceProvider(plan.Outlooks, provider, updated) }
+          : plan with { Realtime = ReplaceProvider(plan.Realtime, provider, updated) };
+      }
+    }
+    catch (OperationCanceledException)
+    {
+    }
+    catch (Exception ex)
+    {
+      Console.WriteLine($"Failed to refresh {provider}: {ex.Message}");
+    }
+    finally
+    {
+      refreshingProviders.Remove(key);
+      if (!_isDisposed)
+      {
+        StateHasChanged();
+      }
+    }
+  }
+
+  private void ClearSelectedPlace()
+  {
+    query.PlaceName = null;
+    query.LocationId = null;
+    locationSearchText = string.Empty;
+    query.PendingSearchText = null;
+  }
+
+  private async Task ResetToLocalLocation()
+  {
+    errorMessage = null;
+    var pos = await LocationService.GetCurrentLocationAsync(forceRefresh: true);
+    if (_isDisposed) return;
+
+    if (pos != null)
+    {
+      query.Latitude = pos.Latitude;
+      query.Longitude = pos.Longitude;
+      query.LocationId = null;
+      var address = await PlaceResolutionService.ReverseGeocodeAsync(pos.Latitude, pos.Longitude);
+      if (_isDisposed) return;
+
+      query.PlaceName = string.IsNullOrWhiteSpace(address) ? "Current Location" : address;
+      locationSearchText = query.PlaceName;
+      query.PendingSearchText = null;
+      try
+      {
+        await WeatherPlannerService.ResolveNearestLocationAsync(query, updatePlaceName: false, _cts.Token);
+      }
+      catch (OperationCanceledException)
+      {
+        return;
+      }
+    }
+    else
+    {
+      errorMessage = "Could not determine your current location. Please check your browser permissions.";
+      return;
+    }
+
+    if (_isDisposed) return;
+    await LoadPlanAsync();
+  }
+
+  private static string FormatDateInputValue(DateTime value) =>
+    value.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+  private static string DisplayLocation(WeatherQuery value)
+  {
+    string location = string.IsNullOrWhiteSpace(value.PlaceName) ? "Custom location" : value.PlaceName;
+    return $"{location} ({value.Latitude:F3}, {value.Longitude:F3})";
+  }
+
+  private static string DisplayDateRange(DateTimeOffset? start, DateTimeOffset? end)
+  {
+    string startText = start.HasValue ? start.Value.ToString("dd MMM") : "?";
+    string endText = end.HasValue ? end.Value.ToString("dd MMM") : "?";
+    return (startText == "?" && endText == "?") ? string.Empty : $"{startText} → {endText}";
+  }
+
+  private static bool IsNearSingapore(double lat, double lon) =>
+    Services.WeatherPlannerService.IsNearSingapore(lat, lon);
+}

@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
-using MyTransportAppWASM.Models;
 
 namespace MyTransportAppWASM.Tests;
 

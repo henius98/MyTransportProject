@@ -1,7 +1,5 @@
 using System.Net;
 using Microsoft.Extensions.Configuration;
-using MyTransportAppWASM.Models;
-using MyTransportAppWASM.Services;
 
 namespace MyTransportAppWASM.Tests;
 
@@ -143,6 +141,39 @@ public sealed class TransportStaticDataServiceTests
     Assert.Equal(default, departures[0].DepartureAt);
     Assert.Equal("B2", departures[1].RouteId);
     Assert.Null(departures[1].Headsign);
+  }
+
+  [Fact]
+  public async Task ReturnsEmptyImmediatelyWhenBaseUrlIsWhitespace()
+  {
+    var emptySource = new TransportStaticData("", "/data/routes", "/map", "/departures");
+    var handler = new FakeHandler(_ => throw new InvalidOperationException("No network calls expected"));
+    var service = new TransportStaticDataService(new HttpClient(handler));
+
+    var routes = await service.GetRoutesAsync(emptySource);
+    var map = await service.GetMapAsync(emptySource);
+    var departures = await service.GetDeparturesAsync(emptySource, "A1", "STOP/1");
+
+    Assert.Empty(routes);
+    Assert.Empty(map);
+    Assert.Empty(departures);
+    Assert.Empty(handler.Urls);
+  }
+
+  [Fact]
+  public async Task ThrowsServiceUnavailableWithoutRetryingMapEndpoint()
+  {
+    var handler = new FakeHandler(request => request.RequestUri!.AbsolutePath switch
+    {
+      "/rapid-bus-kl/data/routes" => throw new HttpRequestException("Service Unavailable", null, HttpStatusCode.ServiceUnavailable),
+      _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
+    });
+    var service = new TransportStaticDataService(new HttpClient(handler));
+
+    var ex = await Assert.ThrowsAsync<HttpRequestException>(() => service.GetRoutesAsync(Source));
+    Assert.Equal(HttpStatusCode.ServiceUnavailable, ex.StatusCode);
+    Assert.Single(handler.Urls);
+    Assert.Contains("/rapid-bus-kl/data/routes", handler.Urls[0]);
   }
 
   private sealed class FakeHandler(Func<HttpRequestMessage, string> respond) : HttpMessageHandler

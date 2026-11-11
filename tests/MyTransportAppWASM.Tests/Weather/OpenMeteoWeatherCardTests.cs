@@ -11,11 +11,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
 using Moq;
-using MyTransportAppWASM.Models;
-using MyTransportAppWASM.Pages.Weather.Components;
-using MyTransportAppWASM.Services;
-using MyTransportAppWASM.Services.Interfaces;
-using MyTransportAppWASM.Utils;
 
 namespace MyTransportAppWASM.Tests;
 

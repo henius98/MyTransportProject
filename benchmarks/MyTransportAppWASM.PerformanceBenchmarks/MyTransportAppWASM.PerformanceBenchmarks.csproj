@@ -18,7 +18,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <Protobuf Include="../../MyTransportAppWASM/Models/Protos/gtfs-realtime.proto"
+    <Protobuf Include="../../MyTransportAppWASM/Features/Transit/Models/Protos/gtfs-realtime.proto"
               Link="Models/Protos/gtfs-realtime.proto"
               GrpcServices="None" />
   </ItemGroup>

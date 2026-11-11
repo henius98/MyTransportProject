@@ -20,10 +20,14 @@ const baseUrl = new URL(base, self.origin);
 const manifestUrlList = self.assetsManifest.assets.map(asset => new URL(asset.url, baseUrl).href);
 
 function isGtfsStaticRequest(url) {
-  return (url.hostname === 'api.data.gov.my' && url.pathname.includes('/gtfs-static/'))
+  const selfOrigin = self.origin || (self.location && self.location.origin);
+  const isSelfMapRoute = (selfOrigin && url.origin === selfOrigin) && (url.pathname === '/map' || url.pathname === '/map/');
+  return !isSelfMapRoute && (
+    (url.hostname === 'api.data.gov.my' && url.pathname.includes('/gtfs-static/'))
     || url.pathname.includes('/data/routes')
     || url.pathname.includes('/departures')
-    || (url.pathname.endsWith('/map') || url.pathname.includes('/map?') || url.pathname.includes('/map/'));
+    || (url.pathname.endsWith('/map') || url.pathname.includes('/map?') || url.pathname.includes('/map/'))
+  );
 }
 
 async function onInstall(event) {

@@ -2,8 +2,6 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using MyTransportAppWASM.Models;
-using MyTransportAppWASM.Pages.Map.Components;
 
 namespace MyTransportAppWASM.Tests;
 

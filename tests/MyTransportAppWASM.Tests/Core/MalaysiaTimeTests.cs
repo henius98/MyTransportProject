@@ -1,4 +1,3 @@
-using MyTransportAppWASM.Utils;
 
 namespace MyTransportAppWASM.Tests;
 

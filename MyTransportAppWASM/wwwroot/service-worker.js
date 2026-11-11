@@ -17,10 +17,14 @@ self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
   // GTFS static routes, departures, and shapes from api.data.gov.my or configured static endpoints
-  const isGtfsStatic = (url.hostname === 'api.data.gov.my' && url.pathname.includes('/gtfs-static/'))
+  const selfOrigin = self.origin || (self.location && self.location.origin);
+  const isSelfMapRoute = (selfOrigin && url.origin === selfOrigin) && (url.pathname === '/map' || url.pathname === '/map/');
+  const isGtfsStatic = !isSelfMapRoute && (
+    (url.hostname === 'api.data.gov.my' && url.pathname.includes('/gtfs-static/'))
     || url.pathname.includes('/data/routes')
     || url.pathname.includes('/departures')
-    || (url.pathname.endsWith('/map') || url.pathname.includes('/map?') || url.pathname.includes('/map/'));
+    || (url.pathname.endsWith('/map') || url.pathname.includes('/map?') || url.pathname.includes('/map/'))
+  );
   // MetMalaysia recreation centres station catalog
   const isStationCatalog = url.pathname.includes('recreation_centres.json');
 

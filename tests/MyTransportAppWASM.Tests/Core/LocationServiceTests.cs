@@ -1,9 +1,6 @@
 using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
 using Moq;
-using MyTransportAppWASM.Models;
-using MyTransportAppWASM.Services;
-using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM.Tests;
 

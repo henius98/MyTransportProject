@@ -30,10 +30,14 @@ A unified dashboard for public transit tracking and weather-aware trip planning 
 
 ## 📂 Project Structure
 
-- `MyTransportAppWASM/Pages`: Razor components for the main application views (`Map.razor`, `Weather.razor`, `Home.razor`).
-- `MyTransportAppWASM/Services`: Core logic for transit data fetching, weather aggregation, and geocoding.
+- `MyTransportAppWASM/Features`: Vertical domain feature slices containing components, pages, services, models, and utilities:
+  - `Features/Transit`: Live transit tracking, GTFS integration, route options, and map view (`Map.razor`).
+  - `Features/Weather`: Weather planning, multi-provider cards, and forecast outlooks (`Weather.razor`).
+  - `Features/Google`: Google Calendar, Google Tasks, and live route navigation.
+  - `Features/Fortune`: BaziFlow astrological calculations and daily fortunes (`Fortune.razor`).
+  - `Features/Home`: Landing overview and quick actions (`Home.razor`).
+- `MyTransportAppWASM/Core`: Foundational modules shared across features (Layout, Auth, Services, Models, Utils).
 - `MyTransportAppWASM.Gtfs`: Route-lazy-loaded GTFS-Realtime parser and transport projection contract.
-- `MyTransportAppWASM/Utils`: Shared data-shaping utilities for runtime hot paths.
 - `MyTransportAppWASM/wwwroot/js`: JavaScript modules for direct Google Maps manipulation and geolocation.
 - `benchmarks`: Repeatable host and browser-native Mono/WASM performance harnesses.
 - `bruno`: Ready-to-open requests for the app's external APIs; see [collection setup](bruno/README.md).

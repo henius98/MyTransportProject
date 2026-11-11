@@ -1,4 +1,3 @@
-using MyTransportAppWASM.Models;
 
 namespace MyTransportAppWASM.Tests;
 

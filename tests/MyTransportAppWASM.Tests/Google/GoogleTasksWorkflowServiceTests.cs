@@ -1,7 +1,4 @@
 using Moq;
-using MyTransportAppWASM.Models;
-using MyTransportAppWASM.Services;
-using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM.Tests;
 

@@ -1,8 +1,0 @@
-@page "/google/calendar"
-@namespace MyTransportAppWASM.Pages.Google
-
-<GoogleServicePage Title="Google Calendar" Service="calendar">
-    <ChildContent Context="uid">
-        <GoogleCalendarContent @key="uid" UserId="@uid" />
-    </ChildContent>
-</GoogleServicePage>

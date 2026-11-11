@@ -3,9 +3,11 @@ using System.Text;
 using System.Text.Json;
 using Google.Protobuf;
 using MyTransportAppWASM.Gtfs;
-using MyTransportAppWASM.Models;
-using MyTransportAppWASM.Services;
-using MyTransportAppWASM.Utils;
+using MyTransportAppWASM.Core.Utils;
+using MyTransportAppWASM.Features.Google.Services;
+using MyTransportAppWASM.Features.Transit.Models;
+using MyTransportAppWASM.Features.Weather.Models;
+using MyTransportAppWASM.Features.Weather.Utils;
 using TransitRealtime;
 
 const int warmupIterations = 8;

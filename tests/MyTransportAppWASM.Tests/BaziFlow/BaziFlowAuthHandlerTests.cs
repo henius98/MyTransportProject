@@ -4,8 +4,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.Extensions.Configuration;
 using Xunit;
-using MyTransportAppWASM.Services.Handlers; // Will be created in GREEN step
-using MyTransportAppWASM.Services.Interfaces;
+// Will be created in GREEN step
 
 namespace MyTransportAppWASM.Tests
 {

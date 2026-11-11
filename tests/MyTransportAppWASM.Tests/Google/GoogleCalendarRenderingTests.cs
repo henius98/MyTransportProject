@@ -5,11 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.JSInterop;
 using Moq;
-using MyTransportAppWASM.Models;
-using MyTransportAppWASM.Pages.Google;
-using MyTransportAppWASM.Services;
-using MyTransportAppWASM.Services.Interfaces;
-using MyTransportAppWASM.Utils;
 
 namespace MyTransportAppWASM.Tests;
 
@@ -139,10 +134,10 @@ public class GoogleCalendarRenderingTests
             .Returns((string _, object?[]? args) => failTasks
                 ? ValueTask.FromException<GoogleTask[]>(new JSException("Offline"))
                 : ValueTask.FromResult(groups[int.Parse((string)args![1]!)]));
-        List<Models.GoogleCalendar> calendars = [new() { Id = "primary", Summary = "Personal", Primary = true, AccessRole = "owner" }];
+        List<MyTransportAppWASM.Features.Google.Models.GoogleCalendar> calendars = [new() { Id = "primary", Summary = "Personal", Primary = true, AccessRole = "owner" }];
         if (subscribedHolidays)
             calendars.Add(new() { Id = Holidays, Summary = "Holidays in Malaysia", AccessRole = "reader" });
-        module.Setup(js => js.InvokeAsync<Models.GoogleCalendar[]>("listCalendars", It.IsAny<object?[]>())).ReturnsAsync(calendars.ToArray());
+        module.Setup(js => js.InvokeAsync<MyTransportAppWASM.Features.Google.Models.GoogleCalendar[]>("listCalendars", It.IsAny<object?[]>())).ReturnsAsync(calendars.ToArray());
         module.Setup(js => js.InvokeAsync<GoogleCalendarEvent[]>("listEvents", It.IsAny<object?[]>()))
             .Returns((string _, object?[]? args) =>
             {

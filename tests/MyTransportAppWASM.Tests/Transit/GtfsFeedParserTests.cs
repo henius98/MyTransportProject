@@ -1,6 +1,5 @@
 using Google.Protobuf;
 using MyTransportAppWASM.Gtfs;
-using MyTransportAppWASM.Models;
 using TransitRealtime;
 
 namespace MyTransportAppWASM.Tests;

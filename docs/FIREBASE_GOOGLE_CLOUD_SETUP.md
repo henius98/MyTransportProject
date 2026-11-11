@@ -262,7 +262,7 @@ gcloud services enable tasks.googleapis.com
 The app uses Firebase Auth via JS interop:
 
 - [`wwwroot/js/firebase-auth.js`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/wwwroot/js/firebase-auth.js) — JS module for Google sign-in (popup + One Tap)
-- [`Services/Firebase/FirebaseAuthenticationStateProvider.cs`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/Services/Firebase/FirebaseAuthenticationStateProvider.cs) — Blazor `AuthenticationStateProvider` that calls the JS module
+- [`Core/Auth/FirebaseAuthenticationStateProvider.cs`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/Core/Auth/FirebaseAuthenticationStateProvider.cs) — Blazor `AuthenticationStateProvider` that calls the JS module
 
 No additional code changes needed — just ensure the Firebase config values are correct.
 
@@ -297,7 +297,7 @@ firebase deploy --only firestore:rules
 
 - [`wwwroot/js/firebase-firestore.js`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/wwwroot/js/firebase-firestore.js) — JS module for Firestore reads/writes
 - [`wwwroot/js/firebase-task-extensions.js`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/wwwroot/js/firebase-task-extensions.js) — JS module for task extension CRUD
-- [`Services/Firebase/UserSettingsService.cs`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/Services/Firebase/UserSettingsService.cs) — C# service that calls Firestore via JS interop
+- [`Core/Auth/UserSettingsService.cs`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/Core/Auth/UserSettingsService.cs) — C# service that calls Firestore via JS interop
 
 ---
 

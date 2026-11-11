@@ -1,8 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
 using Google.Protobuf;
-using MyTransportAppWASM.Services;
-using MyTransportAppWASM.Services.Interfaces;
 using TransitRealtime;
 
 namespace MyTransportAppWASM.Tests;

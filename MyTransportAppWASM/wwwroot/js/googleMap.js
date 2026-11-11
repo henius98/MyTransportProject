@@ -366,10 +366,13 @@ export async function initAutocomplete(elementId, dotNetHelper, methodName, apiK
 			requestedRegion: "my",
 			includedRegionCodes: ["my"],
 		});
+		placeAutocomplete.id = `${elementId}-field`;
+		placeAutocomplete.name = `${elementId}-field`;
 		placeAutocomplete.setAttribute(
 			"aria-label",
 			methodName === "UpdateOrigin" ? "Origin" : "Destination",
 		);
+		placeAutocomplete.setAttribute("aria-labelledby", `${elementId}-label`);
 		placeAutocomplete.setAttribute("placeholder", placeholderText);
 
 		// Style the widget to fill its parent container
@@ -413,6 +416,8 @@ export async function initAutocomplete(elementId, dotNetHelper, methodName, apiK
 		container.innerHTML = "";
 		const fallbackInput = document.createElement("input");
 		fallbackInput.type = "text";
+		fallbackInput.id = `${elementId}-field`;
+		fallbackInput.name = `${elementId}-field`;
 		fallbackInput.className = "w-100";
 		fallbackInput.style.border = "none";
 		fallbackInput.style.background = "transparent";
@@ -421,6 +426,7 @@ export async function initAutocomplete(elementId, dotNetHelper, methodName, apiK
 		fallbackInput.style.font = "inherit";
 		fallbackInput.placeholder = placeholderText;
 		fallbackInput.setAttribute("aria-label", methodName === "UpdateOrigin" ? "Origin" : "Destination");
+		fallbackInput.setAttribute("aria-labelledby", `${elementId}-label`);
 		fallbackInput.addEventListener("input", async (e) => {
 			if (dotNetHelper) {
 				await dotNetHelper.invokeMethodAsync(methodName, e.target.value);
@@ -458,18 +464,22 @@ export async function updateUserMarker(lat, lng) {
 	pendingUserPosition = { lat, lng };
 	try {
 		await loadGoogleMaps();
-		if (!map || !userMarker) return;
+		if (mapAuthFailed || !map || !userMarker) return;
 		pendingUserPosition = null;
-		if (typeof userMarker.setPosition === "function") {
-			userMarker.setPosition({ lat, lng });
-		} else {
-			userMarker.position = { lat, lng };
+		try {
+			if (typeof userMarker.setPosition === "function") {
+				userMarker.setPosition({ lat, lng });
+			} else {
+				userMarker.position = { lat, lng };
+			}
+		} catch (posErr) {
+			console.debug("Could not update user marker position:", posErr);
 		}
 		try {
 			map.panTo?.({ lat, lng });
 		} catch (_) { }
 	} catch (err) {
-		console.error("updateUserMarker err: " + err)
+		console.error("updateUserMarker err: " + err);
 	}
 }
 

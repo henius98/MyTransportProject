@@ -1,0 +1,104 @@
+@inherits LayoutComponentBase
+@inject IUserSettingsService UserSettings
+@inject IConfiguration Configuration
+@inject IJSRuntime JS
+@inject ThemeService Theme
+
+<div class="page" style="@SidebarStyle">
+    <!-- Skip link for keyboard users — visually hidden until focused -->
+    <a href="#main-content"
+       style="position:absolute;top:-100%;left:1rem;z-index:9999;padding:0.5rem 1rem;background:var(--primary-blue);color:#fff;border-radius:0 0 8px 8px;font-weight:700;text-decoration:none;"
+       onfocus="this.style.top='0'" onblur="this.style.top='-100%'">
+        Skip to main content
+    </a>
+    <div class="@SidebarClass" @onclick="ExpandSidebar" @onmouseenter="HandleMouseEnter"
+         @onmouseleave="HandleMouseLeave" @onclick:stopPropagation>
+        <NavMenu IsCollapsed="EffectiveIsCollapsed" />
+    </div>
+
+    <main id="main-content" tabindex="-1" @onclick="CollapseSidebar">
+        <article class="content px-4">
+            <ErrorBoundary>
+                <ChildContent>
+                    @Body
+                </ChildContent>
+                <ErrorContent>
+                    <div class="alert alert-danger m-3">
+                        <h4>@Language["ErrorTitle"]</h4>
+                        <p>@Language["ErrorMessage"]</p>
+                    </div>
+                </ErrorContent>
+            </ErrorBoundary>
+        </article>
+    </main>
+
+    <LoginModal />
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    [CascadingParameter] private LanguageService Language { get; set; } = default!;
+
+    private bool isCollapsed = false;
+    private bool isHovered = false;
+    private int preferenceVersion;
+    private Task<AuthenticationState>? _lastAuthState;
+
+    private bool EffectiveIsCollapsed => isCollapsed && !isHovered;
+
+    private string SidebarStyle => $"--sidebar-width: {(EffectiveIsCollapsed ? "70px" : "250px")};";
+    private string SidebarClass => $"sidebar {(EffectiveIsCollapsed ? "collapsed" : "")}".Trim();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!ReferenceEquals(AuthState, _lastAuthState))
+        {
+            _lastAuthState = AuthState;
+            if (AuthState is not null)
+            {
+                await AuthState;
+            }
+            await ApplyPreferencesAsync();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("window.firebaseAuthInterop.initializeOneTap", Configuration["Firebase:googleClientId"]);
+            }
+            catch (JSException ex)
+            {
+                Console.Error.WriteLine($"Google One Tap could not start: {ex.Message}");
+            }
+        }
+    }
+
+    private async Task ApplyPreferencesAsync()
+    {
+        var version = ++preferenceVersion;
+        try
+        {
+            var settings = await UserSettings.GetSettingsAsync();
+            if (version != preferenceVersion) return;
+            await Theme.ApplyAsync(settings);
+            if (version != preferenceVersion) return;
+            var language = LanguageService.SupportedLanguages.Any(option => option.Code == settings.Language)
+                ? settings.Language! : "en-US";
+            await Language.LoadLanguageAsync(language);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Could not apply preferences: {ex.Message}");
+        }
+    }
+
+    private void ExpandSidebar() => isCollapsed = false;
+    private void CollapseSidebar() => isCollapsed = true;
+
+    private void HandleMouseEnter() => isHovered = true;
+    private void HandleMouseLeave() => isHovered = false;
+}

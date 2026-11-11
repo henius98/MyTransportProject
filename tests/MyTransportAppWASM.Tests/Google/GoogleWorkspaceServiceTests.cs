@@ -2,8 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.JSInterop;
 using Moq;
-using MyTransportAppWASM.Models;
-using MyTransportAppWASM.Services;
 
 namespace MyTransportAppWASM.Tests;
 

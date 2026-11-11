@@ -6,7 +6,8 @@ import { createContext, SourceTextModule, SyntheticModule } from "node:vm";
 const source = await readFile(new URL("../../MyTransportAppWASM/wwwroot/js/google-authorization.js", import.meta.url), "utf8");
 const plain = value => JSON.parse(JSON.stringify(value));
 
-async function setup() {
+async function setup(setupOptions = {}) {
+    const { appOptions = {} } = setupOptions;
     const state = { uid: "alice", calls: [], popups: 0, imports: 0, loads: 0 };
     const context = createContext({});
     const sdk = new SyntheticModule(["getFunctions", "httpsCallable"], function () {
@@ -28,7 +29,7 @@ async function setup() {
     await sdk.link(() => assert.fail("Unexpected dependency"));
     await sdk.evaluate();
     const config = new SyntheticModule(["getFirebaseApp", "firebaseSdkBase"], function () {
-        this.setExport("getFirebaseApp", async () => ({}));
+        this.setExport("getFirebaseApp", async () => ({ options: appOptions }));
         this.setExport("firebaseSdkBase", "https://firebase.test");
     }, { context });
     const firebase = new SyntheticModule(["loadGoogleIdentity", "requireSignedInUser"], function () {
@@ -37,14 +38,27 @@ async function setup() {
         });
         this.setExport("loadGoogleIdentity", async () => {
             state.loads++;
-            return { oauth2: { initCodeClient: options => {
-                state.options = options;
-                return { requestCode: () => {
-                    state.popups++;
-                    if (state.popup) state.popup(options);
-                    else options.callback({ code: "authorization-code" });
-                } };
-            } } };
+            return {
+                oauth2: {
+                    initCodeClient: options => {
+                        state.options = options;
+                        return { requestCode: () => {
+                            state.popups++;
+                            if (state.popup) state.popup(options);
+                            else options.callback({ code: "authorization-code" });
+                        } };
+                    },
+                    initTokenClient: options => {
+                        state.tokenClientOptions = options;
+                        return { requestAccessToken: promptOptions => {
+                            state.popups++;
+                            state.promptOptions = promptOptions;
+                            if (state.popup) state.popup(options);
+                            else options.callback({ access_token: "client-side-token", expires_in: 3600 });
+                        } };
+                    }
+                }
+            };
         });
     }, { context });
     const module = new SourceTextModule(source, { context, importModuleDynamically: specifier => {
@@ -129,5 +143,26 @@ test("a failed preparation can be retried", async () => {
     await assert.rejects(state.api.prepareAuthorization("alice", "calendar"), /Offline/);
     state.call = null;
     await state.authorize();
+    assert.equal(state.popups, 1);
+});
+
+test("restore returns null when the backend function is not deployed or not found", async () => {
+    const state = await setup();
+    const notFoundError = new Error("internal");
+    notFoundError.code = "functions/internal";
+    state.call = () => { throw notFoundError; };
+    const restored = await state.api.restoreConnection("alice", "calendar");
+    assert.equal(restored, null);
+});
+
+test("client-side token fallback connects when backend function is unavailable but googleClientId is configured", async () => {
+    const state = await setup({ appOptions: { googleClientId: "fallback-client-id.apps.googleusercontent.com" } });
+    const internalErr = new Error("internal");
+    internalErr.code = "functions/internal";
+    state.call = () => { throw internalErr; };
+    const result = await state.authorize();
+    assert.equal(result.accessToken, "client-side-token");
+    assert.equal(state.tokenClientOptions.client_id, "fallback-client-id.apps.googleusercontent.com");
+    assert.match(state.tokenClientOptions.scope, /calendar\.events/);
     assert.equal(state.popups, 1);
 });

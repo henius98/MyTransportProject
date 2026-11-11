@@ -2,9 +2,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
 using Moq;
-using MyTransportAppWASM.Models;
-using MyTransportAppWASM.Services;
-using MyTransportAppWASM.Services.Interfaces;
 
 namespace MyTransportAppWASM.Tests;
 

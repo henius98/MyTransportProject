@@ -1,5 +1,4 @@
 using Microsoft.JSInterop;
-using MyTransportAppWASM.Services;
 
 namespace MyTransportAppWASM.Tests;
 
@@ -70,8 +69,38 @@ public class FirebaseAuthenticationStateProviderTests
         Assert.Equal(1, notifications);
     }
 
+    [Fact]
+    public async Task SignInWithGoogleAsync_PassesClientId_WhenProvided()
+    {
+        var stub = new StubJsRuntime(false);
+        await using var provider = new FirebaseAuthenticationStateProvider(stub);
+
+        await provider.SignInWithGoogleAsync("client-123.apps.googleusercontent.com");
+
+        var signInCall = stub.Invocations.FirstOrDefault(i => i.Identifier == "window.firebaseAuthInterop.signInWithGoogle");
+        Assert.NotNull(signInCall.Identifier);
+        Assert.NotNull(signInCall.Args);
+        Assert.Single(signInCall.Args!);
+        Assert.Equal("client-123.apps.googleusercontent.com", signInCall.Args![0]);
+    }
+
+    [Fact]
+    public async Task SignInWithGoogleAsync_OmitsArgs_WhenClientIdIsNullOrWhitespace()
+    {
+        var stub = new StubJsRuntime(false);
+        await using var provider = new FirebaseAuthenticationStateProvider(stub);
+
+        await provider.SignInWithGoogleAsync(null);
+
+        var signInCall = stub.Invocations.FirstOrDefault(i => i.Identifier == "window.firebaseAuthInterop.signInWithGoogle");
+        Assert.NotNull(signInCall.Identifier);
+        Assert.Empty(signInCall.Args!);
+    }
+
     private sealed class StubJsRuntime(bool shouldFail) : IJSRuntime
     {
+        public List<(string Identifier, object?[]? Args)> Invocations { get; } = [];
+
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
         {
             return InvokeAsync<TValue>(identifier, CancellationToken.None, args);
@@ -82,6 +111,7 @@ public class FirebaseAuthenticationStateProviderTests
             CancellationToken cancellationToken,
             object?[]? args)
         {
+            Invocations.Add((identifier, args));
             return shouldFail
                 ? ValueTask.FromException<TValue>(new JSException("Interop unavailable"))
                 : ValueTask.FromResult(default(TValue)!);

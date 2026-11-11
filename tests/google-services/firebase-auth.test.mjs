@@ -21,8 +21,24 @@ async function setup({ restoredUid = null, restoration = Promise.resolve(), scri
         cancel: () => { state.cancellations++; },
         disableAutoSelect: () => { state.autoSelectDisabled++; }
     };
+    const oauth2 = {
+        initTokenClient: options => {
+            state.tokenClientOptions = options;
+            return {
+                requestAccessToken: reqOptions => {
+                    state.tokenRequests = (state.tokenRequests || 0) + 1;
+                    state.tokenRequestOptions = reqOptions;
+                    if (state.tokenResponse) {
+                        options.callback(state.tokenResponse);
+                    } else if (state.tokenError) {
+                        options.error_callback(state.tokenError);
+                    }
+                }
+            };
+        }
+    };
     state.loadScript = () => {
-        window.google = { accounts: { id: googleIdentity } };
+        window.google = { accounts: { id: googleIdentity, oauth2 } };
         state.scripts[0].onload();
     };
     const context = createContext({
@@ -45,16 +61,16 @@ async function setup({ restoredUid = null, restoration = Promise.resolve(), scri
         this.setExport("getAuth", () => auth);
         this.setExport("GoogleAuthProvider", class {
             setCustomParameters() {}
-            static credential(idToken) { return { idToken }; }
+            static credential(idToken, accessToken) { return { idToken, accessToken }; }
         });
         this.setExport("onAuthStateChanged", (_auth, callback) => { callbacks.push(callback); return () => {}; });
         // Keep the notification deferred so explicit sign-out must clear tokens before returning.
         this.setExport("signOut", async () => { auth.currentUser = null; });
         this.setExport("signInWithCredential", async (target, credential) => {
             assert.equal(target, auth);
-            state.credentials.push(credential.idToken);
+            state.credentials.push(credential.idToken || credential.accessToken);
             if (credentialFailure) throw Object.assign(new Error("Rejected"), { code: "auth/invalid-credential" });
-            state.notifyUser("one-tap-user");
+            state.notifyUser(credential.accessToken ? "gis-user" : "one-tap-user");
             return { user: auth.currentUser };
         });
         this.setExport("signInWithPopup", async () => {
@@ -66,7 +82,7 @@ async function setup({ restoredUid = null, restoration = Promise.resolve(), scri
     await sdk.link(() => assert.fail("Unexpected SDK dependency"));
     await sdk.evaluate();
     const config = new SyntheticModule(["getFirebaseApp", "firebaseSdkBase"], function () {
-        this.setExport("getFirebaseApp", async () => ({}));
+        this.setExport("getFirebaseApp", async () => ({ options: state.appOptions || {} }));
         this.setExport("firebaseSdkBase", "https://firebase.test");
     }, { context });
     const store = new SourceTextModule(storeSource, { context });
@@ -242,4 +258,52 @@ test("a rejected One Tap credential leaves manual sign-in available", async () =
     assert.equal(state.warnings.length, 1);
     assert.equal(state.warnings[0][1], "auth/invalid-credential");
     assert.equal((await state.window.firebaseAuthInterop.signInWithGoogle()).uid, "popup-user");
+});
+
+test("manual sign-in reuses resolved auth context synchronously and opens popup", async () => {
+    const state = await setup();
+    await state.api.getAuthContext();
+    const user = await state.window.firebaseAuthInterop.signInWithGoogle();
+    assert.equal(user.uid, "popup-user");
+    assert.equal(state.popups, 1);
+});
+
+test("GIS token client authenticates with signInWithCredential when client ID is provided", async () => {
+    const state = await setup();
+    state.tokenResponse = { access_token: "gis-access-token" };
+    const user = await state.window.firebaseAuthInterop.signInWithGoogle(clientId);
+    assert.equal(user.uid, "gis-user");
+    assert.deepEqual(state.credentials, ["gis-access-token"]);
+    assert.equal(state.popups, 0);
+    assert.equal(state.tokenClientOptions.client_id, clientId);
+    assert.equal(state.tokenClientOptions.scope, "email profile openid");
+    assert.equal(state.tokenRequestOptions.prompt, "select_account");
+});
+
+test("GIS token client authenticates using app.options.googleClientId", async () => {
+    const state = await setup();
+    state.appOptions = { googleClientId: clientId };
+    state.tokenResponse = { access_token: "app-access-token" };
+    const user = await state.window.firebaseAuthInterop.signInWithGoogle();
+    assert.equal(user.uid, "gis-user");
+    assert.deepEqual(state.credentials, ["app-access-token"]);
+    assert.equal(state.popups, 0);
+});
+
+test("GIS cancellation maps popup_closed to auth/popup-closed-by-user and suppresses error logging", async () => {
+    const state = await setup();
+    state.tokenError = { type: "popup_closed" };
+    await assert.rejects(
+        async () => state.window.firebaseAuthInterop.signInWithGoogle(clientId),
+        err => err.code === "auth/popup-closed-by-user"
+    );
+});
+
+test("GIS popup blocking maps popup_failed_to_open to auth/popup-blocked", async () => {
+    const state = await setup();
+    state.tokenError = { type: "popup_failed_to_open" };
+    await assert.rejects(
+        async () => state.window.firebaseAuthInterop.signInWithGoogle(clientId),
+        err => err.code === "auth/popup-blocked"
+    );
 });
