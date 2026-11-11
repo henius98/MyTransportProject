@@ -1,5 +1,5 @@
 // Set Firebase in appsettings.json (also used by deployment), with overrides in appsettings.{Environment}.json.
-export const firebaseSdkBase = "https://www.gstatic.com/firebasejs/10.14.1";
+export const firebaseSdkBase = "https://www.gstatic.com/firebasejs/11.4.0";
 let appPromise = null;
 
 function parseSettings(text) {

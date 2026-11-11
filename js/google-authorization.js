@@ -8,7 +8,7 @@ async function invoke(uid, data) {
     await requireSignedInUser(uid);
     if (!callablePromise) {
         callablePromise = Promise.all([getFirebaseApp(), import(`${firebaseSdkBase}/firebase-functions.js`)])
-            .then(([app, sdk]) => sdk.httpsCallable(sdk.getFunctions(app), "googleConnection"));
+            .then(([app, sdk]) => sdk.httpsCallable(sdk.getFunctions(app, "asia-southeast1"), "googleConnection"));
         void callablePromise.catch(() => { callablePromise = null; });
     }
     const callable = await callablePromise;

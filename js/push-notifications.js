@@ -40,7 +40,7 @@ async function updateRegistration(uid, action, token) {
       getFirebaseApp(),
       import(`${firebaseSdkBase}/firebase-functions.js`),
     ]).then(([app, sdk]) =>
-      sdk.httpsCallable(sdk.getFunctions(app), "pushRegistration"),
+      sdk.httpsCallable(sdk.getFunctions(app, "asia-southeast1"), "pushRegistration"),
     );
     callablePromise = pending;
     void pending.catch(() => {
@@ -58,6 +58,7 @@ async function workerRegistration(app) {
   const config = { apiKey, appId, authDomain, messagingSenderId, projectId };
   const url = new URL("../firebase-messaging-sw.js", import.meta.url);
   url.searchParams.set("config", JSON.stringify(config));
+  url.searchParams.set("sdkBase", firebaseSdkBase);
   return navigator.serviceWorker.register(url.href, {
     scope: new URL("../", import.meta.url).pathname,
   });
@@ -101,11 +102,15 @@ window.pushNotifications = {
           serviceWorkerRegistration: current,
         });
         if (token) {
-          await updateRegistration(uid, "add", token);
           const old = localStorage.getItem("push-token");
-          if (old && old !== token)
-            await updateRegistration(uid, "remove", old);
-          localStorage.setItem("push-token", token);
+          const oldUid = localStorage.getItem("push-uid");
+          if (old !== token || oldUid !== uid) {
+            await updateRegistration(uid, "add", token);
+            if (old && old !== token)
+              await updateRegistration(uid, "remove", old);
+            localStorage.setItem("push-token", token);
+            localStorage.setItem("push-uid", uid);
+          }
           await listenInForeground(current);
         }
       } catch (error) {
@@ -139,6 +144,7 @@ window.pushNotifications = {
       throw new Error("This device could not subscribe to push notifications.");
     await updateRegistration(uid, "add", token);
     localStorage.setItem("push-token", token);
+    localStorage.setItem("push-uid", uid);
     await listenInForeground(registration);
     return true;
   },
@@ -152,7 +158,10 @@ window.pushNotifications = {
     const subscription = registration
       ? await registration.pushManager.getSubscription()
       : null;
-    if (!token && !subscription) return true;
+    if (!token && !subscription) {
+      localStorage.removeItem("push-uid");
+      return true;
+    }
     let unsubscribed = false;
     let removed = false;
     let failure;
@@ -182,6 +191,7 @@ window.pushNotifications = {
     if (!unsubscribed && !removed)
       throw failure || new Error("Could not turn off notifications.");
     localStorage.removeItem("push-token");
+    localStorage.removeItem("push-uid");
     return true;
   },
 };

@@ -1,10 +1,164 @@
 let mapsApiPromise = null;
-let map, userMarker, infoWindow;
 let storedApiKey = null;
+let cachedGeocoder = null;
+let map, userMarker, infoWindow;
+let currentInfoWindowAnchor = null;
+let activeDotNetHelper = null;
+let mapAuthFailed = false;
 const activeMarkers = Object.create(null);
 const autocompletes = Object.create(null);
+const pendingAutocompleteValues = Object.create(null);
 const advancedMarkerEventHandlers = new WeakMap();
 let displayTimeZone = null;
+let pendingUserPosition = null;
+
+function ensureGoogleMapsBootstrap(key) {
+	if (window.google?.maps?.importLibrary) return;
+	(g => {
+		var h, a, k, p = "The Google Maps JavaScript API", c = "google", l = "importLibrary", q = "__ib__", m = document, b = window;
+		b = b[c] || (b[c] = {});
+		var d = b.maps || (b.maps = {}), r = new Set, e = new URLSearchParams, u = () => h || (h = new Promise(async (f, n) => {
+			await (a = m.createElement("script"));
+			e.set("libraries", [...r] + "");
+			for (k in g) e.set(k.replace(/[A-Z]/g, t => "_" + t[0].toLowerCase()), g[k]);
+			e.set("callback", c + ".maps." + q);
+			a.src = `https://maps.${c}apis.com/maps/api/js?` + e;
+			d[q] = f;
+			a.onerror = () => h = n(Error(p + " could not load."));
+			a.nonce = m.querySelector("script[nonce]")?.nonce || "";
+			(m.head || m.body || m.documentElement).append(a);
+		}));
+		d[l] ? console.warn(p + " only loads once. Ignoring:", g) : d[l] = (f, ...n) => r.add(f) && u().then(() => d[l](f, ...n));
+	})({
+		key,
+		v: "weekly",
+		loading: "async",
+	});
+}
+
+export async function loadGoogleMaps(apiKey) {
+	if (apiKey) storedApiKey = apiKey;
+	if (mapsApiPromise) return mapsApiPromise;
+	if (window.google?.maps?.Map) return Promise.resolve();
+
+	const key = storedApiKey || apiKey;
+	if (!key) throw new Error("Google Maps API key not provided.");
+
+	ensureGoogleMapsBootstrap(key);
+	mapsApiPromise = google.maps.importLibrary("maps").catch(err => {
+		mapsApiPromise = null;
+		if (!window.google?.maps?.Map) {
+			try {
+				delete window.google?.maps?.importLibrary;
+				delete window.google?.maps?.__ib__;
+			} catch (_) { }
+		}
+		throw err;
+	});
+
+	return mapsApiPromise;
+}
+
+export function formatDisplayName(displayName) {
+	if (!displayName) return "";
+	if (typeof displayName === "string") return displayName;
+	if (typeof displayName.text === "string") return displayName.text;
+	return String(displayName);
+}
+
+async function getGeocoder(apiKey) {
+	if (cachedGeocoder) return cachedGeocoder;
+	await loadGoogleMaps(apiKey);
+	const { Geocoder } = await google.maps.importLibrary("geocoding");
+	cachedGeocoder = new Geocoder();
+	return cachedGeocoder;
+}
+
+async function callGeocoder(geocoder, request) {
+	return new Promise((resolve, reject) => {
+		try {
+			const ret = geocoder.geocode(request, (results, status) => {
+				if (status === "OK" && results && results.length > 0) {
+					resolve(results);
+				} else if (status === "ZERO_RESULTS" || (status === "OK" && (!results || results.length === 0))) {
+					resolve([]);
+				} else {
+					reject(new Error("Geocode failed: " + status));
+				}
+			});
+			if (ret && typeof ret.then === "function") {
+				ret.then(
+					response => resolve(response?.results ?? []),
+					err => {
+						const msg = String(err?.message || err);
+						if (msg.includes("ZERO_RESULTS")) resolve([]);
+						else reject(err);
+					}
+				);
+			}
+		} catch (err) {
+			reject(err);
+		}
+	});
+}
+
+export async function geocodePlaceName(name, apiKey) {
+	if (!name || typeof name !== "string" || !name.trim()) return null;
+	try {
+		const geocoder = await getGeocoder(apiKey);
+		const results = await callGeocoder(geocoder, {
+			address: name.trim(),
+			region: "my",
+		});
+		if (results && results.length > 0) {
+			const loc = results[0].geometry?.location;
+			const lat = typeof loc?.lat === "function" ? loc.lat() : loc?.lat;
+			const lng = typeof loc?.lng === "function" ? loc.lng() : loc?.lng;
+			return {
+				lat,
+				lng,
+				formattedAddress: results[0].formatted_address || ""
+			};
+		}
+		return null;
+	} catch (err) {
+		const msg = String(err?.message || err);
+		if (msg.includes("ZERO_RESULTS")) return null;
+		throw err;
+	}
+}
+
+export async function reverseGeocode(lat, lng, apiKey) {
+	const numLat = Number(lat);
+	const numLng = Number(lng);
+	if (!Number.isFinite(numLat) || !Number.isFinite(numLng) || numLat < -90 || numLat > 90 || numLng < -180 || numLng > 180) {
+		return null;
+	}
+	try {
+		const geocoder = await getGeocoder(apiKey);
+		const results = await callGeocoder(geocoder, {
+			location: { lat: numLat, lng: numLng },
+		});
+		if (results && results.length > 0) {
+			return results[0].formatted_address || null;
+		}
+		return null;
+	} catch (err) {
+		const msg = String(err?.message || err);
+		if (msg.includes("ZERO_RESULTS")) return null;
+		throw err;
+	}
+}
+
+// Global auth failure handler for Google Maps JS API
+window.gm_authFailure = function () {
+	mapAuthFailed = true;
+	console.warn("Google Maps authentication failed (gm_authFailure triggered).");
+	if (activeDotNetHelper) {
+		activeDotNetHelper.invokeMethodAsync("OnMapAuthError", "Google Maps authorization failed: please verify your API key and allowed referers.")
+			.catch(() => {});
+	}
+};
 const transportMarkerTypes = {
 	bus: { icon: "🚌", className: "bus-marker", label: "Bus" },
 	lrt: { icon: "🚈", className: "lrt-marker", label: "LRT" },
@@ -28,7 +182,7 @@ export function clearStaticRoute() {
 	features.forEach(feature => staticRouteLayer.remove(feature));
 }
 
-export function showStaticRoute(geoJson, dotNetRef) {
+export async function showStaticRoute(geoJson, dotNetRef) {
 	if (!map) return;
 	if (!staticRouteLayer) {
 		staticRouteLayer = new google.maps.Data({ map });
@@ -51,7 +205,8 @@ export function showStaticRoute(geoJson, dotNetRef) {
 	staticRouteDotNetRef = dotNetRef;
 	const collection = JSON.parse(geoJson);
 	const features = staticRouteLayer.addGeoJson(collection);
-	const bounds = new google.maps.LatLngBounds();
+	const { LatLngBounds } = await google.maps.importLibrary("core");
+	const bounds = new LatLngBounds();
 	for (const feature of features) {
 		feature.getGeometry()?.forEachLatLng(position => bounds.extend(position));
 	}
@@ -67,56 +222,36 @@ function addAdvancedMarkerEventListener(marker, eventName, handler) {
 }
 
 function removeAdvancedMarker(marker) {
+	if (!marker) return;
 	const handlers = advancedMarkerEventHandlers.get(marker) || [];
 	for (const { eventName, handler } of handlers) {
-		marker.removeEventListener(eventName, handler);
+		try {
+			marker.removeEventListener(eventName, handler);
+		} catch (_) { }
 	}
 	advancedMarkerEventHandlers.delete(marker);
-	if (infoWindow?.get("anchor") === marker) infoWindow.close();
-	marker.map = null;
+	if (currentInfoWindowAnchor === marker) {
+		try {
+			infoWindow?.close();
+		} catch (_) { }
+		currentInfoWindowAnchor = null;
+	}
+	try {
+		if (window.google?.maps?.event?.clearInstanceListeners) {
+			google.maps.event.clearInstanceListeners(marker);
+		}
+	} catch (_) { }
+	try {
+		if (typeof marker.setMap === "function") marker.setMap(null);
+		marker.map = null;
+	} catch (_) { }
 }
 
-export async function loadGoogleMaps(apiKey) {
-	if (apiKey) storedApiKey = apiKey;
-	if (mapsApiPromise) return mapsApiPromise;
-	if (window.google?.maps?.importLibrary) return Promise.resolve();
-
-	const key = storedApiKey || apiKey;
-	if (!key) throw new Error("Google Maps API key not provided.");
-
-	mapsApiPromise = new Promise((resolve, reject) => {
-		const script = document.createElement("script");
-		script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&v=weekly&libraries=places&loading=async`;
-		script.async = true;
-		script.defer = true;
-
-		script.onload = () => {
-			const startTime = Date.now();
-			const waitUntilReady = () => {
-				if (window.google?.maps?.importLibrary) {
-					resolve();
-				} else if (Date.now() - startTime > 15000) {
-					mapsApiPromise = null;
-					reject(new Error("Google Maps API initialization timed out"));
-				} else {
-					setTimeout(waitUntilReady, 25);
-				}
-			};
-			waitUntilReady();
-		};
-
-		script.onerror = () => {
-			mapsApiPromise = null;
-			reject(new Error("Failed to load Google Maps script"));
-		};
-
-		document.head.appendChild(script);
-	});
-
-	return mapsApiPromise;
-}
 
 export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dotNetHelper, theme = 'DARK', timeZone) {
+	mapAuthFailed = false;
+	activeDotNetHelper = dotNetHelper;
+	pendingUserPosition = null;
 	await loadGoogleMaps(apiKey);
 	if (!timeZone) throw new Error("Display time zone not provided.");
 	displayTimeZone = timeZone;
@@ -129,6 +264,12 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 		google.maps.importLibrary("maps"),
 		google.maps.importLibrary("marker"),
 	]);
+
+	if (pendingUserPosition) {
+		lat = pendingUserPosition.lat;
+		lng = pendingUserPosition.lng;
+		pendingUserPosition = null;
+	}
 
 	map = new Map(el, {
 		center: { lat, lng },
@@ -145,36 +286,58 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 	// Close infoWindow when clicking anywhere else on the map
 	map.addListener("click", () => {
 		infoWindow.close();
+		currentInfoWindowAnchor = null;
 	});
 
 	const pin = document.createElement("div");
 	pin.textContent = "🚶";
 	pin.style.fontSize = "33px";
 
-	userMarker = new AdvancedMarkerElement({
-		position: { lat, lng },
-		map,
-		title: "Me",
-		gmpDraggable: true,
-		content: pin,
-	});
-
-	// Add gmp-dragend listener to update origin in Blazor
-	addAdvancedMarkerEventListener(userMarker, "gmp-dragend", async () => {
-		const newPos = userMarker.position;
+	async function handleUserMarkerDragEnd(rawPos) {
+		const coords = toLatLngLiteral(rawPos);
+		if (!coords) return;
 		try {
-			const address = await reverseGeocode(newPos.lat, newPos.lng);
+			const address = await reverseGeocode(coords.lat, coords.lng);
 			if (dotNetHelper) {
 				await dotNetHelper.invokeMethodAsync("UpdateOrigin", address);
-				await dotNetHelper.invokeMethodAsync("UpdateUserPosition", newPos.lat, newPos.lng);
-				
+				await dotNetHelper.invokeMethodAsync("UpdateUserPosition", coords.lat, coords.lng);
+
 				// Update the origin autocomplete widget value visually
 				setAutocompleteValue("origin-input", address);
 			}
 		} catch (err) {
 			console.error("Dragend geocode failed:", err);
 		}
-	});
+	}
+
+	try {
+		userMarker = new AdvancedMarkerElement({
+			position: { lat, lng },
+			map,
+			title: "Me",
+			gmpDraggable: true,
+			content: pin,
+		});
+
+		// Add gmp-dragend listener to update origin in Blazor
+		addAdvancedMarkerEventListener(userMarker, "gmp-dragend", () => handleUserMarkerDragEnd(userMarker.position));
+	} catch (markerErr) {
+		console.debug("Could not create user marker with AdvancedMarkerElement, falling back:", markerErr);
+		try {
+			if (google.maps.Marker) {
+				userMarker = new google.maps.Marker({
+					position: { lat, lng },
+					map,
+					title: "Me",
+					draggable: true,
+					label: "🚶",
+				});
+				userMarker.addListener("dragend", (e) => handleUserMarkerDragEnd(e?.latLng));
+			}
+		} catch (fallbackErr) {
+			console.warn("User marker fallback failed:", fallbackErr);
+		}
+	}
 
 	return map;
 }
@@ -190,58 +353,101 @@ export async function setMapTheme(theme) {
  * The new widget is a custom HTML element appended inside the container identified by elementId.
  */
 export async function initAutocomplete(elementId, dotNetHelper, methodName, apiKey) {
-	await loadGoogleMaps(apiKey);
-	const { PlaceAutocompleteElement } = await google.maps.importLibrary("places");
-
 	const container = document.getElementById(elementId);
 	if (!container) return;
+	const placeholderText = methodName === "UpdateOrigin" ? "Enter origin..." : "Enter destination...";
 
-	// Create the new PlaceAutocompleteElement widget
-	const placeAutocomplete = new PlaceAutocompleteElement({});
-	placeAutocomplete.setAttribute(
-		"aria-label",
-		methodName === "UpdateOrigin" ? "Origin" : "Destination",
-	);
+	try {
+		await loadGoogleMaps(apiKey);
+		const { PlaceAutocompleteElement } = await google.maps.importLibrary("places");
 
-	// Style the widget to fill its parent container
-	placeAutocomplete.style.width = "100%";
+		// Create the new PlaceAutocompleteElement widget
+		const placeAutocomplete = new PlaceAutocompleteElement({
+			requestedRegion: "my",
+			includedRegionCodes: ["my"],
+		});
+		placeAutocomplete.setAttribute(
+			"aria-label",
+			methodName === "UpdateOrigin" ? "Origin" : "Destination",
+		);
+		placeAutocomplete.setAttribute("placeholder", placeholderText);
 
-	// Clear the container and append the new element
-	container.innerHTML = "";
-	container.appendChild(placeAutocomplete);
-	autocompletes[elementId] = placeAutocomplete;
+		// Style the widget to fill its parent container
+		placeAutocomplete.style.width = "100%";
 
-	// Listen for place selection via the new gmp-select event
-	placeAutocomplete.addEventListener("gmp-select", async ({ placePrediction }) => {
-		const place = placePrediction.toPlace();
-		await place.fetchFields({ fields: ["displayName", "formattedAddress", "location"] });
-
-		const displayText = place.displayName || place.formattedAddress;
-
-		if (dotNetHelper) {
-			dotNetHelper.invokeMethodAsync(methodName, displayText);
-
-			if (methodName === "UpdateOrigin" && place.location) {
-				const lat = place.location.lat();
-				const lng = place.location.lng();
-				updateUserMarker(lat, lng);
-				dotNetHelper.invokeMethodAsync("UpdateUserPosition", lat, lng);
-			}
+		// Clear the container and append the new element
+		container.innerHTML = "";
+		container.appendChild(placeAutocomplete);
+		autocompletes[elementId] = placeAutocomplete;
+		if (Object.hasOwn(pendingAutocompleteValues, elementId)) {
+			setAutocompleteValue(elementId, pendingAutocompleteValues[elementId]);
 		}
-	});
+
+		// Listen for place selection via the new gmp-select event
+		placeAutocomplete.addEventListener("gmp-select", async ({ placePrediction }) => {
+			if (!placePrediction) return;
+			try {
+				const place = placePrediction.toPlace();
+				await place.fetchFields({ fields: ["displayName", "formattedAddress", "location"] });
+
+				const displayText = formatDisplayName(place.displayName) || place.formattedAddress || "";
+
+				if (dotNetHelper) {
+					dotNetHelper.invokeMethodAsync(methodName, displayText);
+
+					if (methodName === "UpdateOrigin" && place.location) {
+						const lat = typeof place.location.lat === "function" ? place.location.lat() : place.location.lat;
+						const lng = typeof place.location.lng === "function" ? place.location.lng() : place.location.lng;
+						if (Number.isFinite(lat) && Number.isFinite(lng)) {
+							updateUserMarker(lat, lng);
+							dotNetHelper.invokeMethodAsync("UpdateUserPosition", lat, lng);
+						}
+					}
+				}
+			} catch (err) {
+				console.error("Place selection failed:", err);
+			}
+		});
+	} catch (err) {
+		console.debug(`PlaceAutocompleteElement unavailable for ${elementId}, falling back to text input:`, err);
+		container.innerHTML = "";
+		const fallbackInput = document.createElement("input");
+		fallbackInput.type = "text";
+		fallbackInput.className = "w-100";
+		fallbackInput.style.border = "none";
+		fallbackInput.style.background = "transparent";
+		fallbackInput.style.outline = "none";
+		fallbackInput.style.color = "inherit";
+		fallbackInput.style.font = "inherit";
+		fallbackInput.placeholder = placeholderText;
+		fallbackInput.setAttribute("aria-label", methodName === "UpdateOrigin" ? "Origin" : "Destination");
+		fallbackInput.addEventListener("input", async (e) => {
+			if (dotNetHelper) {
+				await dotNetHelper.invokeMethodAsync(methodName, e.target.value);
+			}
+		});
+		container.appendChild(fallbackInput);
+		autocompletes[elementId] = fallbackInput;
+		if (Object.hasOwn(pendingAutocompleteValues, elementId)) {
+			setAutocompleteValue(elementId, pendingAutocompleteValues[elementId]);
+		}
+	}
 }
 
 /**
- * Updates the text value of a PlaceAutocompleteElement widget.
+ * Updates the text value of a PlaceAutocompleteElement widget or fallback input.
  */
 export function setAutocompleteValue(elementId, value) {
+	pendingAutocompleteValues[elementId] = value || "";
 	const widget = autocompletes[elementId];
 	if (widget) {
-		widget.value = value || "";
+		if ("value" in widget) {
+			widget.value = value || "";
+		}
 		
 		// Also find the internal input and trigger an input event if needed
 		// although setting .value on the web component should suffice for display.
-		const internalInput = widget.querySelector('input');
+		const internalInput = widget.querySelector ? widget.querySelector('input') : null;
 		if (internalInput) {
 			internalInput.value = value || "";
 		}
@@ -249,11 +455,19 @@ export function setAutocompleteValue(elementId, value) {
 }
 
 export async function updateUserMarker(lat, lng) {
+	pendingUserPosition = { lat, lng };
 	try {
 		await loadGoogleMaps();
 		if (!map || !userMarker) return;
-		userMarker.position = { lat, lng };
-		map.panTo({ lat, lng });
+		pendingUserPosition = null;
+		if (typeof userMarker.setPosition === "function") {
+			userMarker.setPosition({ lat, lng });
+		} else {
+			userMarker.position = { lat, lng };
+		}
+		try {
+			map.panTo?.({ lat, lng });
+		} catch (_) { }
 	} catch (err) {
 		console.error("updateUserMarker err: " + err)
 	}
@@ -271,11 +485,29 @@ export function clearRoute() {
 	currentActiveRouteId = -1;
 }
 
+function toLatLngLiteral(pos) {
+	if (!pos) return null;
+	const lat = typeof pos.lat === "function" ? pos.lat() : pos.lat;
+	const lng = typeof pos.lng === "function" ? pos.lng() : pos.lng;
+	const numLat = Number(lat);
+	const numLng = Number(lng);
+	return (Number.isFinite(numLat) && Number.isFinite(numLng)) ? { lat: numLat, lng: numLng } : null;
+}
+
+function normalizeRoutesTravelMode(mode) {
+	const m = (mode || "").toUpperCase();
+	if (m === "DRIVING" || m === "DRIVE") return "DRIVE";
+	if (m === "WALKING" || m === "WALK") return "WALK";
+	if (m === "BICYCLING" || m === "BICYCLE") return "BICYCLE";
+	if (m === "TRANSIT") return "TRANSIT";
+	return m || "TRANSIT";
+}
+
 /**
  * Computes and renders a route using the new Routes library (Route.computeRoutes).
  * Replaces legacy DirectionsService.route() + DirectionsRenderer.setDirections().
  */
-export async function showRoute(origin, destination, travelMode = "TRANSIT") {
+async function showRoute(origin, destination, travelMode = "TRANSIT") {
 	await loadGoogleMaps();
 	if (!map) throw new Error("Map not initialized.");
 
@@ -284,11 +516,15 @@ export async function showRoute(origin, destination, travelMode = "TRANSIT") {
 	// Clear any existing route before drawing a new one
 	clearRoute();
 
+	const originLoc = toLatLngLiteral(origin) || origin;
+	const destinationLoc = toLatLngLiteral(destination) || destination;
+
+	const routesTravelMode = normalizeRoutesTravelMode(travelMode);
 	const request = {
-		origin,
-		destination,
-		travelMode,
-		fields: ["path"],
+		origin: originLoc,
+		destination: destinationLoc,
+		travelMode: routesTravelMode,
+		fields: ["path", "legs", "viewport"],
 	};
 
 	const { routes } = await Route.computeRoutes(request);
@@ -297,8 +533,10 @@ export async function showRoute(origin, destination, travelMode = "TRANSIT") {
 		throw new Error("No routes found.");
 	}
 
+	const route = routes[0];
+
 	// Draw polylines on the map
-	routePolylines = routes[0].createPolylines();
+	routePolylines = route.createPolylines();
 	routePolylines.forEach(polyline => {
 		polyline.setOptions({
 			strokeColor: "#4285F4",
@@ -309,54 +547,97 @@ export async function showRoute(origin, destination, travelMode = "TRANSIT") {
 
 	// Draw origin/destination markers
 	try {
-		const { PinElement, AdvancedMarkerElement } = await google.maps.importLibrary("marker");
-		const route = routes[0];
 		routeMarkers = [];
 
-		if (route.legs && route.legs.length > 0) {
-			// Add Start Marker
-			const startLeg = route.legs[0];
-			const startPin = new PinElement({
-				glyphText: 'A',
-				background: '#4285F4',
-				borderColor: '#FFFFFF'
-			});
-			const startMarker = new AdvancedMarkerElement({
-				position: startLeg.startLocation.latLng,
-				content: startPin,
-				title: "Origin"
-			});
-			startMarker.map = map;
-			routeMarkers.push(startMarker);
+		const startPos = (route.legs && route.legs.length > 0)
+			? (route.legs[0].startLocation?.latLng || route.legs[0].startLocation)
+			: originLoc;
+		const endPos = (route.legs && route.legs.length > 0)
+			? (route.legs[route.legs.length - 1].endLocation?.latLng || route.legs[route.legs.length - 1].endLocation)
+			: destinationLoc;
 
-			// Add End Marker (and intermediate ones if they existed, but for now we follow the legs)
-			const lastLeg = route.legs[route.legs.length - 1];
-			const endPin = new PinElement({
-				glyphText: 'B',
-				background: '#EA4335',
-				borderColor: '#FFFFFF'
-			});
-			const endMarker = new AdvancedMarkerElement({
-				position: lastLeg.endLocation.latLng,
-				content: endPin,
-				title: "Destination"
-			});
-			endMarker.map = map;
-			routeMarkers.push(endMarker);
+		if (startPos && endPos) {
+			let addedWithAdvanced = false;
+			try {
+				const { PinElement, AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+				if (AdvancedMarkerElement && PinElement) {
+					const startPin = new PinElement({
+						glyphText: 'A',
+						background: '#4285F4',
+						borderColor: '#FFFFFF'
+					});
+					const startMarker = new AdvancedMarkerElement({
+						position: startPos,
+						content: startPin,
+						title: "Origin"
+					});
+					startMarker.map = map;
+					routeMarkers.push(startMarker);
+
+					const endPin = new PinElement({
+						glyphText: 'B',
+						background: '#EA4335',
+						borderColor: '#FFFFFF'
+					});
+					const endMarker = new AdvancedMarkerElement({
+						position: endPos,
+						content: endPin,
+						title: "Destination"
+					});
+					endMarker.map = map;
+					routeMarkers.push(endMarker);
+					addedWithAdvanced = true;
+				}
+			} catch (_) { }
+
+			if (!addedWithAdvanced && google.maps.Marker) {
+				try {
+					const startMarker = new google.maps.Marker({
+						position: startPos,
+						map,
+						title: "Origin",
+						label: "A"
+					});
+					routeMarkers.push(startMarker);
+
+					const endMarker = new google.maps.Marker({
+						position: endPos,
+						map,
+						title: "Destination",
+						label: "B"
+					});
+					routeMarkers.push(endMarker);
+				} catch (_) { }
+			}
 		}
 	} catch (err) {
 		console.error("Manual marker creation failed:", err);
 	}
+
+	// Fit map bounds to the route
+	if (route.viewport) map.fitBounds(route.viewport);
+}
+
+async function resolveRouteEndpoints(originName, destinationName) {
+	const [originRes, destinationRes] = await Promise.all([
+		geocodePlaceName(originName),
+		geocodePlaceName(destinationName)
+	]);
+
+	const originLoc = toLatLngLiteral(originRes);
+	const destinationLoc = toLatLngLiteral(destinationRes);
+
+	if (!originLoc || !destinationLoc) {
+		throw new Error("Unable to resolve origin or destination location.");
+	}
+
+	return { originLoc, destinationLoc };
 }
 
 export async function showRouteByName(originName, destinationName, travelMode = "TRANSIT") {
 	await loadGoogleMaps();
 	try {
-		const [originLoc, destinationLoc] = await Promise.all([
-			geocodePlaceName(originName),
-			geocodePlaceName(destinationName)
-		]);
-
+		const { originLoc, destinationLoc } = await resolveRouteEndpoints(originName, destinationName);
 		await showRoute(originLoc, destinationLoc, travelMode);
 	} catch (err) {
 		console.error("showRouteByName failed:", err);
@@ -367,20 +648,17 @@ export async function showRouteByName(originName, destinationName, travelMode = 
 export async function getTransitRoutes(originName, destinationName) {
 	await loadGoogleMaps();
 	try {
-		const [originLoc, destinationLoc] = await Promise.all([
-			geocodePlaceName(originName),
-			geocodePlaceName(destinationName)
-		]);
+		const { originLoc, destinationLoc } = await resolveRouteEndpoints(originName, destinationName);
 
 		const { Route } = await google.maps.importLibrary("routes");
-		const { GeometryLibrary } = await google.maps.importLibrary("geometry");
+		const { encoding } = await google.maps.importLibrary("geometry");
 
 		const request = {
 			origin: originLoc,
 			destination: destinationLoc,
 			travelMode: "TRANSIT",
 			computeAlternativeRoutes: true,
-			fields: ["*"],
+			fields: ["path", "durationMillis", "distanceMeters", "legs.steps.transitDetails"],
 		};
 
 		const { routes } = await Route.computeRoutes(request);
@@ -411,13 +689,13 @@ export async function getTransitRoutes(originName, destinationName) {
 			}
 
 			let encodedPolyline = "";
-			if (r.path && google.maps.geometry?.encoding) {
-				encodedPolyline = google.maps.geometry.encoding.encodePath(r.path);
+			if (r.path) {
+				encodedPolyline = encoding.encodePath(r.path);
 			}
 
 			return {
 				routeId: index,
-				encodedPolyline: encodedPolyline,
+				encodedPolyline,
 				durationSeconds: r.durationMillis ? Math.round(r.durationMillis / 1000) : 0,
 				distanceMeters: r.distanceMeters || 0,
 				transitSteps: steps
@@ -434,19 +712,23 @@ export async function drawMultipleRoutes(routesData, activeRouteId, dotNetRef) {
 	await loadGoogleMaps();
 	if (!map) throw new Error("Map not initialized.");
 	
-	const { GeometryLibrary } = await google.maps.importLibrary("geometry");
+	const [{ Polyline }, { LatLngBounds }, { encoding }] = await Promise.all([
+		google.maps.importLibrary("maps"),
+		google.maps.importLibrary("core"),
+		google.maps.importLibrary("geometry")
+	]);
 
 	clearRoute();
 	currentActiveRouteId = activeRouteId;
 
-	const bounds = new google.maps.LatLngBounds();
+	const bounds = new LatLngBounds();
 
 	routesData.forEach(routeData => {
 		if (!routeData.path) return;
 		
-		const path = google.maps.geometry.encoding.decodePath(routeData.path);
+		const path = encoding.decodePath(routeData.path);
 		
-		const polyline = new google.maps.Polyline({
+		const polyline = new Polyline({
 			path: path,
 			strokeColor: "#808080",
 			strokeWeight: 3,
@@ -492,37 +774,6 @@ export function setActiveRoute(routeId) {
 }
 
 
-export async function geocodePlaceName(name) {
-	await loadGoogleMaps();
-	const { Geocoder } = await google.maps.importLibrary("geocoding");
-	const geocoder = new Geocoder();
-
-	return new Promise((resolve, reject) => {
-		geocoder.geocode({ address: name }, (results, status) => {
-			if (status === "OK" && results[0]) {
-				resolve(results[0].geometry.location);
-			} else {
-				reject(new Error("Geocode failed: " + status));
-			}
-		});
-	});
-}
-
-export async function reverseGeocode(lat, lng) {
-	await loadGoogleMaps();
-	const { Geocoder } = await google.maps.importLibrary("geocoding");
-	const geocoder = new Geocoder();
-
-	return new Promise((resolve, reject) => {
-		geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-			if (status === "OK" && results[0]) {
-				resolve(results[0].formatted_address);
-			} else {
-				reject(new Error("Reverse geocode failed: " + status));
-			}
-		});
-	});
-}
 
 function getTransportMarker(location) {
 	const type = typeof location.transportType === "string" ? location.transportType.trim().toLowerCase() : "";
@@ -536,7 +787,7 @@ function updateTransportMarkerElement(element, location) {
 }
 
 export async function syncMarkers(locations) {
-	if (!map || !infoWindow) return;
+	if (!map || !infoWindow || mapAuthFailed) return;
 	
 	// Safety check for Blazor interop
 	if (!locations || !Array.isArray(locations)) {
@@ -544,64 +795,96 @@ export async function syncMarkers(locations) {
 		return;
 	}
 
-	await loadGoogleMaps();
-	const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
-
 	try {
+		await loadGoogleMaps();
+		const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
 		const currentIds = new Set();
 
 		for (const loc of locations) {
 			const id = loc.vehicleId;
 			if (id == null || !Number.isFinite(loc.lat) || !Number.isFinite(loc.lng)) {
-				console.warn("syncMarkers: skipping invalid vehicle location", loc);
+				console.debug("syncMarkers: skipping invalid vehicle location", loc);
 				continue;
 			}
-			currentIds.add(id);
+			const markerKey = loc.providerName ? `${loc.providerName}:${id}` : String(id);
+			currentIds.add(markerKey);
 
 			const speedKmh = (loc.speed || 0) * 3.6;
 			loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
 			const title = `Route ${loc.routeId || 'Unknown'} - ${id}`;
 			
-			if (activeMarkers[id]) {
-				const marker = activeMarkers[id];
-				const previous = marker.busData;
-				if (!previous || previous.lat !== loc.lat || previous.lng !== loc.lng) {
-					marker.position = { lat: loc.lat, lng: loc.lng };
+			if (activeMarkers[markerKey]) {
+				const marker = activeMarkers[markerKey];
+				try {
+					if (typeof marker.setPosition === "function") {
+						marker.setPosition({ lat: loc.lat, lng: loc.lng });
+						if (typeof marker.setTitle === "function") marker.setTitle(title);
+					} else {
+						const previous = marker.busData;
+						if (!previous || previous.lat !== loc.lat || previous.lng !== loc.lng) {
+							marker.position = { lat: loc.lat, lng: loc.lng };
+						}
+						marker.title = title;
+						if (marker.content) {
+							updateTransportMarkerElement(marker.content, loc);
+						}
+					}
+					marker.busData = loc;
+				} catch (updateErr) {
+					console.warn("syncMarkers: failed to update marker position:", markerKey, updateErr);
 				}
-				marker.title = title;
-				updateTransportMarkerElement(marker.content, loc);
-				marker.busData = loc;
 			} else {
 				const pos = { lat: loc.lat, lng: loc.lng };
-				const el = document.createElement("div");
-				updateTransportMarkerElement(el, loc);
-				el.style.fontSize = "28px";
-
-				const marker = new AdvancedMarkerElement({
-					position: pos,
-					map,
-					title,
-					content: el,
-					gmpClickable: true,
-				});
-
-				marker.busData = loc;
-
-				addAdvancedMarkerEventListener(marker, "gmp-click", () => {
-					if (infoWindow.get("anchor") === marker) {
+				let marker = null;
+				const toggleInfoWindow = () => {
+					if (currentInfoWindowAnchor === marker) {
 						infoWindow.close();
+						currentInfoWindowAnchor = null;
 						return;
 					}
+					infoWindow.setContent(buildVehicleInfoContent(id, marker.busData));
+					infoWindow.open({ anchor: marker, map });
+					currentInfoWindowAnchor = marker;
+				};
 
-					const currentLoc = marker.busData;
-					infoWindow.setContent(buildVehicleInfoContent(id, currentLoc));
-					infoWindow.open({
-						anchor: marker,
+				try {
+					const el = document.createElement("div");
+					updateTransportMarkerElement(el, loc);
+					el.style.fontSize = "28px";
+
+					marker = new AdvancedMarkerElement({
+						position: pos,
 						map,
+						title,
+						content: el,
+						gmpClickable: true,
 					});
-				});
 
-				activeMarkers[id] = marker;
+					marker.busData = loc;
+					addAdvancedMarkerEventListener(marker, "gmp-click", toggleInfoWindow);
+					activeMarkers[markerKey] = marker;
+				} catch (markerErr) {
+					// AdvancedMarkerElement failed; attempt fallback to google.maps.Marker
+					try {
+						if (google.maps.Marker) {
+							const markerType = getTransportMarker(loc);
+							marker = new google.maps.Marker({
+								position: pos,
+								map,
+								title,
+								label: {
+									text: loc.icon || markerType.icon,
+									fontSize: "20px",
+								},
+							});
+							marker.busData = loc;
+							marker.addListener("click", toggleInfoWindow);
+							activeMarkers[markerKey] = marker;
+						}
+					} catch (fallbackErr) {
+						console.warn("syncMarkers: both AdvancedMarkerElement and fallback failed:", fallbackErr);
+					}
+				}
 			}
 		}
 
@@ -657,6 +940,8 @@ function appendBusInfoRow(container, label, value) {
 }
 export function cleanupMap() {
 	clearStaticRoute();
+	clearRoute();
+	activeDotNetHelper = null;
 	if (staticRouteLayer) {
 		staticRouteLayer.setMap(null);
 		staticRouteLayer = null;
@@ -666,11 +951,7 @@ export function cleanupMap() {
 		removeAdvancedMarker(activeMarkers[id]);
 		delete activeMarkers[id];
 	}
-	routePolylines.forEach(p => p.setMap(null));
-	routePolylines = [];
-	routeMarkers.forEach(removeAdvancedMarker);
-	routeMarkers = [];
-	
+
 	if (infoWindow) {
 		infoWindow.close();
 		infoWindow = null;
@@ -679,6 +960,7 @@ export function cleanupMap() {
 		removeAdvancedMarker(userMarker);
 		userMarker = null;
 	}
+	pendingUserPosition = null;
 	map = null;
 
 	// Fallback clear all autocompletes
@@ -692,6 +974,7 @@ export function cleanupMap() {
  * to prevent detached DOM memory leaks.
  */
 export function disposeAutocomplete(elementId) {
+	delete pendingAutocompleteValues[elementId];
 	if (autocompletes[elementId]) {
 		const widget = autocompletes[elementId];
 		// By removing the widget from the DOM and deleting the reference,

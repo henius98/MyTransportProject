@@ -3,11 +3,11 @@ import { requireSignedInUser } from "./firebase-auth.js";
 
 let firestoreContextPromise = null;
 
-async function getFirestoreContext() {
+export async function getFirestoreContext() {
     if (!firestoreContextPromise) {
         const pending = Promise.all([
             getFirebaseApp(),
-            import(`${firebaseSdkBase}/firebase-firestore.js`)
+            import(`${firebaseSdkBase}/firebase-firestore-lite.js`)
         ]).then(([app, sdk]) => ({ db: sdk.getFirestore(app), sdk }));
         firestoreContextPromise = pending;
         void pending.catch(() => {
