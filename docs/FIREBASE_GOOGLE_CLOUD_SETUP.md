@@ -505,7 +505,8 @@ The script [`scripts/configure-firebase.mjs`](file:///var/home/henius/src/MyTran
 2. Parses the `FIREBASE_CONFIG_JSON` environment variable
 3. Validates required keys (`apiKey`, `authDomain`, `projectId`, `appId`)
 4. Replaces the empty Firebase section with real values
-5. Writes the updated file
+5. Optionally fills `StaticData.BaseUrl` / `BaziFlow.BaseUrl` from `STATIC_DATA_BASE_URL` / `BAZIFLOW_BASE_URL`, keeping inline comments
+6. Writes the updated file
 
 The GitHub Actions workflow calls it like:
 

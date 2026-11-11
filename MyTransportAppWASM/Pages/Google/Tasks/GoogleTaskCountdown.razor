@@ -1,7 +1,7 @@
 @namespace MyTransportAppWASM.Pages.Google
 @using System.Globalization
 @implements IDisposable
-@inject GoogleWorkspaceService Workspace
+@inject IGoogleWorkspaceService Workspace
 
 <section class="task-countdown" aria-labelledby="today-countdown-title">
   <h3 id="today-countdown-title"><span class="bi bi-clock" aria-hidden="true"></span> End of today</h3>

@@ -25,21 +25,12 @@ const sdk = {
     setDoc: async (ref, data) => { writes.push({ operation: "set", ref, data }); },
     deleteDoc: async ref => { writes.push({ operation: "delete", ref }); }
 };
-const firestore = new SyntheticModule(Object.keys(sdk), function () {
-    for (const [key, value] of Object.entries(sdk)) this.setExport(key, value);
-}, { context });
-await firestore.link(() => {});
-await firestore.evaluate();
-const module = new SourceTextModule(source, { context, importModuleDynamically: async specifier => {
-    assert.equal(specifier, "unused/firebase-firestore-lite.js");
-    return firestore;
-} });
+const module = new SourceTextModule(source, { context });
 await module.link(specifier => new SyntheticModule(
-    specifier === "./firebase-config.js" ? ["getFirebaseApp", "firebaseSdkBase"] : ["requireSignedInUser"],
+    specifier === "./firebase-firestore.js" ? ["getFirestoreContext"] : ["requireSignedInUser"],
     function () {
-        if (specifier === "./firebase-config.js") {
-            this.setExport("getFirebaseApp", async () => ({}));
-            this.setExport("firebaseSdkBase", "unused");
+        if (specifier === "./firebase-firestore.js") {
+            this.setExport("getFirestoreContext", async () => ({ db, sdk }));
         } else this.setExport("requireSignedInUser", async () => {});
     }, { context }
 ));

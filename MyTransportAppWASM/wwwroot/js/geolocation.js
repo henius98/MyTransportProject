@@ -1,65 +1,101 @@
 /**
  * @typedef {Object} GetUserLocationOptions
  * @property {boolean} [enableHighAccuracy=true] Request high-accuracy if available.
- * @property {number}  [timeout=15000]           Max time (ms) for initial getCurrentPosition.
- * @property {number}  [maximumAge=0]            Allow cached position age (ms).
- * @property {number}  [minAccuracy=100]         Desired accuracy in meters before we stop retrying.
- * @property {number}  [watchTimeout=5000]       Max extra time (ms) we wait with watchPosition.
+ * @property {number}  [timeout=8000]            Max time (ms) for initial getCurrentPosition.
+ * @property {number}  [maximumAge]              Allow cached position age (ms).
  * @property {boolean} [useCache=true]           Use localStorage cache when valid.
  * @property {number}  [cacheMaxAge=0]           Max cache age (ms) before ignoring.
  */
 
 let permissionDeniedNotified = false;
+const cacheKey = "user_location_cache_v1";
 
 /**
- * Get user location with sane defaults, retry + watch fallback and optional caching.
- * Throws on hard errors (e.g. permission denied).
+ * Synchronously reads the last cached location from localStorage regardless of age.
+ * Used for instant initial map centering while a fresh position fix resolves.
+ *
+ * @returns {{ latitude:number; longitude:number; accuracy:number|null; timestamp:number; source:"cache" } | null}
+ */
+export function getCachedLocation() {
+  if (typeof localStorage === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = localStorage.getItem(cacheKey);
+    if (!raw) {
+      return null;
+    }
+
+    const cached = JSON.parse(raw);
+    if (
+      cached &&
+      typeof cached.latitude === "number" &&
+      Number.isFinite(cached.latitude) &&
+      typeof cached.longitude === "number" &&
+      Number.isFinite(cached.longitude)
+    ) {
+      return {
+        latitude: cached.latitude,
+        longitude: cached.longitude,
+        accuracy: typeof cached.accuracy === "number" ? cached.accuracy : null,
+        timestamp: typeof cached.timestamp === "number" ? cached.timestamp : 0,
+        source: "cache"
+      };
+    }
+  } catch (cacheErr) {
+    // ignore cache errors, continue with live lookup
+    console.debug("Location cache read failed", cacheErr);
+  }
+
+  return null;
+}
+
+/**
+ * Get user location with sane defaults, fast network fallback and optional caching.
+ * Throws on hard errors (e.g. browser unsupported).
  *
  * @param {GetUserLocationOptions} [options]
- * @returns {Promise<{ latitude:number; longitude:number; accuracy:number; source:"fresh"|"watch"|"cache" } | null>}
+ * @returns {Promise<{ latitude:number; longitude:number; accuracy:number; source:"fresh"|"cache" } | null>}
  */
 export async function getUserLocation(options = {}) {
   const {
     enableHighAccuracy = true,
-    timeout = 15000,
-    maximumAge = 0,
-    minAccuracy = 100,
-    watchTimeout = 5000,
+    timeout = 8000,
     useCache = true,
     cacheMaxAge = 0
   } = options;
+  const maximumAge =
+    typeof options.maximumAge === "number"
+      ? options.maximumAge
+      : useCache
+        ? Math.max(cacheMaxAge, 60000)
+        : 0;
 
   if (!("geolocation" in navigator)) {
     throw new Error("Geolocation not supported by this browser");
   }
 
   const geo = navigator.geolocation;
-  const cacheKey = "user_location_cache_v1";
   // 1) Fast path: cached location (optional)
-  if (useCache && typeof localStorage !== "undefined") {
-    try {
-      const raw = localStorage.getItem(cacheKey);
-      if (raw) {
-        const cached = JSON.parse(raw);
-        const age = Date.now() - cached.timestamp;
-        if (age >= 0 && age <= cacheMaxAge) {
-          return {
-            latitude: cached.latitude,
-            longitude: cached.longitude,
-            accuracy: cached.accuracy,
-            source: "cache"
-          };
-        }
+  if (useCache) {
+    const cached = getCachedLocation();
+    if (cached) {
+      const age = Date.now() - cached.timestamp;
+      if (age >= 0 && age <= cacheMaxAge) {
+        return {
+          latitude: cached.latitude,
+          longitude: cached.longitude,
+          accuracy: cached.accuracy,
+          source: "cache"
+        };
       }
-    } catch (cacheErr) {
-      // ignore cache errors, continue with live lookup
-      console.warn("Location cache read failed", cacheErr);
     }
   }
   
   const settings = { enableHighAccuracy, timeout, maximumAge };
 
-  function getPositionOnce() {
+  function requestPosition(posSettings) {
     return new Promise(function (resolve, reject) {
       geo.getCurrentPosition(
         function (pos) {
@@ -68,74 +104,40 @@ export async function getUserLocation(options = {}) {
         function (err) {
           reject(err);
         },
-        settings
+        posSettings
       );
     });
   }
 
-  async function getWithWatchFallback() {
-    // First shot
-    const initial = await getPositionOnce();
-    if (initial.accuracy <= minAccuracy) {
-      return { coords: initial, source: "fresh" };
-    }
-
-    // Try to refine via watchPosition for a short window.
-    return new Promise(function (resolve, reject) {
-      let settled = false;
-      let watchId = null;
-
-      function finish(value, fromWatch) {
-        if (settled) return;
-        settled = true;
-        if (watchId !== null) {
-          geo.clearWatch(watchId);
-        }
-        resolve({
-          coords: value,
-          source: fromWatch ? "watch" : "fresh"
+  async function getPositionOnce() {
+    try {
+      return await requestPosition(settings);
+    } catch (err) {
+      // Fall back to fast network/Wi-Fi location when high-accuracy GPS times out or is unavailable.
+      if (
+        enableHighAccuracy &&
+        err &&
+        typeof err === "object" &&
+        (err.code === err.POSITION_UNAVAILABLE || err.code === err.TIMEOUT || err.code === 2 || err.code === 3)
+      ) {
+        return await requestPosition({
+          enableHighAccuracy: false,
+          timeout: Math.min(timeout, 4000),
+          maximumAge: Math.max(maximumAge, 300000)
         });
       }
-
-      function handleError(err) {
-        if (settled) return;
-        settled = true;
-        if (watchId !== null) {
-          geo.clearWatch(watchId);
-        }
-        reject(err);
-      }
-
-      watchId = geo.watchPosition(
-        function (p) {
-          const c = p.coords;
-          if (c.accuracy <= minAccuracy) {
-            finish(c, true);
-          }
-        },
-        handleError,
-        settings
-      );
-
-      // If no better fix within watchTimeout, fall back to the initial reading.
-      setTimeout(function () {
-        if (!settled) {
-          finish(initial, false);
-        }
-      }, watchTimeout);
-    });
+      throw err;
+    }
   }
 
   try {
-    const resultWithSource = await getWithWatchFallback();
-    const coords = resultWithSource.coords;
-    const source = resultWithSource.source;
+    const coords = await getPositionOnce();
 
     const result = {
       latitude: coords.latitude,
       longitude: coords.longitude,
       accuracy: coords.accuracy,
-      source: source
+      source: "fresh"
     };
 
     // Persist to cache if enabled
@@ -152,7 +154,7 @@ export async function getUserLocation(options = {}) {
         );
       } catch (cacheErr) {
         // ignore cache failures
-        console.warn("Location cache write failed", cacheErr);
+        console.debug("Location cache write failed", cacheErr);
       }
     }
 

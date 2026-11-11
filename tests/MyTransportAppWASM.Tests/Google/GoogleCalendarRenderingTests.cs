@@ -8,6 +8,7 @@ using Moq;
 using MyTransportAppWASM.Models;
 using MyTransportAppWASM.Pages.Google;
 using MyTransportAppWASM.Services;
+using MyTransportAppWASM.Services.Interfaces;
 using MyTransportAppWASM.Utils;
 
 namespace MyTransportAppWASM.Tests;
@@ -157,7 +158,7 @@ public class GoogleCalendarRenderingTests
         module.Setup(js => js.DisposeAsync()).Returns(ValueTask.CompletedTask);
         await using var services = new ServiceCollection().AddLogging()
             .AddSingleton(runtime.Object)
-            .AddSingleton<GoogleWorkspaceService>().BuildServiceProvider();
+            .AddSingleton<IGoogleWorkspaceService, GoogleWorkspaceService>().BuildServiceProvider();
         await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
         var html = await renderer.Dispatcher.InvokeAsync(async () =>
         {

@@ -158,27 +158,15 @@ namespace MyTransportAppWASM.Services
         }
       }
 
-      await Task.WhenAll(realtimeTasks.Concat(outlookTasks));
-
-      var realtimeResults = new List<WeatherProviderResult>();
-      foreach (var task in realtimeTasks)
-      {
-        var result = await task;
-        if (result != null) realtimeResults.Add(result);
-      }
-
-      var outlookResults = new List<WeatherProviderResult>();
-      foreach (var task in outlookTasks)
-      {
-        var result = await task;
-        if (result != null) outlookResults.Add(result);
-      }
+      var realtimeAllTask = Task.WhenAll(realtimeTasks);
+      var outlookAllTask = Task.WhenAll(outlookTasks);
+      await Task.WhenAll(realtimeAllTask, outlookAllTask);
 
       return new WeatherPlanResult
       {
         Query = query with { },
-        Realtime = realtimeResults,
-        Outlooks = outlookResults
+        Realtime = (await realtimeAllTask).Where(r => r != null).ToList(),
+        Outlooks = (await outlookAllTask).Where(r => r != null).ToList()
       };
     }
 
@@ -381,21 +369,30 @@ namespace MyTransportAppWASM.Services
       return result;
     }
 
-    private static Uri BuildSingaporeNeaUri(string template, KeyedWeatherProviderOptions options, WeatherQuery query)
+    private static string ApplyCommonPlaceholders(
+      string template,
+      WeatherProviderOptions options,
+      WeatherQuery? query = null)
     {
-      var formatted = template
-        .Replace("{lat}", query.Latitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
-        .Replace("{lon}", query.Longitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
+      if (query is not null)
+      {
+        template = template
+          .Replace("{lat}", query.Latitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
+          .Replace("{lon}", query.Longitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
+      }
 
       if (!string.IsNullOrWhiteSpace(options.ApiKey))
       {
-        formatted = formatted
+        template = template
           .Replace("{key}", options.ApiKey, StringComparison.OrdinalIgnoreCase)
           .Replace("{apiKey}", options.ApiKey, StringComparison.OrdinalIgnoreCase);
       }
 
-      return new Uri(formatted, UriKind.Absolute);
+      return template;
     }
+
+    private static Uri BuildSingaporeNeaUri(string template, KeyedWeatherProviderOptions options, WeatherQuery query) =>
+      new(ApplyCommonPlaceholders(template, options, query), UriKind.Absolute);
 
     private static Uri BuildMetMalaysiaUri(MetMalaysiaWeatherProviderOptions options, WeatherQuery query, bool isOutlook)
     {
@@ -417,21 +414,12 @@ namespace MyTransportAppWASM.Services
         template = template.Replace("{date_end}", end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
       }
 
-      if (!string.IsNullOrWhiteSpace(options.ApiKey))
-      {
-        template = template
-          .Replace("{key}", options.ApiKey, StringComparison.OrdinalIgnoreCase)
-          .Replace("{apiKey}", options.ApiKey, StringComparison.OrdinalIgnoreCase);
-      }
-
-      return new Uri(template, UriKind.Absolute);
+      return new Uri(ApplyCommonPlaceholders(template, options), UriKind.Absolute);
     }
 
     private static Uri BuildOpenMeteoUri(string template, KeyedWeatherProviderOptions options, WeatherQuery query)
     {
-      var formatted = template
-        .Replace("{lat}", query.Latitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
-        .Replace("{lon}", query.Longitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
+      var formatted = ApplyCommonPlaceholders(template, options, query);
 
       if (formatted.Contains("{forecast_hours}", StringComparison.OrdinalIgnoreCase))
       {
@@ -447,13 +435,6 @@ namespace MyTransportAppWASM.Services
           days = Math.Max(1, Math.Min(WeatherForecastLimits.OpenMeteoForecastDays, timeSpan.Days + 2));
         }
         formatted = formatted.Replace("{forecast_days}", days.ToString(), StringComparison.OrdinalIgnoreCase);
-      }
-
-      if (!string.IsNullOrWhiteSpace(options.ApiKey))
-      {
-        formatted = formatted
-          .Replace("{key}", options.ApiKey, StringComparison.OrdinalIgnoreCase)
-          .Replace("{apiKey}", options.ApiKey, StringComparison.OrdinalIgnoreCase);
       }
 
       return new Uri(formatted, UriKind.Absolute);

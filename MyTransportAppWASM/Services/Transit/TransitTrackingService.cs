@@ -1,6 +1,8 @@
 using System.Globalization;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using MyTransportAppWASM.Models;
 using MyTransportAppWASM.Models.BaziFlow;
 using MyTransportAppWASM.Services.Interfaces;
@@ -17,6 +19,7 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
   private readonly TransitRefreshCoordinator _transitRefresh;
   private readonly SemaphoreSlim _refreshLock = new(1, 1);
   private readonly IMemoryCache? _cache;
+  private readonly ILogger<TransitTrackingService> _logger;
   private bool _disposed;
   private FortuneData? _cachedFortune;
   private string? _cachedFortuneDate;
@@ -34,7 +37,8 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
     ILiveRoutingService liveRoutingService,
     IBaziFlowService baziFlowService,
     IConfiguration config,
-    IMemoryCache? cache = null)
+    IMemoryCache? cache = null,
+    ILogger<TransitTrackingService>? logger = null)
     : this(
         gtfsService,
         liveRoutingService,
@@ -43,7 +47,8 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
         Math.Max(5, config.GetValue("TransitPolling:IntervalSeconds", 15)),
         Math.Max(5, config.GetValue("TransitPolling:MaximumBackoffSeconds", 120)),
         Math.Max(5, config.GetValue("TransitPolling:MaximumSnapshotAgeSeconds", 120)),
-        cache)
+        cache,
+        logger)
   {
   }
 
@@ -55,13 +60,15 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
     int intervalSeconds = 15,
     int maximumBackoffSeconds = 120,
     int maximumSnapshotAgeSeconds = 120,
-    IMemoryCache? cache = null)
+    IMemoryCache? cache = null,
+    ILogger<TransitTrackingService>? logger = null)
   {
     _gtfsService = gtfsService;
     _liveRoutingService = liveRoutingService;
     _baziFlowService = baziFlowService;
     _transportProviders = transportProviders;
     _cache = cache;
+    _logger = logger ?? NullLogger<TransitTrackingService>.Instance;
     var normalInterval = TimeSpan.FromSeconds(Math.Max(5, intervalSeconds));
     var maxBackoff = TimeSpan.FromSeconds(Math.Max(intervalSeconds, maximumBackoffSeconds));
     var maxSnapshotAge = TimeSpan.FromSeconds(Math.Max(intervalSeconds, maximumSnapshotAgeSeconds));
@@ -207,7 +214,7 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
     }
     catch (Exception ex)
     {
-      Console.WriteLine($"Fortune enrichment failed: {ex.Message}");
+      _logger.LogDebug("Fortune enrichment failed: {Message}", ex.Message);
     }
 
     return enriched;

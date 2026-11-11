@@ -1,5 +1,3 @@
-@using MyTransportAppWASM.Models
-@using MyTransportAppWASM.Services.Interfaces
 @inject IWeatherPlannerService WeatherPlannerService
 @inject IJSRuntime JS
 @implements IDisposable
@@ -252,7 +250,7 @@
 
 @code {
   [CascadingParameter]
-  private MyTransportAppWASM.Services.LanguageService Language { get; set; } = default!;
+  private LanguageService Language { get; set; } = default!;
 
   [Parameter]
   public KeyedWeatherProviderOptions? Options { get; set; }
@@ -370,5 +368,6 @@
   {
     _disposed = true;
     _cts.Cancel();
+    _cts.Dispose();
   }
 }

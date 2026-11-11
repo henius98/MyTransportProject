@@ -54,10 +54,22 @@ namespace MyTransportAppWASM.Services
       {
         var geoModule = await GetGeoModuleAsync();
         if (geoModule == null || _isDisposed) return null;
+
+        if (LastKnownLocation == null)
+        {
+          var cached = await geoModule.InvokeAsync<Location?>("getCachedLocation");
+          if (_isDisposed) return null;
+          if (cached != null && LastKnownLocation == null)
+          {
+            LastKnownLocation = cached;
+          }
+        }
+
         var location = await geoModule.InvokeAsync<Location?>("getUserLocation", new
         {
           cacheMaxAge = forceRefresh ? 0 : _cacheMaxAgeMilliseconds,
-          useCache = !forceRefresh
+          useCache = !forceRefresh,
+          enableHighAccuracy = forceRefresh
         });
         if (_isDisposed) return null;
         if (location != null)

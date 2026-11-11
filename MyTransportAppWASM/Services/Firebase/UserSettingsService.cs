@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.JSInterop;
 using System.Security.Claims;
 using System.Text.Json;
@@ -12,6 +14,7 @@ namespace MyTransportAppWASM.Services
         private readonly IBrowserStorageService _localStorage;
         private readonly AuthenticationStateProvider _authStateProvider;
         private readonly IJSRuntime _jsRuntime;
+        private readonly ILogger<UserSettingsService> _logger;
         
         private UserSettings? _cachedSettings;
         private string? _cachedUserId;
@@ -20,11 +23,16 @@ namespace MyTransportAppWASM.Services
         public string? SyncError { get; private set; }
         public event Action? SyncStatusChanged;
 
-        public UserSettingsService(IBrowserStorageService localStorage, AuthenticationStateProvider authStateProvider, IJSRuntime jsRuntime)
+        public UserSettingsService(
+            IBrowserStorageService localStorage,
+            AuthenticationStateProvider authStateProvider,
+            IJSRuntime jsRuntime,
+            ILogger<UserSettingsService>? logger = null)
         {
             _localStorage = localStorage;
             _authStateProvider = authStateProvider;
             _jsRuntime = jsRuntime;
+            _logger = logger ?? NullLogger<UserSettingsService>.Instance;
             _authStateProvider.AuthenticationStateChanged += HandleAuthenticationStateChanged;
         }
 
@@ -87,7 +95,7 @@ namespace MyTransportAppWASM.Services
                 {
                     // A failed read must not be treated as a missing document, otherwise stale
                     // local settings could overwrite a user's Firestore settings.
-                    Console.WriteLine($"Could not load cloud settings; using this device's settings: {ex.Message}");
+                    _logger.LogDebug("Could not load cloud settings; using this device's settings: {Message}", ex.Message);
                     SetSyncError("Cloud preferences are unavailable. Using settings saved on this device.");
                 }
             }
@@ -108,7 +116,7 @@ namespace MyTransportAppWASM.Services
                 }
                 catch (Exception ex) when (ex is JSException or OperationCanceledException)
                 {
-                    Console.WriteLine($"Settings were saved on this device but not synced: {ex.Message}");
+                    _logger.LogWarning("Settings were saved on this device but not synced: {Message}", ex.Message);
                     if (uid == await GetUserIdAsync())
                         SetSyncError("Preferences saved on this device. Cloud sync failed; try changing the preference again when connected.");
                 }

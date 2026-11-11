@@ -41,6 +41,7 @@ async function onActivate(event) {
   await Promise.all(cacheKeys
     .filter(key => key.startsWith(cacheNamePrefix) && key !== cacheName)
     .map(key => caches.delete(key)));
+  await self.clients.claim();
 }
 
 async function onFetch(event) {
@@ -51,20 +52,17 @@ async function onFetch(event) {
   const url = new URL(event.request.url);
 
   // GTFS static routes, departures, and shapes
-  if (isGtfsStaticRequest(url)) {
+  if (event.request.mode !== 'navigate' && isGtfsStaticRequest(url)) {
     const dataCache = await caches.open(staticDataCacheName);
     const cachedResponse = await dataCache.match(event.request);
 
     // Stale-while-revalidate for GTFS static data to enable offline lookups and instant rendering
-    const networkFetch = fetch(event.request).then(response => {
+    const networkFetch = fetch(event.request).then(async response => {
       if (response && response.status === 200) {
-        dataCache.put(event.request, response.clone());
+        await dataCache.put(event.request, response.clone());
       }
       return response;
-    }).catch(err => {
-      if (cachedResponse) return cachedResponse;
-      throw err;
-    });
+    }).catch(() => cachedResponse || new Response(null, { status: 503, statusText: 'Service Unavailable' }));
 
     if (cachedResponse) {
       if (event.waitUntil) {
@@ -80,7 +78,7 @@ async function onFetch(event) {
   const shouldServeIndexHtml = event.request.mode === 'navigate'
     && !manifestUrlList.some(u => u === event.request.url);
 
-  const request = shouldServeIndexHtml ? 'index.html' : event.request;
+  const request = shouldServeIndexHtml ? new URL('index.html', baseUrl).href : event.request;
   const cache = await caches.open(cacheName);
   const cachedResponse = await cache.match(request);
 
@@ -98,12 +96,12 @@ async function onFetch(event) {
   try {
     const networkResponse = await fetch(event.request);
     if (networkResponse && networkResponse.status === 200 && url.pathname.includes('recreation_centres.json')) {
-      dataCache.put(event.request, networkResponse.clone());
+      await dataCache.put(event.request, networkResponse.clone());
     }
     return networkResponse;
   } catch (error) {
     const fallback = await cache.match(request) || await dataCache.match(event.request);
     if (fallback) return fallback;
-    throw error;
+    return new Response(null, { status: 503, statusText: 'Service Unavailable' });
   }
 }

@@ -73,9 +73,7 @@ namespace MyTransportAppWASM.Utils
               string? icon = null;
               if (weatherCodeDouble.HasValue)
               {
-                var localTime = MalaysiaTime.Convert(time);
-                bool isNight = localTime.Hour < 7 || localTime.Hour > 19;
-                (summary, icon) = MapWmoCode(weatherCodeDouble.Value, isNight);
+                (summary, icon) = MapWmoCode(weatherCodeDouble.Value, IsNight(time));
               }
 
               results.Add(new WeatherTimeSlice
@@ -162,98 +160,71 @@ namespace MyTransportAppWASM.Utils
 
       if (fields.MorningForecast != null || fields.AfternoonForecast != null || fields.NightForecast != null)
       {
-          if (fields.MorningForecast != null)
-          {
-              destination.Add(new WeatherTimeSlice
-              {
-                  Label = "Pagi",
-                  Time = time,
-                  TemperatureC = temperature,
-                  MinTemperatureC = fields.MinimumTemperature,
-                  MaxTemperatureC = fields.MaximumTemperature,
-                  PrecipitationMm = fields.Precipitation,
-                  ProbabilityOfRain = probability,
-                  Wind = fields.Wind,
-                  Summary = fields.MorningForecast,
-                  Icon = GetIconForSummaryString(fields.MorningForecast, time)
-              });
-          }
-          if (fields.AfternoonForecast != null)
-          {
-              var petangTime = time.AddHours(6);
-              destination.Add(new WeatherTimeSlice
-              {
-                  Label = "Petang",
-                  Time = petangTime,
-                  TemperatureC = temperature,
-                  MinTemperatureC = fields.MinimumTemperature,
-                  MaxTemperatureC = fields.MaximumTemperature,
-                  PrecipitationMm = fields.Precipitation,
-                  ProbabilityOfRain = probability,
-                  Wind = fields.Wind,
-                  Summary = fields.AfternoonForecast,
-                  Icon = GetIconForSummaryString(fields.AfternoonForecast, petangTime)
-              });
-          }
-          if (fields.NightForecast != null)
-          {
-              var malamTime = time.AddHours(12);
-              destination.Add(new WeatherTimeSlice
-              {
-                  Label = "Malam",
-                  Time = malamTime,
-                  TemperatureC = temperature,
-                  MinTemperatureC = fields.MinimumTemperature,
-                  MaxTemperatureC = fields.MaximumTemperature,
-                  PrecipitationMm = fields.Precipitation,
-                  ProbabilityOfRain = probability,
-                  Wind = fields.Wind,
-                  Summary = fields.NightForecast,
-                  Icon = GetIconForSummaryString(fields.NightForecast, malamTime)
-              });
-          }
-          return true;
+        if (fields.MorningForecast != null)
+        {
+          AddFieldSlice(destination, "Pagi", time, temperature, probability, in fields, fields.MorningForecast, GetIconForSummaryString(fields.MorningForecast, time));
+        }
+        if (fields.AfternoonForecast != null)
+        {
+          var petangTime = time.AddHours(6);
+          AddFieldSlice(destination, "Petang", petangTime, temperature, probability, in fields, fields.AfternoonForecast, GetIconForSummaryString(fields.AfternoonForecast, petangTime));
+        }
+        if (fields.NightForecast != null)
+        {
+          var malamTime = time.AddHours(12);
+          AddFieldSlice(destination, "Malam", malamTime, temperature, probability, in fields, fields.NightForecast, GetIconForSummaryString(fields.NightForecast, malamTime));
+        }
+        return true;
       }
 
       string? summary = fields.Summary;
-      
       string? icon = null;
       if (summary == null)
       {
         if (fields.WeatherCode.HasValue)
         {
-          var localTime = MalaysiaTime.Convert(time);
-          bool isNight = localTime.Hour < 7 || localTime.Hour > 19;
-          (summary, icon) = MapWmoCode(fields.WeatherCode.Value, isNight);
+          (summary, icon) = MapWmoCode(fields.WeatherCode.Value, IsNight(time));
         }
       }
       else
       {
-         icon = GetIconForSummaryString(summary, time);
+        icon = GetIconForSummaryString(summary, time);
       }
-
-
 
       if (temperature is null && fields.Precipitation is null && probability is null && summary is null && fields.Wind is null)
       {
         return false;
       }
 
-      destination.Add(new WeatherTimeSlice
-      {
-          Label = label,
-          Time = time,
-          TemperatureC = temperature,
-          MinTemperatureC = fields.MinimumTemperature,
-          MaxTemperatureC = fields.MaximumTemperature,
-          PrecipitationMm = fields.Precipitation,
-          ProbabilityOfRain = probability,
-          Wind = fields.Wind,
-          Summary = summary,
-          Icon = icon
-      });
+      AddFieldSlice(destination, label, time, temperature, probability, in fields, summary, icon);
       return true;
     }
+
+    private static void AddFieldSlice(
+      List<WeatherTimeSlice> destination,
+      string label,
+      DateTimeOffset time,
+      double? temperature,
+      double? probability,
+      in WeatherFields fields,
+      string? summary,
+      string? icon) =>
+      destination.Add(new WeatherTimeSlice
+      {
+        Label = label,
+        Time = time,
+        TemperatureC = temperature,
+        MinTemperatureC = fields.MinimumTemperature,
+        MaxTemperatureC = fields.MaximumTemperature,
+        PrecipitationMm = fields.Precipitation,
+        ProbabilityOfRain = probability,
+        Wind = fields.Wind,
+        Summary = summary,
+        Icon = icon
+      });
+
+    private static bool IsNight(DateTimeOffset time) =>
+      MalaysiaTime.Convert(time).Hour is < 7 or > 19;
 
     private static double? NormalizeProbability(double? probability)
     {
@@ -548,9 +519,8 @@ namespace MyTransportAppWASM.Utils
     private static string GetIconForSummaryString(string? summary, DateTimeOffset time)
     {
         if (string.IsNullOrWhiteSpace(summary)) return "bi-cloud text-secondary";
-        
-        var localTime = MalaysiaTime.Convert(time);
-        bool isNight = localTime.Hour < 7 || localTime.Hour > 19;
+
+        bool isNight = IsNight(time);
 
         if (ContainsIgnoreCase(summary, "ribut petir") || ContainsIgnoreCase(summary, "thunder") || ContainsIgnoreCase(summary, "lightning") || ContainsIgnoreCase(summary, "squall"))
         {

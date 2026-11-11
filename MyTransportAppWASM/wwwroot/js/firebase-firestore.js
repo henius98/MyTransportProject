@@ -3,7 +3,7 @@ import { requireSignedInUser } from "./firebase-auth.js";
 
 let firestoreContextPromise = null;
 
-async function getFirestoreContext() {
+export async function getFirestoreContext() {
     if (!firestoreContextPromise) {
         const pending = Promise.all([
             getFirebaseApp(),

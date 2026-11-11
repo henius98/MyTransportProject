@@ -27,17 +27,17 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="../../MyTransportAppWASM/Models/TransportModels.cs"
+    <Compile Include="../../MyTransportAppWASM/Models/Transit/TransportModels.cs"
              Link="Production/Models/TransportModels.cs" />
-    <Compile Include="../../MyTransportAppWASM/Models/WeatherModels.cs"
+    <Compile Include="../../MyTransportAppWASM/Models/Weather/WeatherModels.cs"
              Link="Production/Models/WeatherModels.cs" />
-    <Compile Include="../../MyTransportAppWASM/Services/Interfaces/ILiveRoutingService.cs"
+    <Compile Include="../../MyTransportAppWASM/Services/Google/Maps/ILiveRoutingService.cs"
              Link="Production/Services/Interfaces/ILiveRoutingService.cs" />
-    <Compile Include="../../MyTransportAppWASM/Services/LiveRoutingService.cs"
+    <Compile Include="../../MyTransportAppWASM/Services/Google/Maps/LiveRoutingService.cs"
              Link="Production/Services/LiveRoutingService.cs" />
     <Compile Include="../../MyTransportAppWASM/Utils/GeoMath.cs"
              Link="Production/Utils/GeoMath.cs" />
-    <Compile Include="../../MyTransportAppWASM/Utils/WeatherShaper.cs"
+    <Compile Include="../../MyTransportAppWASM/Utils/Weather/WeatherShaper.cs"
              Link="Production/Utils/WeatherShaper.cs" />
     <Compile Include="../../MyTransportAppWASM/Utils/MalaysiaTime.cs"
              Link="Production/Utils/MalaysiaTime.cs" />

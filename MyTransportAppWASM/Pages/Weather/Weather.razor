@@ -1,8 +1,4 @@
 @page "/weather"
-@using MyTransportAppWASM.Models
-@using MyTransportAppWASM.Services.Interfaces
-@using MyTransportAppWASM.Services
-@using MyTransportAppWASM.Pages.Weather.Components
 @inject IPlaceResolutionService PlaceResolutionService
 @inject ILocationService LocationService
 @inject IWeatherPlannerService WeatherPlannerService
@@ -303,13 +299,22 @@
     }
   }
 
+  private static string ProviderKey(string provider, bool isOutlook) =>
+    $"{provider}:{(isOutlook ? "Outlook" : "Realtime")}";
+
+  private static List<WeatherProviderResult> ReplaceProvider(
+    IReadOnlyList<WeatherProviderResult> items,
+    string provider,
+    WeatherProviderResult updated) =>
+    items.Where(p => !string.Equals(p.Provider, provider, StringComparison.OrdinalIgnoreCase)).Append(updated).ToList();
+
   private bool IsRefreshing(string provider, bool isOutlook) =>
-    refreshingProviders.Contains($"{provider}:{(isOutlook ? "Outlook" : "Realtime")}");
+    refreshingProviders.Contains(ProviderKey(provider, isOutlook));
 
   private async Task RefreshProviderAsync(string provider, bool isOutlook)
   {
     if (plan == null) return;
-    var key = $"{provider}:{(isOutlook ? "Outlook" : "Realtime")}";
+    var key = ProviderKey(provider, isOutlook);
     if (!refreshingProviders.Add(key)) return;
     try
     {
@@ -317,18 +322,9 @@
       if (_isDisposed) return;
       if (plan != null)
       {
-        if (isOutlook)
-        {
-          var list = plan.Outlooks.Where(p => !string.Equals(p.Provider, provider, StringComparison.OrdinalIgnoreCase)).ToList();
-          list.Add(updated);
-          plan = plan with { Outlooks = list };
-        }
-        else
-        {
-          var list = plan.Realtime.Where(p => !string.Equals(p.Provider, provider, StringComparison.OrdinalIgnoreCase)).ToList();
-          list.Add(updated);
-          plan = plan with { Realtime = list };
-        }
+        plan = isOutlook
+          ? plan with { Outlooks = ReplaceProvider(plan.Outlooks, provider, updated) }
+          : plan with { Realtime = ReplaceProvider(plan.Realtime, provider, updated) };
       }
     }
     catch (OperationCanceledException)
@@ -409,5 +405,5 @@
   }
 
   private static bool IsNearSingapore(double lat, double lon) =>
-    MyTransportAppWASM.Services.WeatherPlannerService.IsNearSingapore(lat, lon);
+    Services.WeatherPlannerService.IsNearSingapore(lat, lon);
 }

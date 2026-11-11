@@ -1,4 +1,7 @@
 
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
 namespace MyTransportAppWASM.Pages.Map;
 
 public partial class Map : IAsyncDisposable
@@ -10,6 +13,7 @@ public partial class Map : IAsyncDisposable
   [CascadingParameter] private ThemeService Theme { get; set; } = default!;
   [Inject] private ILocationService LocationService { get; set; } = default!;
   [Inject] private IPlaceResolutionService PlaceResolution { get; set; } = default!;
+  [Inject] private ILogger<Map> Logger { get; set; } = NullLogger<Map>.Instance;
 
   private double Latitude;
   private double Longitude;
@@ -33,7 +37,7 @@ public partial class Map : IAsyncDisposable
   private string _staticStatus = "";
   private TimeSpan _pollingInterval = TimeSpan.FromSeconds(15);
   private readonly SemaphoreSlim _refreshGate = new(1, 1);
-  private List<MyTransportAppWASM.Models.EnrichedRoute> _routeOptions = new();
+  private List<EnrichedRoute> _routeOptions = new();
   private int _activeRouteId = -1;
   private bool _mapAuthFailed;
   private Task _autocompleteTask = Task.CompletedTask;
@@ -68,17 +72,23 @@ public partial class Map : IAsyncDisposable
     _staticStatus = "Loading routes...";
     try
     {
-      var routes = await StaticDataService.GetRoutesAsync(source, _cts.Token);
+      var routesTask = StaticDataService.GetRoutesAsync(source, _cts.Token);
+      var mapTask = StaticDataService.GetMapAsync(source, "", _cts.Token);
+      await Task.WhenAll(routesTask, mapTask);
       if (_isDisposed || SelectedStaticData != source) return;
-      _staticRoutes = routes;
-      _staticStatus = routes.Count == 0 ? "No routes available." : "Choose a route.";
+      _staticRoutes = await routesTask;
+      if (mapModule != null && string.IsNullOrEmpty(_selectedStaticRouteId))
+      {
+        await mapModule.InvokeVoidAsync("showStaticRoute", await mapTask, objRef);
+      }
+      _staticStatus = _staticRoutes.Count == 0 ? "No routes available." : "Select a stop on the map for departures.";
     }
     catch (OperationCanceledException) { }
     catch (Exception ex)
     {
       if (_isDisposed || SelectedStaticData != source) return;
       _staticStatus = "Static routes unavailable.";
-      Console.WriteLine($"Static route list failed: {ex.Message}");
+      Logger.LogWarning("Static route list failed: {Message}", ex.Message);
     }
   }
 
@@ -92,7 +102,7 @@ public partial class Map : IAsyncDisposable
     await mapModule.InvokeVoidAsync("clearStaticRoute");
     var source = SelectedStaticData;
     var routeId = _selectedStaticRouteId;
-    if (source == null || string.IsNullOrEmpty(routeId)) { _staticStatus = "Choose a route."; return; }
+    if (source == null) { _staticStatus = ""; return; }
 
     _staticStatus = "Loading route map...";
     try
@@ -107,7 +117,7 @@ public partial class Map : IAsyncDisposable
     {
       if (_isDisposed || SelectedStaticData != source || _selectedStaticRouteId != routeId) return;
       _staticStatus = "Static route map unavailable.";
-      Console.WriteLine($"Static route map failed: {ex.Message}");
+      Logger.LogWarning("Static route map failed: {Message}", ex.Message);
     }
   }
 
@@ -116,7 +126,7 @@ public partial class Map : IAsyncDisposable
   {
     var source = SelectedStaticData;
     var routeId = _selectedStaticRouteId;
-    if (_isDisposed || source == null || string.IsNullOrEmpty(routeId)) return;
+    if (_isDisposed || source == null) return;
     _selectedStaticStopId = stopId;
     _staticStopName = string.IsNullOrWhiteSpace(stopName) ? stopId : stopName;
     _staticDepartures = [];
@@ -136,7 +146,7 @@ public partial class Map : IAsyncDisposable
     {
       if (_isDisposed || SelectedStaticData != source || _selectedStaticRouteId != routeId || _selectedStaticStopId != stopId) return;
       _staticStatus = "Departures unavailable.";
-      Console.WriteLine($"Static departures failed: {ex.Message}");
+      Logger.LogWarning("Static departures failed: {Message}", ex.Message);
       StateHasChanged();
     }
   }
@@ -180,7 +190,7 @@ public partial class Map : IAsyncDisposable
       }
       catch (Exception ex)
       {
-        if (!_isDisposed) Console.WriteLine($"Theme update failed: {ex.Message}");
+        if (!_isDisposed) Logger.LogDebug("Theme update failed: {Message}", ex.Message);
       }
     }
   }
@@ -192,13 +202,15 @@ public partial class Map : IAsyncDisposable
     try
     {
       objRef = DotNetObjectReference.Create(this);
+      // Start GPS/cache lookup concurrently with module loading so initial center is ready sooner
+      var locationTask = LocationService.GetCurrentLocationAsync();
       mapModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/googleMap.js");
 
       if (_isDisposed) return;
 
       // Initialize autocomplete concurrently so it's not blocked by GPS loading
       _autocompleteTask = InitializeAutocompleteAsync();
-      await InitializeMapOptimisticallyAsync();
+      await InitializeMapOptimisticallyAsync(locationTask);
 
       if (_isDisposed) return;
 
@@ -207,7 +219,7 @@ public partial class Map : IAsyncDisposable
     }
     catch (Exception ex)
     {
-      Console.WriteLine($"Init error: {ex.Message}");
+      Logger.LogError("Init error: {Message}", ex.Message);
     }
   }
 
@@ -232,7 +244,7 @@ public partial class Map : IAsyncDisposable
     }
   }
 
-  private async Task InitializeMapOptimisticallyAsync()
+  private async Task InitializeMapOptimisticallyAsync(Task<Location?> locationTask)
   {
     if (mapModule is null || _isDisposed) return;
 
@@ -240,43 +252,74 @@ public partial class Map : IAsyncDisposable
     {
       _mapAuthFailed = false;
       var apiKey = Config["GoogleMaps:ApiKey"];
-      var initialLat = LocationService.LastKnownLocation?.Latitude ?? Latitude;
-      var initialLng = LocationService.LastKnownLocation?.Longitude ?? Longitude;
 
-      await mapModule.InvokeVoidAsync("initGoogleMaps", "map", initialLat, initialLng, 14, apiKey, objRef,
-        Theme.IsDarkMode ? "DARK" : "LIGHT", MalaysiaTime.IanaTimeZone);
+      if (!locationTask.IsCompleted && LocationService.LastKnownLocation is null)
+      {
+        await Task.WhenAny(locationTask, Task.Delay(150));
+        if (_isDisposed) return;
+      }
 
-      locationStatus = "Loading GPS...";
-      StateHasChanged();
+      var resolvedEarly = locationTask.IsCompletedSuccessfully ? await locationTask : null;
+      var initialLocation = resolvedEarly ?? LocationService.LastKnownLocation;
+      var initialLat = initialLocation?.Latitude ?? Latitude;
+      var initialLng = initialLocation?.Longitude ?? Longitude;
 
-      var position = await LocationService.GetCurrentLocationAsync();
+      var initMapTask = mapModule.InvokeVoidAsync("initGoogleMaps", "map", initialLat, initialLng, 14, apiKey, objRef,
+        Theme.IsDarkMode ? "DARK" : "LIGHT", MalaysiaTime.IanaTimeZone).AsTask();
+
+      if (resolvedEarly is null && !locationTask.IsCompleted)
+      {
+        locationStatus = "Loading GPS...";
+        StateHasChanged();
+      }
+
+      var position = resolvedEarly ?? await locationTask;
       if (_isDisposed) return;
 
       if (position is not null)
       {
-        await mapModule.InvokeVoidAsync("updateUserMarker", position.Latitude, position.Longitude);
+        await initMapTask;
+        if (_isDisposed) return;
+
+        var movedFromInitial = Math.Abs(position.Latitude - initialLat) > 1e-6
+          || Math.Abs(position.Longitude - initialLng) > 1e-6;
+        if (movedFromInitial)
+        {
+          await mapModule.InvokeVoidAsync("updateUserMarker", position.Latitude, position.Longitude);
+        }
+
         locationStatus = "Live";
-        await UpdateOriginFromLocation(position.Latitude, position.Longitude);
+        StateHasChanged();
+        await Task.WhenAll(
+          UpdateOriginFromLocation(position.Latitude, position.Longitude),
+          RefreshBusPosition()
+        );
       }
       else
       {
-        LocationService.UpdateLocation(initialLat, initialLng);
-        locationStatus = "Using default location";
+        await initMapTask;
+        if (_isDisposed) return;
+
+        if (LocationService.LastKnownLocation is null)
+        {
+          LocationService.UpdateLocation(initialLat, initialLng);
+          locationStatus = "Using default location";
+        }
+        else
+        {
+          locationStatus = "Using cached location";
+        }
+
+        await RefreshBusPosition();
       }
 
-      await RefreshBusPosition();
       StateHasChanged();
     }
     catch (JSException ex)
     {
       locationStatus = "Map error";
-      Console.WriteLine($"initGoogleMaps failed: {ex.Message}");
+      Logger.LogWarning("initGoogleMaps failed: {Message}", ex.Message);
     }
-  }
-
-  private Task<string?> ResolveAddressAsync(double lat, double lng)
-  {
-    return PlaceResolution.ReverseGeocodeAsync(lat, lng);
   }
 
   private async Task UpdateOriginFromLocation(double lat, double lng)
@@ -284,7 +327,7 @@ public partial class Map : IAsyncDisposable
     if (_isDisposed || !string.IsNullOrEmpty(origin)) return;
     try
     {
-      string? resolved = await ResolveAddressAsync(lat, lng);
+      string? resolved = await PlaceResolution.ReverseGeocodeAsync(lat, lng);
       if (_isDisposed || string.IsNullOrEmpty(resolved)) return;
       origin = resolved;
       if (mapModule != null)
@@ -295,7 +338,7 @@ public partial class Map : IAsyncDisposable
     catch (Exception ex)
     {
       if (_isDisposed) return;
-      Console.WriteLine($"Reverse geocode failed: {ex.Message}");
+      Logger.LogDebug("Reverse geocode failed: {Message}", ex.Message);
     }
   }
 
@@ -356,7 +399,7 @@ public partial class Map : IAsyncDisposable
     }
     catch (Exception ex)
     {
-      if (!_isDisposed) Console.WriteLine($"Autocomplete init failed: {ex.Message}");
+      if (!_isDisposed) Logger.LogDebug("Autocomplete init failed: {Message}", ex.Message);
     }
   }
 
@@ -368,7 +411,7 @@ public partial class Map : IAsyncDisposable
     try
     {
       await mapModule.InvokeVoidAsync("updateUserMarker", position.Latitude, position.Longitude);
-      var resolved = await ResolveAddressAsync(position.Latitude, position.Longitude);
+      var resolved = await PlaceResolution.ReverseGeocodeAsync(position.Latitude, position.Longitude);
       if (!string.IsNullOrEmpty(resolved)) origin = resolved;
 
       if (_isDisposed || mapModule == null) return;
@@ -379,7 +422,7 @@ public partial class Map : IAsyncDisposable
     catch (Exception ex)
     {
       if (_isDisposed) return;
-      Console.WriteLine($"Manual location update failed: {ex.Message}");
+      Logger.LogWarning("Manual location update failed: {Message}", ex.Message);
     }
   }
 
@@ -422,7 +465,7 @@ public partial class Map : IAsyncDisposable
     catch (Exception ex)
     {
       if (_isDisposed) return;
-      Console.WriteLine($"RefreshBusPosition failed: {ex.Message}");
+      Logger.LogWarning("RefreshBusPosition failed: {Message}", ex.Message);
     }
     finally
     {
@@ -460,7 +503,7 @@ public partial class Map : IAsyncDisposable
         return;
       }
 
-      var googleRoutes = await mapModule.InvokeAsync<List<MyTransportAppWASM.Models.GoogleRoute>>("getTransitRoutes", origin, destination);
+      var googleRoutes = await mapModule.InvokeAsync<List<GoogleRoute>>("getTransitRoutes", origin, destination);
       
       if (googleRoutes == null || googleRoutes.Count == 0)
       {
@@ -494,12 +537,12 @@ public partial class Map : IAsyncDisposable
     {
       if (_isDisposed) return;
       locationStatus = "Route calculation failed.";
-      Console.WriteLine($"Route display failed: {ex.Message}");
+      Logger.LogWarning("Route display failed: {Message}", ex.Message);
       StateHasChanged();
     }
   }
 
-  private async Task SelectRoute(MyTransportAppWASM.Models.EnrichedRoute route)
+  private async Task SelectRoute(EnrichedRoute route)
   {
     if (mapModule == null || _isDisposed) return;
     _activeRouteId = route.OriginalRoute.RouteId;
@@ -511,7 +554,7 @@ public partial class Map : IAsyncDisposable
     }
     catch (Exception ex)
     {
-      Console.WriteLine($"SelectRoute failed: {ex.Message}");
+      Logger.LogWarning("SelectRoute failed: {Message}", ex.Message);
     }
   }
 
@@ -529,7 +572,7 @@ public partial class Map : IAsyncDisposable
     catch (Exception ex)
     {
       if (_isDisposed) return;
-      Console.WriteLine($"Clear route failed: {ex.Message}");
+      Logger.LogWarning("Clear route failed: {Message}", ex.Message);
     }
   }
 
@@ -561,8 +604,6 @@ public partial class Map : IAsyncDisposable
     {
       try
       {
-        await mapModule.InvokeVoidAsync("disposeAutocomplete", "origin-input");
-        await mapModule.InvokeVoidAsync("disposeAutocomplete", "destination-input");
         await mapModule.InvokeVoidAsync("cleanupMap");
         await mapModule.DisposeAsync();
       }

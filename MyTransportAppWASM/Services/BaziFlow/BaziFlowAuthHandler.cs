@@ -8,7 +8,6 @@ namespace MyTransportAppWASM.Services.Handlers
     {
         private readonly IBrowserStorageService _localStorage;
         private readonly string? _expectedHost;
-        private const string ApiKeyStorageKey = "baziflow_api_key";
 
         public BaziFlowAuthHandler(IBrowserStorageService localStorage, IConfiguration? configuration = null)
         {
@@ -27,7 +26,7 @@ namespace MyTransportAppWASM.Services.Handlers
 
             if (isTargetHost)
             {
-                var apiKey = await _localStorage.GetStringAsync(ApiKeyStorageKey, cancellationToken);
+                var apiKey = await _localStorage.GetStringAsync(BaziFlowService.ApiKeyStorageKey, cancellationToken);
                 if (!string.IsNullOrEmpty(apiKey))
                 {
                     request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);

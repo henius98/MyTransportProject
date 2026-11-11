@@ -1,6 +1,3 @@
-@using MyTransportAppWASM.Models
-@using MyTransportAppWASM.Services.Interfaces
-@using MyTransportAppWASM.Services
 @inject IPlaceResolutionService PlaceResolutionService
 @inject IWeatherStationCatalogService StationCatalog
 @inject IJSRuntime JSRuntime
@@ -81,13 +78,14 @@
         }
         else
         {
+          var filteredLocations = FilteredMapLocations;
           <p class="location-picker-hint">Select a dot or search for a location. Zoom with the buttons or mouse wheel, then
             drag to move the map.</p>
             <div class="location-picker-map" @ref="_mapViewport">
               <svg viewBox="0 0 1000 332" role="img" aria-label="Map of Malaysia showing forecast locations" @ref="_mapSvg">
                 <image href="maps/malaysia-static-map.svg" width="1000" height="332" />
                 <!-- Project forecast markers onto the SimpleMaps map -->
-                @foreach (var location in FilteredMapLocations)
+                @foreach (var location in filteredLocations)
                 {
                   <circle class="location-picker-dot" cx="@MapX(location.Longitude)" cy="@MapY(location.Latitude)" r="4.5"
                           data-location-name="@location.LocationName" @onclick="() => SelectMapLocation(location)" />
@@ -102,13 +100,13 @@
             @if (!string.IsNullOrWhiteSpace(_mapSearch))
             {
               <ul class="location-picker-results" aria-label="Matching forecast locations">
-                @foreach (var location in FilteredMapLocations.Take(15))
+                @foreach (var location in filteredLocations.Take(15))
                 {
                   <li><button type="button" @onclick="() => SelectMapLocation(location)">@location.LocationName
                     (@location.LocationId)</button></li>
                   }
                 </ul>
-                @if (FilteredMapLocations.Count == 0)
+                @if (filteredLocations.Count == 0)
                 {
                   <p class="location-picker-hint">No locations found.</p>
                 }
@@ -148,11 +146,17 @@
   // The source SVG's embedded calibration points map longitude and latitude to its 1000 x 332 viewBox.
   private static double MapX(double longitude) => 90.9 + (longitude - 100.62687099273207) * 46.30559021697878;
   private static double MapY(double latitude) => 302.2 - (latitude - 1.176590816028057) * 46.44711959017247;
-  private IReadOnlyList<MetLocation> FilteredMapLocations =>
-      string.IsNullOrWhiteSpace(_mapSearch)
-          ? _mapLocations
-          : _mapLocations.Where(location => location.LocationName?.Contains(_mapSearch.Trim(), StringComparison.OrdinalIgnoreCase) == true
-              || location.LocationId?.Contains(_mapSearch.Trim(), StringComparison.OrdinalIgnoreCase) == true).ToList();
+  private IReadOnlyList<MetLocation> FilteredMapLocations
+  {
+    get
+    {
+      var query = _mapSearch.Trim();
+      return string.IsNullOrEmpty(query)
+        ? _mapLocations
+        : _mapLocations.Where(location => location.LocationName?.Contains(query, StringComparison.OrdinalIgnoreCase) == true
+            || location.LocationId?.Contains(query, StringComparison.OrdinalIgnoreCase) == true).ToList();
+    }
+  }
 
   protected override void OnInitialized()
   {

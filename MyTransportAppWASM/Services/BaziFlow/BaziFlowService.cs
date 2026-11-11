@@ -1,4 +1,6 @@
 using System.Net.Http.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using MyTransportAppWASM.Models.BaziFlow;
 using MyTransportAppWASM.Services.Interfaces;
 
@@ -8,24 +10,27 @@ namespace MyTransportAppWASM.Services
     {
         private readonly HttpClient _httpClient;
         private readonly IBrowserStorageService _localStorage;
-        private const string ApiKeyStorageKey = "baziflow_api_key";
+        private readonly ILogger<BaziFlowService> _logger;
+        internal const string ApiKeyStorageKey = "baziflow_api_key";
 
-        public BaziFlowService(HttpClient httpClient, IBrowserStorageService localStorage)
+        public BaziFlowService(
+            HttpClient httpClient,
+            IBrowserStorageService localStorage,
+            ILogger<BaziFlowService>? logger = null)
         {
             _httpClient = httpClient;
             _localStorage = localStorage;
+            _logger = logger ?? NullLogger<BaziFlowService>.Instance;
         }
-
-
 
         public async Task<string?> GetApiKeyAsync(CancellationToken cancellationToken = default)
         {
-            return await _localStorage.GetStringAsync(ApiKeyStorageKey);
+            return await _localStorage.GetStringAsync(ApiKeyStorageKey, cancellationToken);
         }
 
         public async Task SaveApiKeyAsync(string apiKey, CancellationToken cancellationToken = default)
         {
-            await _localStorage.SetStringAsync(ApiKeyStorageKey, apiKey);
+            await _localStorage.SetStringAsync(ApiKeyStorageKey, apiKey, cancellationToken);
         }
 
         public async Task<bool> HasApiKeyAsync(CancellationToken cancellationToken = default)
@@ -58,7 +63,7 @@ namespace MyTransportAppWASM.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error fetching profile: {ex.Message}");
+                _logger.LogDebug("Error fetching profile: {Message}", ex.Message);
                 return null;
             }
         }
@@ -84,7 +89,7 @@ namespace MyTransportAppWASM.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error creating profile: {ex.Message}");
+                _logger.LogWarning("Error creating profile: {Message}", ex.Message);
                 return false;
             }
         }
@@ -124,7 +129,7 @@ namespace MyTransportAppWASM.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error fetching date fortune: {ex.Message}");
+                _logger.LogDebug("Error fetching date fortune: {Message}", ex.Message);
                 return null;
             }
         }

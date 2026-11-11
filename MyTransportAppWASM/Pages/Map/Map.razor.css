@@ -155,11 +155,7 @@
   color: var(--text-dim);
 }
 
-.tracker-status.tracker-status--error,
-.theme-light .tracker-status.tracker-status--error,
-.theme-dark .tracker-status.tracker-status--error,
-.theme-light .tracker-status--error,
-.theme-dark .tracker-status--error {
+.tracker-status.tracker-status--error {
   color: #ea4335;
 }
 
@@ -189,10 +185,7 @@
 }
 
 .pulse-dot.pulse-dot--error,
-.theme-light .pulse-dot.pulse-dot--error,
-.theme-dark .pulse-dot.pulse-dot--error,
-.theme-light .pulse-dot--error,
-.theme-dark .pulse-dot--error {
+.theme-light .pulse-dot--error {
   background: #ea4335;
 }
 

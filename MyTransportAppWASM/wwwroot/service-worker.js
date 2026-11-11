@@ -12,7 +12,7 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  if (event.request.method !== 'GET') return;
+  if (event.request.method !== 'GET' || event.request.mode === 'navigate') return;
 
   const url = new URL(event.request.url);
 
@@ -30,16 +30,13 @@ self.addEventListener('fetch', event => {
       const cachedResponse = await cache.match(event.request);
 
       const fetchPromise = fetch(event.request)
-        .then(response => {
+        .then(async response => {
           if (response && response.status === 200) {
-            cache.put(event.request, response.clone());
+            await cache.put(event.request, response.clone());
           }
           return response;
         })
-        .catch(err => {
-          if (cachedResponse) return cachedResponse;
-          throw err;
-        });
+        .catch(() => cachedResponse || new Response(null, { status: 503, statusText: 'Service Unavailable' }));
 
       if (cachedResponse) {
         if (event.waitUntil) {

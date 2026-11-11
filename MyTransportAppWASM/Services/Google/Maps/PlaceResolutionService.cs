@@ -1,5 +1,7 @@
 using System.Globalization;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.JSInterop;
 using MyTransportAppWASM.Models;
 using MyTransportAppWASM.Services.Interfaces;
@@ -14,6 +16,7 @@ namespace MyTransportAppWASM.Services
   {
     private readonly IWeatherStationCatalogService _stationCatalog;
     private readonly IJSRuntime? _jsRuntime;
+    private readonly ILogger<PlaceResolutionService> _logger;
     private readonly string _apiKey;
     private readonly object _lock = new();
     private Task<IJSObjectReference>? _moduleTask;
@@ -21,20 +24,14 @@ namespace MyTransportAppWASM.Services
 
     public PlaceResolutionService(
       IConfiguration configuration,
-      IWeatherStationCatalogService stationCatalog)
-      : this(configuration, stationCatalog, null)
-    {
-    }
-
-    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
-    public PlaceResolutionService(
-      IConfiguration configuration,
       IWeatherStationCatalogService stationCatalog,
-      IJSRuntime? jsRuntime)
+      IJSRuntime? jsRuntime = null,
+      ILogger<PlaceResolutionService>? logger = null)
     {
       _stationCatalog = stationCatalog;
       _apiKey = configuration["GoogleMaps:ApiKey"] ?? string.Empty;
       _jsRuntime = jsRuntime;
+      _logger = logger ?? NullLogger<PlaceResolutionService>.Instance;
     }
 
     private async ValueTask<IJSObjectReference?> GetMapModuleAsync(CancellationToken cancellationToken = default)
@@ -86,7 +83,7 @@ namespace MyTransportAppWASM.Services
         }
         catch (Exception ex)
         {
-          Console.Error.WriteLine($"Geocoding via JS failed: {ex.Message}");
+          _logger.LogDebug("Geocoding via JS failed: {Message}", ex.Message);
         }
       }
 
@@ -129,7 +126,7 @@ namespace MyTransportAppWASM.Services
       }
       catch (Exception ex)
       {
-        Console.Error.WriteLine($"Failed to query weather stations for suggestions: {ex.Message}");
+        _logger.LogDebug("Failed to query weather stations for suggestions: {Message}", ex.Message);
       }
 
       // If no static station matched and API key is present, resolve real place via Google Geocoding
@@ -172,7 +169,7 @@ namespace MyTransportAppWASM.Services
         }
         catch (Exception ex)
         {
-          Console.Error.WriteLine($"Reverse Geocoding via JS failed: {ex.Message}");
+          _logger.LogDebug("Reverse Geocoding via JS failed: {Message}", ex.Message);
         }
       }
 

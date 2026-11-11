@@ -1,6 +1,5 @@
 @namespace MyTransportAppWASM.Pages.Google
 @using System.Globalization
-@using MyTransportAppWASM.Services.Interfaces
 @implements IDisposable
 @inject IGoogleTasksWorkflowService WorkflowService
 
@@ -253,15 +252,14 @@
     private List<GoogleTask> TasksFor(string targetListId) => tasksByList.GetValueOrDefault(targetListId) ?? [];
     private IEnumerable<(string ListId, string ListTitle, GoogleTask Task)> AllTaskReferences =>
         taskLists.SelectMany(list => TasksFor(list.Id).Select(task => (list.Id, list.Title, task)));
-    private Dictionary<string, GoogleTask> TaskLookup => taskLookup;
     private GoogleTaskExtension? ExtensionFor(string listId, string taskId) =>
         extensions.GetValueOrDefault(GoogleTaskWorkflow.Key(listId, taskId));
     private GoogleTaskWorkflowState WorkflowState(string listId, GoogleTask task) =>
-        GoogleTaskWorkflow.State(task, ExtensionFor(listId, task.Id), TaskLookup);
+        GoogleTaskWorkflow.State(task, ExtensionFor(listId, task.Id), taskLookup);
     private IReadOnlyList<GoogleTaskReference> BlockingTasks(string listId, GoogleTask task) =>
-        GoogleTaskWorkflow.BlockingTasks(ExtensionFor(listId, task.Id), TaskLookup);
+        GoogleTaskWorkflow.BlockingTasks(ExtensionFor(listId, task.Id), taskLookup);
     private string DependencyTitle(GoogleTaskReference reference) =>
-        TaskLookup.TryGetValue(GoogleTaskWorkflow.Key(reference), out var task) ? task.Title : "Deleted task";
+        taskLookup.TryGetValue(GoogleTaskWorkflow.Key(reference), out var task) ? task.Title : "Deleted task";
     private bool EditorHasChanges => selectedTask != null && editingListId != null &&
         (title != selectedTask.Title || notes != (selectedTask.Notes ?? string.Empty) || dueDate != selectedTask.DueDate ||
          completed != (selectedTask.Status == "completed") ||
@@ -271,48 +269,31 @@
 
     protected override Task OnInitializedAsync() => RefreshAsync();
 
-    private async Task RefreshAsync()
+    private Task RefreshAsync() => RunBusyAsync(async () =>
     {
-        if (busy || disposed) return;
-        busy = true;
-        error = status = null;
-        try
-        {
-            var tree = await WorkflowService.LoadTaskTreeAsync(UserId, _cts.Token);
-            if (disposed) return;
-            taskLists = tree.TaskLists.ToList();
-            tasksByList = tree.TasksByList.ToDictionary(kv => kv.Key, kv => kv.Value);
-            taskLookup = tree.TaskLookup.ToDictionary(kv => kv.Key, kv => kv.Value);
-            extensions = tree.Extensions.ToDictionary(kv => kv.Key, kv => kv.Value);
+        var tree = await WorkflowService.LoadTaskTreeAsync(UserId, _cts.Token);
+        if (disposed) return;
+        taskLists = tree.TaskLists.ToList();
+        tasksByList = tree.TasksByList.ToDictionary(kv => kv.Key, kv => kv.Value);
+        taskLookup = tree.TaskLookup.ToDictionary(kv => kv.Key, kv => kv.Value);
+        extensions = tree.Extensions.ToDictionary(kv => kv.Key, kv => kv.Value);
 
-            if (activeListId != null && !tasksByList.ContainsKey(activeListId)) activeListId = null;
-            if (editorOpen && editingListId != null)
+        if (activeListId != null && !tasksByList.ContainsKey(activeListId)) activeListId = null;
+        if (editorOpen && editingListId != null)
+        {
+            if (!tasksByList.ContainsKey(editingListId)) CloseEditor();
+            else if (selectedTask != null)
             {
-                if (!tasksByList.ContainsKey(editingListId)) CloseEditor();
-                else if (selectedTask != null)
+                var refreshed = TasksFor(editingListId).FirstOrDefault(task => task.Id == selectedTask.Id);
+                if (refreshed == null)
                 {
-                    var refreshed = TasksFor(editingListId).FirstOrDefault(task => task.Id == selectedTask.Id);
-                    if (refreshed == null)
-                    {
-                        CloseEditor();
-                        status = "The selected task is no longer in this list.";
-                    }
-                    else SelectTask(editingListId, refreshed);
+                    CloseEditor();
+                    status = "The selected task is no longer in this list.";
                 }
+                else SelectTask(editingListId, refreshed);
             }
         }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            if (!disposed) error = ErrorMessage(ex);
-        }
-        finally
-        {
-            if (!disposed) busy = false;
-        }
-    }
+    });
 
     private void ShowList(string? targetListId)
     {
@@ -371,35 +352,18 @@
         else editingDependencies.Remove(key);
     }
 
-    private async Task ToggleCompleteAsync(string targetListId, GoogleTask task)
-    {
-        if (busy || disposed || task.AssignmentInfo != null) return;
-        busy = true;
-        error = status = null;
-        try
+    private Task ToggleCompleteAsync(string targetListId, GoogleTask task) =>
+        task.AssignmentInfo != null ? Task.CompletedTask : RunBusyAsync(async () =>
         {
             var saved = await WorkflowService.ToggleTaskCompletionAsync(UserId, targetListId, task, _cts.Token);
             if (disposed) return;
             ReplaceTask(targetListId, saved);
             if (selectedTask?.Id == saved.Id && editingListId == targetListId) SelectTask(targetListId, saved);
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            if (!disposed) error = ErrorMessage(ex);
-        }
-        finally
-        {
-            if (!disposed) busy = false;
-        }
-    }
+        });
 
     private async Task SaveAsync()
     {
         if (busy || disposed || !CanEdit || editingListId == null) return;
-        error = status = null;
 
         var dependencies = AllTaskReferences
             .Where(item => editingDependencies.Contains(GoogleTaskWorkflow.Key(item.ListId, item.Task.Id)))
@@ -418,86 +382,60 @@
             Dependencies = dependencies
         };
 
-        busy = true;
-        try
+        await RunBusyAsync(async () =>
         {
-            var saved = await WorkflowService.SaveTaskWithWorkflowAsync(UserId, editingListId, request, _cts.Token);
-            if (disposed) return;
-            ReplaceTask(editingListId, saved);
-            selectedTask = saved;
+            try
+            {
+                var saved = await WorkflowService.SaveTaskWithWorkflowAsync(UserId, editingListId, request, _cts.Token);
+                if (disposed) return;
+                ReplaceTask(editingListId, saved);
+                selectedTask = saved;
 
-            var key = GoogleTaskWorkflow.Key(editingListId, saved.Id);
-            var extension = new GoogleTaskExtension
-            {
-                TaskListId = editingListId,
-                TaskId = saved.Id,
-                EstimatedMinutes = estimatedMinutes,
-                DependsOn = dependencies,
-                StartedAt = extensions.GetValueOrDefault(key)?.StartedAt
-            };
-            if (extension.EstimatedMinutes != null || extension.DependsOn.Count > 0 ||
-                extension.StartedAt != null || extensions.ContainsKey(key))
-            {
+                var key = GoogleTaskWorkflow.Key(editingListId, saved.Id);
+                var extension = new GoogleTaskExtension
+                {
+                    TaskListId = editingListId,
+                    TaskId = saved.Id,
+                    EstimatedMinutes = estimatedMinutes,
+                    DependsOn = dependencies,
+                    StartedAt = extensions.GetValueOrDefault(key)?.StartedAt
+                };
                 if (extension.EstimatedMinutes == null && extension.DependsOn.Count == 0 && extension.StartedAt == null)
                     extensions.Remove(key);
-                else extensions[key] = extension;
-            }
+                else
+                    extensions[key] = extension;
 
-            CloseEditor();
-            status = "Task saved.";
-        }
-        catch (GoogleTaskExtensionSyncException syncEx)
-        {
-            if (!disposed)
+                CloseEditor();
+                status = "Task saved.";
+            }
+            catch (GoogleTaskExtensionSyncException syncEx)
             {
-                ReplaceTask(editingListId, syncEx.SavedTask);
-                selectedTask = syncEx.SavedTask;
-                error = syncEx.Message;
+                if (!disposed)
+                {
+                    ReplaceTask(editingListId, syncEx.SavedTask);
+                    selectedTask = syncEx.SavedTask;
+                    error = syncEx.Message;
+                }
             }
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            if (!disposed) error = ErrorMessage(ex);
-        }
-        finally
-        {
-            if (!disposed) busy = false;
-        }
+        });
     }
 
-    private async Task DeleteAsync()
-    {
-        if (busy || disposed || selectedTask == null || !CanEdit || !confirmDelete || editingListId == null) return;
-        busy = true;
-        error = status = null;
-        try
-        {
-            var deletedId = selectedTask.Id;
-            var targetListId = editingListId;
-            var result = await WorkflowService.DeleteTaskWithWorkflowAsync(UserId, targetListId, deletedId, selectedTask.Etag, _cts.Token);
-            if (disposed) return;
+    private Task DeleteAsync() =>
+        selectedTask == null || !CanEdit || !confirmDelete || editingListId == null
+            ? Task.CompletedTask
+            : RunBusyAsync(async () =>
+            {
+                var deletedId = selectedTask.Id;
+                var targetListId = editingListId;
+                var result = await WorkflowService.DeleteTaskWithWorkflowAsync(UserId, targetListId, deletedId, selectedTask.Etag, _cts.Token);
+                if (disposed) return;
 
-            tasksByList[targetListId] = result.RemainingTasks.ToList();
-            taskLookup = AllTaskReferences.ToDictionary(item => GoogleTaskWorkflow.Key(item.ListId, item.Task.Id), item => item.Task);
-            GoogleTaskWorkflow.RemoveReferences(extensions, result.DeletedReferences);
-            CloseEditor();
-            status = "Task deleted from Google Tasks.";
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            if (!disposed) error = ErrorMessage(ex);
-        }
-        finally
-        {
-            if (!disposed) busy = false;
-        }
-    }
+                tasksByList[targetListId] = result.RemainingTasks.ToList();
+                taskLookup = AllTaskReferences.ToDictionary(item => GoogleTaskWorkflow.Key(item.ListId, item.Task.Id), item => item.Task);
+                GoogleTaskWorkflow.RemoveReferences(extensions, result.DeletedReferences);
+                CloseEditor();
+                status = "Task deleted from Google Tasks.";
+            });
 
     private void ReplaceTask(string targetListId, GoogleTask task)
     {
@@ -512,19 +450,27 @@
         taskLookup[GoogleTaskWorkflow.Key(targetListId, task.Id)] = task;
     }
 
-    private async Task StartTaskAsync()
+    private Task StartTaskAsync() =>
+        selectedTask == null || editingListId == null || EditorHasChanges
+            ? Task.CompletedTask
+            : RunBusyAsync(async () =>
+            {
+                var listId = editingListId;
+                var taskId = selectedTask.Id;
+                var updated = await WorkflowService.StartTaskAsync(UserId, listId, taskId, _cts.Token);
+                if (disposed) return;
+                extensions[GoogleTaskWorkflow.Key(listId, taskId)] = updated;
+                status = "Task started.";
+            });
+
+    private async Task RunBusyAsync(Func<Task> action)
     {
-        if (busy || disposed || selectedTask == null || editingListId == null || EditorHasChanges) return;
-        var listId = editingListId;
-        var taskId = selectedTask.Id;
+        if (busy || disposed) return;
         busy = true;
         error = status = null;
         try
         {
-            var updated = await WorkflowService.StartTaskAsync(UserId, listId, taskId, _cts.Token);
-            if (disposed) return;
-            extensions[GoogleTaskWorkflow.Key(listId, taskId)] = updated;
-            status = "Task started.";
+            await action();
         }
         catch (OperationCanceledException)
         {

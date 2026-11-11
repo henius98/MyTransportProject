@@ -98,6 +98,41 @@ public class LocationServiceTests
     }
 
     [Fact]
+    public async Task GetCurrentLocationAsync_HydratesLastKnownLocationFromCachedStorage_BeforeLiveLookupCompletes()
+    {
+        var js = new Mock<IJSRuntime>();
+        var geoModule = new Mock<IJSObjectReference>();
+        var cachedLocation = new Location(5.4141, 100.3288, 25.0);
+        var liveTcs = new TaskCompletionSource<Location?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        js.Setup(j => j.InvokeAsync<IJSObjectReference>("import", It.IsAny<object[]>()))
+            .ReturnsAsync(geoModule.Object);
+        geoModule.Setup(m => m.InvokeAsync<Location?>("getCachedLocation", It.IsAny<object[]>()))
+            .ReturnsAsync(cachedLocation);
+        geoModule.Setup(m => m.InvokeAsync<Location?>("getUserLocation", It.IsAny<object[]>()))
+            .Returns(() => new ValueTask<Location?>(liveTcs.Task));
+
+        var options = Options.Create(new CacheExpirationOptions
+        {
+            Map = new MapCacheExpirationOptions { GeolocationSeconds = 60 }
+        });
+
+        var service = new LocationService(js.Object, options);
+        var pendingTask = service.GetCurrentLocationAsync(forceRefresh: false);
+
+        // Even while live GPS is still pending, LastKnownLocation is already hydrated from localStorage cache
+        Assert.NotNull(service.LastKnownLocation);
+        Assert.Equal(5.4141, service.LastKnownLocation.Latitude);
+        Assert.Equal(100.3288, service.LastKnownLocation.Longitude);
+
+        liveTcs.SetResult(null);
+        var result = await pendingTask;
+
+        Assert.Null(result);
+        Assert.Equal(5.4141, service.LastKnownLocation.Latitude);
+    }
+
+    [Fact]
     public void LocationService_Throws_WhenGeolocationSecondsIsZeroOrNegative()
     {
         var js = new Mock<IJSRuntime>();

@@ -9,8 +9,7 @@ This directory contains browser-side JavaScript modules and interop bridges. Fil
 | `google-services.js` | Google Workspace | `Services/Google/Workspace/GoogleWorkspaceService.cs` | Google Calendar & Google Tasks REST API client |
 | `google-authorization.js` | Google Workspace / Identity | `Services/Google/Workspace/GoogleWorkspaceService.cs` | Google Identity Services OAuth 2.0 authorization code flow |
 | `google-token-store.js` | Google Workspace | `Services/Google/Workspace/GoogleWorkspaceService.cs` | Client token caching with session/local storage fallback |
-| `googleMap.js` | Google Maps Platform | `Services/Google/Maps/LiveRoutingService.cs`, `Pages/Map/Map.razor.cs` | Maps JS API, markers, routes, polyline decoding |
-| `locationPicker.js` | Google Places Platform | `Pages/Weather/Components/LocationSearchAutocomplete.razor` | Google Places (New) AutocompleteElement interop |
+| `googleMap.js` | Google Maps Platform | `Services/Google/Maps/LiveRoutingService.cs`, `Services/Google/Maps/PlaceResolutionService.cs`, `Pages/Map/Map.razor.cs` | Maps JS API, Places AutocompleteElement, Geocoding, markers, routes, polyline decoding |
 
 ## 2. Firebase Services
 
@@ -24,7 +23,8 @@ This directory contains browser-side JavaScript modules and interop bridges. Fil
 
 ## 3. Core Browser Utilities
 
-| Script | Role | Companion C# Service | Purpose |
+| Script | Role | Companion C# Service / Component | Purpose |
 |---|---|---|---|
-| `geolocation.js` | Browser Geolocation API | `Services/Core/LocationService.cs` | GPS coordinate retrieval and watchPosition tracking |
+| `geolocation.js` | Browser Geolocation API | `Services/Core/LocationService.cs` | GPS coordinate retrieval with fast network fallback and localStorage caching |
+| `locationPicker.js` | Station Map Dialog | `Pages/Weather/Components/LocationSearchAutocomplete.razor` | Interactive SVG Malaysia weather station map dialog (zoom, pan, tooltips) |
 | `theme-manager.js` | Theme Management | `Services/Core/ThemeService.cs` | Pre-Blazor theme flash prevention and body class synchronization |

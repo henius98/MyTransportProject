@@ -75,15 +75,21 @@ public sealed class TransportStaticDataServiceTests
     var service = new TransportStaticDataService(new HttpClient(handler));
 
     var routes = await service.GetRoutesAsync(Source);
+    var allMap = await service.GetMapAsync(Source);
     var map = await service.GetMapAsync(Source, "A 1");
+    var allDepartures = await service.GetDeparturesAsync(Source, "", "STOP/1");
     var departures = await service.GetDeparturesAsync(Source, "A 1", "STOP/1");
 
     Assert.Equal(new StaticRoute("A 1", "A1"), Assert.Single(routes));
+    Assert.Contains("FeatureCollection", allMap);
     Assert.Contains("FeatureCollection", map);
+    Assert.Equal("Airport", Assert.Single(allDepartures).Headsign);
     Assert.Equal("Airport", Assert.Single(departures).Headsign);
     Assert.Equal("https://worker.example/rapid-bus-kl/data/routes?include=route_id,route_short_name,route_long_name&sort=route_id&limit=1000&offset=0", handler.Urls[0]);
-    Assert.Equal("https://worker.example/rapid-bus-kl/map?route_id=A%201", handler.Urls[1]);
-    Assert.Equal("https://worker.example/rapid-bus-kl/departures?stop_id=STOP%2F1&route_id=A%201&limit=5", handler.Urls[2]);
+    Assert.Equal("https://worker.example/rapid-bus-kl/map", handler.Urls[1]);
+    Assert.Equal("https://worker.example/rapid-bus-kl/map?route_id=A%201", handler.Urls[2]);
+    Assert.Equal("https://worker.example/rapid-bus-kl/departures?stop_id=STOP%2F1&limit=5", handler.Urls[3]);
+    Assert.Equal("https://worker.example/rapid-bus-kl/departures?stop_id=STOP%2F1&route_id=A%201&limit=5", handler.Urls[4]);
   }
 
   [Fact]

@@ -42,33 +42,7 @@ jobs:
           FIREBASE_CONFIG_JSON: ${{ vars.FIREBASE_CONFIG_JSON || '{"apiKey":"dummyApiKey","authDomain":"mytransportapp.firebaseapp.com","projectId":"mytransportapp","storageBucket":"mytransportapp.appspot.com","messagingSenderId":"123456789","appId":"1:123456789:web:abcdef"}' }}
           STATIC_DATA_BASE_URL: ${{ vars.STATIC_DATA_BASE_URL || '' }}
           BAZIFLOW_BASE_URL: ${{ vars.BAZIFLOW_BASE_URL || '' }}
-        run: |
-          node scripts/configure-firebase.mjs
-          node -e '
-            const fs = require("node:fs");
-            const prodPath = "MyTransportAppWASM/wwwroot/appsettings.json";
-            const devPath = "MyTransportAppWASM/wwwroot/appsettings.Development.example.json";
-            const raw = fs.readFileSync(prodPath, "utf8");
-            const prod = JSON.parse(raw.replace(/^\s*\/\/.*$/gm, "").replace(/,(\s*[\]}])/g, "$1"));
-            const dev = JSON.parse(fs.readFileSync(devPath, "utf8"));
-            const staticBase = (process.env.STATIC_DATA_BASE_URL || "").trim().replace(/\/+$/, "");
-            const baziBase = (process.env.BAZIFLOW_BASE_URL || "").trim().replace(/\/+$/, "");
-            if (staticBase && Array.isArray(prod.TransportProviders) && Array.isArray(dev.TransportProviders)) {
-              for (let i = 0; i < prod.TransportProviders.length; i++) {
-                const devUrl = dev.TransportProviders[i]?.StaticData?.BaseUrl || "";
-                const slug = devUrl.split("/").filter(Boolean).pop();
-                if (slug && prod.TransportProviders[i]?.StaticData) {
-                  prod.TransportProviders[i].StaticData.BaseUrl = `${staticBase}/${slug}`;
-                }
-              }
-            }
-            if (baziBase) {
-              prod.BaziFlow = { ...(prod.BaziFlow || {}), BaseUrl: baziBase };
-            }
-            if (staticBase || baziBase) {
-              fs.writeFileSync(prodPath, `${JSON.stringify(prod, null, 2)}\n`);
-            }
-          '
+        run: node scripts/configure-firebase.mjs
 
       - name: Install .NET WASM Build Tools
         run: dotnet workload install wasm-tools
@@ -79,15 +53,9 @@ jobs:
       - name: Run tests
         run: dotnet test MyTransportApp.slnx -c Release --no-restore --nologo
 
-      - name: Run Firebase and service worker tests
+      - name: Run Firebase, service worker, and Google connection tests
         run: |
-          node --experimental-vm-modules --test tests/firebase/config/*.test.mjs
-          node --test tests/firebase/push/*.test.mjs
-          node --test tests/service-worker/*.test.mjs
-
-      - name: Run Google connection tests
-        run: |
-          node --experimental-vm-modules --test tests/google-services/*.test.mjs
+          npm run test:node
           if command -v corepack >/dev/null 2>&1; then corepack enable; fi
           cd functions
           pnpm install --frozen-lockfile

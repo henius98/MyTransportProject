@@ -1,16 +1,8 @@
-import { getFirebaseApp, firebaseSdkBase } from "./firebase-config.js";
 import { requireSignedInUser } from "./firebase-auth.js";
-
-let contextPromise;
+import { getFirestoreContext } from "./firebase-firestore.js";
 
 async function context(uid) {
-    if (!contextPromise) {
-        const pending = Promise.all([getFirebaseApp(), import(`${firebaseSdkBase}/firebase-firestore-lite.js`)])
-            .then(([app, sdk]) => ({ db: sdk.getFirestore(app), sdk }));
-        contextPromise = pending;
-        void pending.catch(() => { if (contextPromise === pending) contextPromise = null; });
-    }
-    const result = await contextPromise;
+    const result = await getFirestoreContext();
     await requireSignedInUser(uid);
     return result;
 }

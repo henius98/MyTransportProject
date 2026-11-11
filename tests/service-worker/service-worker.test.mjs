@@ -73,6 +73,7 @@ function setupDevWorker(mockFetch) {
     createContext({
       self,
       URL,
+      Response,
       caches: mockCaches,
       fetch: mockFetch
     })
@@ -110,6 +111,7 @@ function setupProdWorker(mockFetch, manifestAssets = [], registrationScope = nul
     createContext({
       self,
       URL,
+      Response,
       Request: MockRequest,
       caches: mockCaches,
       fetch: mockFetch
@@ -345,4 +347,53 @@ test("prod worker correctly scopes subfolder hosting (e.g. /MyTransportProject/)
   assert.ok(navPromise, "Navigation request under subfolder should be intercepted");
   const navResponse = await navPromise;
   assert.ok(navResponse, "Navigation request under subfolder should return response");
+});
+
+test("dev and prod workers do not mistake /map SPA navigation for GTFS static data and return 503 on uncached fetch failure", async () => {
+  const failingFetch = async () => {
+    throw new TypeError("Failed to fetch");
+  };
+
+  const { handlers: devHandlers } = setupDevWorker(failingFetch);
+
+  // 1. SPA navigation to /map must bypass dev worker
+  let devNavPromise = null;
+  devHandlers.fetch({
+    request: { mode: "navigate", method: "GET", url: "https://example.com/map" },
+    respondWith: (p) => { devNavPromise = p; }
+  });
+  assert.equal(devNavPromise, null, "/map navigation should not be intercepted by dev worker");
+
+  // 2. Uncached GTFS static fetch failure resolves to 503 instead of unhandled rejection
+  let devFailPromise = null;
+  devHandlers.fetch({
+    request: { method: "GET", url: "http://localhost:8787/rapid-bus-kl/data/routes" },
+    respondWith: (p) => { devFailPromise = p; }
+  });
+  const devFailResponse = await devFailPromise;
+  assert.equal(devFailResponse.status, 503);
+
+  // 3. Prod worker serves index.html on offline /map navigation and 503 on uncached GTFS static failure
+  const manifest = [{ url: "index.html", hash: "sha256-idx" }];
+  const { handlers: prodHandlers } = setupProdWorker(failingFetch, manifest);
+  let installPromise = null;
+  prodHandlers.install({ waitUntil: (p) => { installPromise = p; } });
+  await installPromise;
+
+  let prodNavPromise = null;
+  prodHandlers.fetch({
+    request: { mode: "navigate", method: "GET", url: "https://example.com/map" },
+    respondWith: (p) => { prodNavPromise = p; }
+  });
+  const prodNavResponse = await prodNavPromise;
+  assert.equal(prodNavResponse.status, 200);
+  assert.equal(prodNavResponse.url, "https://example.com/index.html");
+
+  let prodFailPromise = null;
+  prodHandlers.fetch({
+    request: { method: "GET", url: "http://localhost:8787/rapid-bus-kl/data/routes" },
+    respondWith: (p) => { prodFailPromise = p; }
+  });
+  const prodFailResponse = await prodFailPromise;
+  assert.equal(prodFailResponse.status, 503);
 });

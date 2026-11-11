@@ -62,7 +62,7 @@ public sealed class TransportStaticDataService(HttpClient httpClient) : ITranspo
     return routes.Values.OrderBy(route => route.Name, StringComparer.OrdinalIgnoreCase).ToList();
   }
 
-  public async Task<string> GetMapAsync(TransportStaticData source, string routeId, CancellationToken cancellationToken = default)
+  public async Task<string> GetMapAsync(TransportStaticData source, string routeId = "", CancellationToken cancellationToken = default)
   {
     var query = string.IsNullOrEmpty(routeId) ? "" : $"?route_id={Uri.EscapeDataString(routeId)}";
     var url = BuildUrl(source, source.GeoJSONUrlPath, query);
@@ -71,8 +71,9 @@ public sealed class TransportStaticDataService(HttpClient httpClient) : ITranspo
 
   public async Task<List<StaticDeparture>> GetDeparturesAsync(TransportStaticData source, string routeId, string stopId, CancellationToken cancellationToken = default)
   {
+    var routeQuery = string.IsNullOrEmpty(routeId) ? "" : $"&route_id={Uri.EscapeDataString(routeId)}";
     var url = BuildUrl(source, source.DeparturePath,
-      $"?stop_id={Uri.EscapeDataString(stopId)}&route_id={Uri.EscapeDataString(routeId)}&limit=5");
+      $"?stop_id={Uri.EscapeDataString(stopId)}{routeQuery}&limit=5");
     using var response = await httpClient.GetAsync(url, cancellationToken);
     response.EnsureSuccessStatusCode();
     using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);

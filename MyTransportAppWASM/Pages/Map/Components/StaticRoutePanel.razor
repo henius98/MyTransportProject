@@ -20,7 +20,7 @@
         {
             <label class="form-label mt-2" for="static-route-select">Route</label>
             <select id="static-route-select" class="form-input" value="@SelectedRouteId" @onchange="OnRouteChanged" disabled="@(Routes.Count == 0)">
-                <option value="">Choose a route</option>
+                <option value="">All routes</option>
                 @foreach (var route in Routes)
                 {
                     <option value="@route.Id">@route.Name (@route.Id)</option>

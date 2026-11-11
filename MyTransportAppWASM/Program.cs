@@ -13,7 +13,7 @@ namespace MyTransportAppWASM
       // Automatically loads appsettings.json and appsettings.{Environment}.json from wwwroot.
       // The framework fetches these via HTTP and merges them into builder.Configuration.
       var builder = WebAssemblyHostBuilder.CreateDefault(args);
-      builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+      ConfigureLogging(builder.Logging, builder.Configuration);
       builder.RootComponents.Add<App>("#app");
       builder.RootComponents.Add<HeadOutlet>("head::after");
 
@@ -79,19 +79,16 @@ namespace MyTransportAppWASM
         return source;
       });
       builder.Services.AddScoped<ILocationService, LocationService>();
-      builder.Services.AddScoped<MyTransportAppWASM.Services.Interfaces.ILiveRoutingService, LiveRoutingService>();
+      builder.Services.AddScoped<ILiveRoutingService, LiveRoutingService>();
       builder.Services.AddScoped<ITransitTrackingService, TransitTrackingService>();
 
       builder.Services.AddAuthorizationCore();
       builder.Services.AddCascadingAuthenticationState();
       builder.Services.AddScoped<AuthenticationStateProvider, FirebaseAuthenticationStateProvider>();
-      builder.Services.AddScoped<GoogleWorkspaceService>();
-      builder.Services.AddScoped<IGoogleWorkspaceService>(sp => sp.GetRequiredService<GoogleWorkspaceService>());
+      builder.Services.AddScoped<IGoogleWorkspaceService, GoogleWorkspaceService>();
       builder.Services.AddScoped<IGoogleTasksWorkflowService, GoogleTasksWorkflowService>();
       builder.Services.AddScoped<IUserSettingsService, UserSettingsService>();
       builder.Services.AddScoped<AppStateService>();
-
-
 
       var host = builder.Build();
 
@@ -103,10 +100,32 @@ namespace MyTransportAppWASM
       }
       catch (Exception ex)
       {
-        Console.WriteLine($"Initial language load failed: {ex.Message}");
+        host.Services.GetRequiredService<ILoggerFactory>()
+          .CreateLogger<Program>()
+          .LogWarning("Initial language load failed: {Message}", ex.Message);
       }
 
       await host.RunAsync();
+    }
+
+    private static void ConfigureLogging(ILoggingBuilder logging, IConfiguration configuration)
+    {
+      logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+
+      var logLevelSection = configuration.GetSection("Logging:LogLevel");
+      if (Enum.TryParse<LogLevel>(logLevelSection["Default"], ignoreCase: true, out var defaultLevel))
+      {
+        logging.SetMinimumLevel(defaultLevel);
+      }
+
+      foreach (var entry in logLevelSection.GetChildren())
+      {
+        if (!string.Equals(entry.Key, "Default", StringComparison.OrdinalIgnoreCase) &&
+            Enum.TryParse<LogLevel>(entry.Value, ignoreCase: true, out var categoryLevel))
+        {
+          logging.AddFilter(entry.Key, categoryLevel);
+        }
+      }
     }
   }
 }

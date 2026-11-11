@@ -141,6 +141,7 @@ public class MapComponentRenderingTests
 
         Assert.Contains("Rapid Bus KL", html);
         Assert.DoesNotContain("value=\"1\">KTMB", html);
+        Assert.Contains("All routes", html);
         Assert.Contains("Route One (route-1)", html);
         Assert.Contains("Test Stop", html);
         Assert.Contains("Scheduled estimates, not live arrivals.", html);

@@ -11,42 +11,51 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Ensure wrkflw is in PATH
 if ! command -v wrkflw >/dev/null 2>&1; then
-  if [ -x "/var/home/linuxbrew/.linuxbrew/bin/wrkflw" ]; then
-    export PATH="/var/home/linuxbrew/.linuxbrew/bin:${PATH}"
-  elif [ -x "${HOME}/.linuxbrew/bin/wrkflw" ]; then
-    export PATH="${HOME}/.linuxbrew/bin:${PATH}"
-  elif [ -x "${HOME}/.cargo/bin/wrkflw" ]; then
-    export PATH="${HOME}/.cargo/bin:${PATH}"
-  elif [ -x "${HOME}/.local/bin/wrkflw" ]; then
-    export PATH="${HOME}/.local/bin:${PATH}"
-  else
+  for candidate in \
+    "/var/home/linuxbrew/.linuxbrew/bin" \
+    "${HOME}/.linuxbrew/bin" \
+    "${HOME}/.cargo/bin" \
+    "${HOME}/.local/bin"; do
+    if [ -x "${candidate}/wrkflw" ]; then
+      export PATH="${candidate}:${PATH}"
+      break
+    fi
+  done
+  if ! command -v wrkflw >/dev/null 2>&1; then
     echo "Error: wrkflw CLI not found." >&2
     echo "Please install via: brew install wrkflw  OR  cargo install wrkflw" >&2
     exit 1
   fi
 fi
 
-# Load local secrets if present
-if [ -f "${REPO_ROOT}/.secrets" ]; then
+load_env_file() {
+  local file="$1"
+  [ -f "${file}" ] || return 0
   # Export non-comment lines
   while IFS= read -r line || [ -n "${line}" ]; do
     line="${line#"${line%%[![:space:]]*}"}"
     if [ -n "${line}" ] && [[ ! "${line}" =~ ^# ]] && [[ "${line}" == *"="* ]]; then
-      export "${line}"
+      local key="${line%%=*}"
+      local val="${line#*=}"
+      # Strip outer matching quotes if present
+      if [[ "${val}" =~ ^\"(.*)\"$ ]] || [[ "${val}" =~ ^\'(.*)\'$ ]]; then
+        val="${BASH_REMATCH[1]}"
+      fi
+      export "${key}=${val}"
     fi
-  done < "${REPO_ROOT}/.secrets"
+  done < "${file}"
+}
+
+# Load local secrets if present
+if [ -f "${REPO_ROOT}/.secrets" ]; then
+  load_env_file "${REPO_ROOT}/.secrets"
 elif [ -f "${REPO_ROOT}/.secrets.example" ]; then
   echo "Notice: No .secrets file found. You can copy .secrets.example to .secrets to supply local secrets."
 fi
 
 # Load local workflow vars if present
 if [ -f "${REPO_ROOT}/.vars" ]; then
-  while IFS= read -r line || [ -n "${line}" ]; do
-    line="${line#"${line%%[![:space:]]*}"}"
-    if [ -n "${line}" ] && [[ ! "${line}" =~ ^# ]] && [[ "${line}" == *"="* ]]; then
-      export "${line}"
-    fi
-  done < "${REPO_ROOT}/.vars"
+  load_env_file "${REPO_ROOT}/.vars"
 fi
 
 # Default fallback values for required workflow variables/secrets

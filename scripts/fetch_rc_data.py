@@ -1,30 +1,34 @@
-import os
 import time
 import json
 import urllib.request
 import urllib.error
 import urllib.parse
 from datetime import date
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 import argparse
 
 today_str = date.today().strftime("%Y-%m-%d")
 MET_API_URL = f"https://api.data.gov.my/weather/forecast?date={today_str}"
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+# Compliant User-Agent per Nominatim Acceptable Use Policy (identifying application and contact)
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+    "User-Agent": "MyTransportApp/1.0 (https://github.com/henius/MyTransportProject; transit-weather-planner)",
     "Referer": "https://data.gov.my"
 }
-OUTPUT_DIR = os.path.join(os.path.dirname(
-    __file__), "..", "MyTransportAppWASM", "wwwroot", "data")
-OUTPUT_FILE = os.path.join(OUTPUT_DIR, "recreation_centres.json")
-FAILED_FILE = os.path.join(os.path.dirname(__file__), "failed_locations.json")
+REQUEST_TIMEOUT_SECONDS = 15
 
-NAME_OVERRIDES = {
+SCRIPT_DIR = Path(__file__).resolve().parent
+OUTPUT_DIR = SCRIPT_DIR.parent / "MyTransportAppWASM" / "wwwroot" / "data"
+OUTPUT_FILE = OUTPUT_DIR / "recreation_centres.json"
+FAILED_FILE = SCRIPT_DIR / "failed_locations.json"
+
+NAME_OVERRIDES: Dict[str, str] = {
     "FP Labuan": "Labuan",
     "WP Putrajaya": "Putrajaya"
 }
 
-HARDCODED_COORDINATES = {
+HARDCODED_COORDINATES: Dict[str, List[Dict[str, float]]] = {
     "Pusat Konservasi Gajah Kebangsaan": [{"lat": 3.5907, "lon": 102.1469}],
     "Kuala Gandah Elephant Conservation Centre": [{"lat": 3.5907, "lon": 102.1469}],
     "Tasik Bera": [{"lat": 3.0833, "lon": 102.5833}],
@@ -32,7 +36,7 @@ HARDCODED_COORDINATES = {
 }
 
 
-def geocode_location(loc_name):
+def geocode_location(loc_name: str) -> Optional[List[Dict[str, Any]]]:
     # Immediate bypass for known failing names
     if loc_name in HARDCODED_COORDINATES:
         return HARDCODED_COORDINATES[loc_name]
@@ -51,29 +55,64 @@ def geocode_location(loc_name):
     })
     url = f"{NOMINATIM_URL}?{params}"
     req = urllib.request.Request(url, headers=HEADERS)
-    with urllib.request.urlopen(req) as geo_response:
-        return json.loads(geo_response.read().decode('utf-8'))
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as geo_response:
+                return json.loads(geo_response.read().decode('utf-8'))
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 503) and attempt < 2:
+                time.sleep(2.0 * (attempt + 1))
+                continue
+            raise
 
 
-def fetch_all_data():
+def save_merged_results(new_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    existing_results = []
+    if OUTPUT_FILE.exists():
+        try:
+            with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+                existing_results = json.load(f)
+        except Exception:
+            existing_results = []
+
+    # Deduplicate existing and new results by location_id
+    merged = {item["location_id"]: item for item in existing_results if isinstance(item, dict) and "location_id" in item}
+    for item in new_results:
+        merged[item["location_id"]] = item
+    combined_results = list(merged.values())
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        json.dump(combined_results, f, indent=2, ensure_ascii=False)
+    return combined_results
+
+
+def fetch_all_data() -> None:
     print("Fetching all raw data from MET Malaysia...")
     try:
         req = urllib.request.Request(MET_API_URL, headers=HEADERS)
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             data = json.loads(response.read().decode('utf-8'))
     except Exception as e:
         print(f"Error fetching data from MET API: {e}")
         return
 
+    if not isinstance(data, list):
+        print(f"Unexpected response format from MET API: expected list, got {type(data).__name__}")
+        return
+
     unique_locations = {}
     for item in data:
-        loc_id = item.get("location", {}).get("location_id")
-        loc_name = item.get("location", {}).get("location_name")
-        if loc_id and loc_name:
-            unique_locations[loc_id] = loc_name
+        if isinstance(item, dict):
+            loc = item.get("location") or {}
+            if isinstance(loc, dict):
+                loc_id = loc.get("location_id")
+                loc_name = loc.get("location_name")
+                if loc_id and loc_name:
+                    unique_locations[loc_id] = loc_name
 
     print(f"Extracted {len(unique_locations)} unique locations.")
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     results = []
     failed = []
@@ -104,9 +143,8 @@ def fetch_all_data():
     print(
         f"\nGeocoding complete. Success: {len(results)}, Failed: {len(failed)}")
 
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(results, f, indent=2, ensure_ascii=False)
-    print(f"Saved master database to {OUTPUT_FILE}")
+    combined_results = save_merged_results(results)
+    print(f"Saved master database to {OUTPUT_FILE} ({len(combined_results)} total locations)")
 
     if failed:
         with open(FAILED_FILE, "w", encoding="utf-8") as f:
@@ -114,31 +152,38 @@ def fetch_all_data():
         print(f"Saved failed locations to {FAILED_FILE}")
 
 
-def retry_failed():
-    if not os.path.exists(FAILED_FILE):
+def retry_failed() -> None:
+    if not FAILED_FILE.exists():
         print("No failed_locations.json found. Nothing to retry.")
         return
 
-    with open(FAILED_FILE, "r", encoding="utf-8") as f:
-        failed_locations = json.load(f)
-
-    if not failed_locations:
-        print("Failed locations list is empty. Nothing to retry.")
+    try:
+        with open(FAILED_FILE, "r", encoding="utf-8") as f:
+            failed_locations = json.load(f)
+    except Exception as e:
+        print(f"Error reading {FAILED_FILE}: {e}")
         return
 
-    existing_results = []
-    if os.path.exists(OUTPUT_FILE):
-        with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
-            existing_results = json.load(f)
+    if not isinstance(failed_locations, list) or not failed_locations:
+        print("Failed locations list is empty or invalid. Nothing to retry.")
+        return
+
+    valid_failed = [
+        item for item in failed_locations
+        if isinstance(item, dict) and "location_id" in item and "location_name" in item
+    ]
+    if not valid_failed:
+        print("No valid location entries found in failed_locations.json.")
+        return
 
     new_results = []
     still_failed = []
 
-    print(f"Retrying {len(failed_locations)} failed locations...")
-    for i, item in enumerate(failed_locations):
+    print(f"Retrying {len(valid_failed)} failed locations...")
+    for i, item in enumerate(valid_failed):
         loc_id = item["location_id"]
         loc_name = item["location_name"]
-        print(f"[{i+1}/{len(failed_locations)}] Retrying {loc_name} ({loc_id})...",
+        print(f"[{i+1}/{len(valid_failed)}] Retrying {loc_name} ({loc_id})...",
               end=" ", flush=True)
 
         try:
@@ -163,9 +208,7 @@ def retry_failed():
         f"\nRetry complete. New Successes: {len(new_results)}, Still Failed: {len(still_failed)}")
 
     if new_results:
-        existing_results.extend(new_results)
-        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-            json.dump(existing_results, f, indent=2, ensure_ascii=False)
+        save_merged_results(new_results)
         print(f"Appended {len(new_results)} locations to master database.")
 
     with open(FAILED_FILE, "w", encoding="utf-8") as f:
@@ -173,7 +216,7 @@ def retry_failed():
     print(f"Updated failed locations list. {len(still_failed)} remaining.")
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Fetch and geocode location data from MET Malaysia API.")
     parser.add_argument("--retry", action="store_true",

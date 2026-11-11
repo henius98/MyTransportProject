@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Net;
 using System.Net.Http.Headers;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using MyTransportAppWASM.Gtfs;
 using MyTransportAppWASM.Models;
 
@@ -14,17 +16,20 @@ namespace MyTransportAppWASM.Services
 
     private readonly HttpClient _httpClient;
     private readonly TimeProvider _timeProvider;
+    private readonly ILogger<GtfsService> _logger;
     private readonly Dictionary<string, ValidatorEntry> _validators = new(StringComparer.Ordinal);
     private readonly Lock _validatorLock = new();
 
-    public GtfsService(HttpClient httpClient) : this(httpClient, TimeProvider.System)
+    public GtfsService(HttpClient httpClient, ILogger<GtfsService>? logger = null)
+      : this(httpClient, TimeProvider.System, logger)
     {
     }
 
-    internal GtfsService(HttpClient httpClient, TimeProvider timeProvider)
+    internal GtfsService(HttpClient httpClient, TimeProvider timeProvider, ILogger<GtfsService>? logger = null)
     {
       _httpClient = httpClient;
       _timeProvider = timeProvider;
+      _logger = logger ?? NullLogger<GtfsService>.Instance;
     }
 
     public async Task<GtfsFetchResult> GetBusPositionsAsync(
@@ -61,7 +66,10 @@ namespace MyTransportAppWASM.Services
 
         if (response.StatusCode == HttpStatusCode.NotModified && allowNotModified)
         {
-          RefreshValidators(url, validators, response, now);
+          if (validators is not null)
+          {
+            StoreValidators(url, response, now, validators);
+          }
           return new GtfsFetchResult(GtfsFetchStatus.NotModified);
         }
 
@@ -80,7 +88,7 @@ namespace MyTransportAppWASM.Services
       }
       catch (Exception ex)
       {
-        Console.Error.WriteLine($"GtfsService error fetching {url}: {ex.Message}");
+        _logger.LogWarning("GtfsService error fetching {Url}: {Message}", url, ex.Message);
         return default;
       }
     }
@@ -166,7 +174,11 @@ namespace MyTransportAppWASM.Services
       }
     }
 
-    private void StoreValidators(string url, HttpResponseMessage response, DateTimeOffset now)
+    private void StoreValidators(
+      string url,
+      HttpResponseMessage response,
+      DateTimeOffset now,
+      ValidatorEntry? fallback = null)
     {
       if (response.Headers.CacheControl?.NoStore == true)
       {
@@ -179,8 +191,8 @@ namespace MyTransportAppWASM.Services
 
       var entry = new ValidatorEntry
       {
-        EntityTag = response.Headers.ETag?.ToString(),
-        LastModified = response.Content.Headers.LastModified,
+        EntityTag = response.Headers.ETag?.ToString() ?? fallback?.EntityTag,
+        LastModified = response.Content.Headers.LastModified ?? fallback?.LastModified,
         FreshUntil = CalculateFreshUntil(response, now),
         LastAccess = now
       };
@@ -198,38 +210,6 @@ namespace MyTransportAppWASM.Services
       {
         EvictOldestValidatorIfRequired(url);
         _validators[url] = entry;
-      }
-    }
-
-    private void RefreshValidators(
-      string url,
-      ValidatorEntry? existing,
-      HttpResponseMessage response,
-      DateTimeOffset now)
-    {
-      if (existing is null)
-      {
-        return;
-      }
-
-      if (response.Headers.CacheControl?.NoStore == true)
-      {
-        lock (_validatorLock)
-        {
-          _validators.Remove(url);
-        }
-        return;
-      }
-
-      existing.EntityTag = response.Headers.ETag?.ToString() ?? existing.EntityTag;
-      existing.LastModified = response.Content.Headers.LastModified ?? existing.LastModified;
-      existing.FreshUntil = CalculateFreshUntil(response, now);
-      existing.LastAccess = now;
-
-      lock (_validatorLock)
-      {
-        EvictOldestValidatorIfRequired(url);
-        _validators[url] = existing;
       }
     }
 

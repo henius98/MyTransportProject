@@ -1,7 +1,7 @@
 @namespace MyTransportAppWASM.Pages.Google
 @using System.Globalization
 @implements IDisposable
-@inject GoogleWorkspaceService Workspace
+@inject IGoogleWorkspaceService Workspace
 
 <div class="gcal" aria-busy="@busy">
   <header class="gcal-topbar">
@@ -293,7 +293,6 @@
   private bool allDay;
   private bool busy;
   private bool disposed;
-  private readonly CancellationTokenSource _cts = new();
   private bool confirmDelete;
   private bool showEditor;
   private bool showLunar = true;
@@ -322,6 +321,10 @@ GridStart.AddDays(offset));
 "writer";
   private static bool IsHolidayCalendar(MyTransportAppWASM.Models.GoogleCalendar calendar) =>
 calendar.Id.EndsWith("#holiday@group.v.calendar.google.com", StringComparison.OrdinalIgnoreCase);
+  private static bool IsMalaysiaHolidayCalendar(MyTransportAppWASM.Models.GoogleCalendar calendar) =>
+calendar.Id.EndsWith(".malaysia#holiday@group.v.calendar.google.com", StringComparison.OrdinalIgnoreCase);
+  private string DefaultWritableCalendarId() =>
+(calendars.FirstOrDefault(calendar => calendar.Primary && IsWritable(calendar)) ?? calendars.FirstOrDefault(IsWritable))?.Id ?? string.Empty;
 
   private string CalendarColor(string id)
   {
@@ -342,36 +345,25 @@ color.Skip(1).All(Uri.IsHexDigit) ? color : fallback;
     await RefreshAsync();
   }
 
-  private async Task MoveMonthAsync(int months)
-  {
-    if (busy || disposed) return;
-    displayMonth = displayMonth.AddMonths(months);
-    selectedDay = displayMonth;
-    events.Clear();
-    NewEvent(displayMonth);
-    showEditor = false;
-    await RefreshAsync();
-  }
+  private Task MoveMonthAsync(int months) =>
+    busy || disposed ? Task.CompletedTask : SwitchMonthAsync(displayMonth.AddMonths(months));
 
-  private async Task GoToTodayAsync()
-  {
-    if (busy || disposed) return;
-    selectedDay = MalaysiaTime.Today;
-    if (displayMonth.Year == selectedDay.Year && displayMonth.Month == selectedDay.Month) return;
-    displayMonth = new(selectedDay.Year, selectedDay.Month, 1);
-    events.Clear();
-    NewEvent(selectedDay);
-    showEditor = false;
-    await RefreshAsync();
-  }
+  private Task GoToTodayAsync() =>
+    busy || disposed ? Task.CompletedTask : ChooseDayAsync(MalaysiaTime.Today);
 
   private async Task ChooseDayAsync(DateTime day)
   {
     selectedDay = day;
     if (day.Month == displayMonth.Month && day.Year == displayMonth.Year) return;
-    displayMonth = new(day.Year, day.Month, 1);
+    await SwitchMonthAsync(day);
+  }
+
+  private async Task SwitchMonthAsync(DateTime targetDay)
+  {
+    selectedDay = targetDay;
+    displayMonth = new(targetDay.Year, targetDay.Month, 1);
     events.Clear();
-    NewEvent(day);
+    NewEvent(targetDay);
     showEditor = false;
     await RefreshAsync();
   }
@@ -414,8 +406,7 @@ EventDate(entry.End) > day)
         var result = await Workspace.ListCalendarsAsync(UserId);
         if (disposed) return;
         calendars = result.ToList();
-        if (!calendars.Any(calendar => calendar.Id.EndsWith(".malaysia#holiday@group.v.calendar.google.com",
-StringComparison.OrdinalIgnoreCase)))
+        if (!calendars.Any(IsMalaysiaHolidayCalendar))
         {
           calendars.Add(new()
           {
@@ -425,11 +416,9 @@ StringComparison.OrdinalIgnoreCase)))
             BackgroundColor = "#8983d1"
           });
         }
-        foreach (var calendar in calendars.Where(calendar => calendar.Selected || calendar.Primary ||
-calendar.Id.EndsWith(".malaysia#holiday@group.v.calendar.google.com", StringComparison.OrdinalIgnoreCase)))
+        foreach (var calendar in calendars.Where(calendar => calendar.Selected || calendar.Primary || IsMalaysiaHolidayCalendar(calendar)))
           enabledCalendars.Add(calendar.Id);
-        calendarId = (calendars.FirstOrDefault(calendar => calendar.Primary && IsWritable(calendar)) ??
-calendars.FirstOrDefault(IsWritable))?.Id ?? string.Empty;
+        calendarId = DefaultWritableCalendarId();
       }
       var start = GridStart;
       var end = start.AddDays(GridWeekCount * 7);
@@ -486,8 +475,7 @@ LoadCalendarEventsAsync(MyTransportAppWASM.Models.GoogleCalendar calendar, DateT
   {
     selectedEvent = null;
     if (!CanWrite)
-      calendarId = (calendars.FirstOrDefault(calendar => calendar.Primary && IsWritable(calendar)) ??
-calendars.FirstOrDefault(IsWritable))?.Id ?? string.Empty;
+      calendarId = DefaultWritableCalendarId();
     title = description = location = string.Empty;
     allDay = confirmDelete = false;
     var date = day ?? MalaysiaTime.Today;
@@ -615,7 +603,5 @@ MalaysiaTime.LocalDateTime(time) : DateTime.MinValue;
   public void Dispose()
   {
     disposed = true;
-    _cts.Cancel();
-    _cts.Dispose();
   }
 }
