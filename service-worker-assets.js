@@ -1,8 +1,8 @@
 self.assetsManifest = {
-  "version": "A/nv3W9V",
+  "version": "Ufyj5ydu",
   "assets": [
     {
-      "hash": "sha256-JeFABRAW1SA8sZ0yEn/6ZCojmg5O9xXzICxKBH+YQps=",
+      "hash": "sha256-P4DxOYny9psfXIjYdHyMto08SfdA5XBeoJ/my3gYLf0=",
       "url": "MyTransportAppWASM.styles.css"
     },
     {
@@ -110,12 +110,12 @@ self.assetsManifest = {
       "url": "_framework/Microsoft.JSInterop.WebAssembly.kivdlry06d.wasm"
     },
     {
-      "hash": "sha256-eyQU07rxB5v2JvGlrgXePVuFP2sLpMQUKoO1Hm0rvdY=",
-      "url": "_framework/MyTransportAppWASM.Gtfs.l0zx0vxfjg.wasm"
+      "hash": "sha256-t8UefIrCD5qumU9HHz1UFR9y8/pAadfIxr2tW/Yoyu4=",
+      "url": "_framework/MyTransportAppWASM.Gtfs.dj51srk1gm.wasm"
     },
     {
-      "hash": "sha256-mzsCYWIfMB3DEPkOACmxvxyKCfL89ZHpCZpEv8jqAX8=",
-      "url": "_framework/MyTransportAppWASM.pzuify24ni.wasm"
+      "hash": "sha256-Kba4ux5NpXIOgNnbzvvrb0dIBmq9kMWMC6MYVEUC0mc=",
+      "url": "_framework/MyTransportAppWASM.dzvlhohsfy.wasm"
     },
     {
       "hash": "sha256-zbcvaV7sm9znxiZ8IShe2+h/GeFkRL/KZV0/H9sj0RA=",
@@ -178,12 +178,12 @@ self.assetsManifest = {
       "url": "_framework/System.Memory.rgky9zzybh.wasm"
     },
     {
-      "hash": "sha256-mLpDpGCr5vhKto46saGKspil5ZOutnNVggP/UNWhRDw=",
-      "url": "_framework/System.Net.Http.8whoer7vdb.wasm"
-    },
-    {
       "hash": "sha256-fKyQqVmX+Pf8kj2BR9k2mEkJAZBesE8K7Go3QLq6J6E=",
       "url": "_framework/System.Net.Http.Json.g5ssqfukoe.wasm"
+    },
+    {
+      "hash": "sha256-b/o1u5PubfoTlgcIILDO20Hrsgo/luOoTMBMW62/hDM=",
+      "url": "_framework/System.Net.Http.zji20sca70.wasm"
     },
     {
       "hash": "sha256-esoFoG86pDoLXIYQdCVCUQK6dbWYy8AL9YfctFFRvFI=",
@@ -250,7 +250,7 @@ self.assetsManifest = {
       "url": "_framework/blazor.webassembly.js"
     },
     {
-      "hash": "sha256-vJYXqptB83gotJGLR7nOI5GpMgZ6YFEKyMwxtcHe0Kc=",
+      "hash": "sha256-XDctocW3Yo/p9vw+pC/MBKcEgTXax6clFMCjr2QX+vc=",
       "url": "_framework/dotnet.js"
     },
     {
@@ -270,7 +270,7 @@ self.assetsManifest = {
       "url": "appsettings.Development.example.json"
     },
     {
-      "hash": "sha256-zdgRRMHfa1tyF/rvg+sKwqShDpRDQP/IsXuyQm4uqKA=",
+      "hash": "sha256-swrL8olFAer4bSw8PHoEAEjOQS00pVXC7HmFwSEDzOg=",
       "url": "appsettings.json"
     },
     {
@@ -278,7 +278,7 @@ self.assetsManifest = {
       "url": "css/base/typography.css"
     },
     {
-      "hash": "sha256-OGlhvFgKLlWGcRAajvyghgXti1S9ytPjsZTSC4Sx0Ts=",
+      "hash": "sha256-yRyX5rpQTUgWPsVD5xlBQNJglp2TJ/zFAKUMYXfD52w=",
       "url": "css/base/variables.css"
     },
     {
@@ -346,7 +346,7 @@ self.assetsManifest = {
       "url": "js/README.md"
     },
     {
-      "hash": "sha256-sGT77ti8+5h6js0a6CUVidlpTNcfL2ckpHs9FHol1PI=",
+      "hash": "sha256-0kdeKBkIw3akjojXmSr3zxkN3y63Lpu0tAATgiAMp3s=",
       "url": "js/firebase-auth.js"
     },
     {
@@ -366,7 +366,7 @@ self.assetsManifest = {
       "url": "js/geolocation.js"
     },
     {
-      "hash": "sha256-NoiE46nvhWCjaQbs6FYyC1plht145IGS7vAFNeWFShA=",
+      "hash": "sha256-6c0oWO/pmzQ1UbFr/MXHd7L5EmKhC/R/EYi95ZZaFxE=",
       "url": "js/google-authorization.js"
     },
     {
@@ -378,7 +378,7 @@ self.assetsManifest = {
       "url": "js/google-token-store.js"
     },
     {
-      "hash": "sha256-D08mDZk93z6aoNwcTxkAhYmOTpggj4/xSkx5U1kY5rY=",
+      "hash": "sha256-SZc/N1hzNZVAZJqFTze7bnLa1nqbT3QyKMBjaNGZN5I=",
       "url": "js/googleMap.js"
     },
     {
