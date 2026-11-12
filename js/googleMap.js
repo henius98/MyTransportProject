@@ -8,6 +8,7 @@ let mapAuthFailed = false;
 const activeMarkers = Object.create(null);
 const autocompletes = Object.create(null);
 const pendingAutocompleteValues = Object.create(null);
+const selectedPlaceLocations = Object.create(null);
 const advancedMarkerEventHandlers = new WeakMap();
 let displayTimeZone = null;
 let pendingUserPosition = null;
@@ -393,18 +394,20 @@ export async function initAutocomplete(elementId, dotNetHelper, methodName, apiK
 				const place = placePrediction.toPlace();
 				await place.fetchFields({ fields: ["displayName", "formattedAddress", "location"] });
 
-				const displayText = formatDisplayName(place.displayName) || place.formattedAddress || "";
+				const displayText = place.formattedAddress || formatDisplayName(place.displayName) || "";
+				const selectedLoc = toLatLngLiteral(place.location);
+				if (displayText && selectedLoc) {
+					selectedPlaceLocations[elementId] = { text: displayText, location: selectedLoc };
+				} else {
+					delete selectedPlaceLocations[elementId];
+				}
 
 				if (dotNetHelper) {
 					dotNetHelper.invokeMethodAsync(methodName, displayText);
 
-					if (methodName === "UpdateOrigin" && place.location) {
-						const lat = typeof place.location.lat === "function" ? place.location.lat() : place.location.lat;
-						const lng = typeof place.location.lng === "function" ? place.location.lng() : place.location.lng;
-						if (Number.isFinite(lat) && Number.isFinite(lng)) {
-							updateUserMarker(lat, lng);
-							dotNetHelper.invokeMethodAsync("UpdateUserPosition", lat, lng);
-						}
+					if (methodName === "UpdateOrigin" && selectedLoc) {
+						updateUserMarker(selectedLoc.lat, selectedLoc.lng);
+						dotNetHelper.invokeMethodAsync("UpdateUserPosition", selectedLoc.lat, selectedLoc.lng);
 					}
 				}
 			} catch (err) {
@@ -444,6 +447,7 @@ export async function initAutocomplete(elementId, dotNetHelper, methodName, apiK
  * Updates the text value of a PlaceAutocompleteElement widget or fallback input.
  */
 export function setAutocompleteValue(elementId, value) {
+	delete selectedPlaceLocations[elementId];
 	pendingAutocompleteValues[elementId] = value || "";
 	const widget = autocompletes[elementId];
 	if (widget) {
@@ -506,9 +510,9 @@ function toLatLngLiteral(pos) {
 
 function normalizeRoutesTravelMode(mode) {
 	const m = (mode || "").toUpperCase();
-	if (m === "DRIVING" || m === "DRIVE") return "DRIVE";
-	if (m === "WALKING" || m === "WALK") return "WALK";
-	if (m === "BICYCLING" || m === "BICYCLE") return "BICYCLE";
+	if (m === "DRIVING" || m === "DRIVE") return "DRIVING";
+	if (m === "WALKING" || m === "WALK") return "WALKING";
+	if (m === "BICYCLING" || m === "BICYCLE") return "BICYCLING";
 	if (m === "TRANSIT") return "TRANSIT";
 	return m || "TRANSIT";
 }
@@ -540,7 +544,7 @@ async function showRoute(origin, destination, travelMode = "TRANSIT") {
 	const { routes } = await Route.computeRoutes(request);
 
 	if (!routes || routes.length === 0) {
-		throw new Error("No routes found.");
+		return false;
 	}
 
 	const route = routes[0];
@@ -626,16 +630,22 @@ async function showRoute(origin, destination, travelMode = "TRANSIT") {
 
 	// Fit map bounds to the route
 	if (route.viewport) map.fitBounds(route.viewport);
+	return true;
+}
+
+async function resolveEndpoint(elementId, placeName) {
+	const cached = selectedPlaceLocations[elementId];
+	if (cached && cached.text === placeName) {
+		return cached.location;
+	}
+	return toLatLngLiteral(await geocodePlaceName(placeName));
 }
 
 async function resolveRouteEndpoints(originName, destinationName) {
-	const [originRes, destinationRes] = await Promise.all([
-		geocodePlaceName(originName),
-		geocodePlaceName(destinationName)
+	const [originLoc, destinationLoc] = await Promise.all([
+		resolveEndpoint("origin-input", originName),
+		resolveEndpoint("destination-input", destinationName)
 	]);
-
-	const originLoc = toLatLngLiteral(originRes);
-	const destinationLoc = toLatLngLiteral(destinationRes);
 
 	if (!originLoc || !destinationLoc) {
 		throw new Error("Unable to resolve origin or destination location.");
@@ -648,7 +658,7 @@ export async function showRouteByName(originName, destinationName, travelMode = 
 	await loadGoogleMaps();
 	try {
 		const { originLoc, destinationLoc } = await resolveRouteEndpoints(originName, destinationName);
-		await showRoute(originLoc, destinationLoc, travelMode);
+		return await showRoute(originLoc, destinationLoc, travelMode);
 	} catch (err) {
 		console.error("showRouteByName failed:", err);
 		throw err;
@@ -668,7 +678,7 @@ export async function getTransitRoutes(originName, destinationName) {
 			destination: destinationLoc,
 			travelMode: "TRANSIT",
 			computeAlternativeRoutes: true,
-			fields: ["path", "durationMillis", "distanceMeters", "legs.steps.transitDetails"],
+			fields: ["path", "durationMillis", "distanceMeters", "legs"],
 		};
 
 		const { routes } = await Route.computeRoutes(request);
@@ -685,11 +695,12 @@ export async function getTransitRoutes(originName, destinationName) {
 						leg.steps.forEach(step => {
 							if (step.transitDetails) {
 								const td = step.transitDetails;
+								const departureLoc = toLatLngLiteral(td.departureStop?.location);
 								steps.push({
 									lineShortName: td.transitLine?.shortName || td.transitLine?.nameShort || "",
 									lineName: td.transitLine?.name || "",
-									departureLat: typeof td.departureStop?.location?.lat === 'function' ? td.departureStop.location.lat() : (td.departureStop?.location?.lat || 0),
-									departureLng: typeof td.departureStop?.location?.lng === 'function' ? td.departureStop.location.lng() : (td.departureStop?.location?.lng || 0),
+									departureLat: departureLoc?.lat ?? 0,
+									departureLng: departureLoc?.lng ?? 0,
 									departureStopName: td.departureStop?.name || ""
 								});
 							}
@@ -749,7 +760,7 @@ export async function drawMultipleRoutes(routesData, activeRouteId, dotNetRef) {
 		polyline.addListener("click", () => {
 			if (currentActiveRouteId !== routeData.id) {
 				setActiveRoute(routeData.id);
-				dotNetRef.invokeMethodAsync('OnRouteSelected', routeData.id);
+				dotNetRef?.invokeMethodAsync('OnRouteSelected', routeData.id);
 			}
 		});
 
@@ -761,7 +772,7 @@ export async function drawMultipleRoutes(routesData, activeRouteId, dotNetRef) {
 	});
 
 	if (routesData.length > 0) {
-		map.fitBounds(bounds);
+		if (!bounds.isEmpty()) map.fitBounds(bounds);
 		setActiveRoute(activeRouteId);
 	}
 }
@@ -985,6 +996,7 @@ export function cleanupMap() {
  */
 export function disposeAutocomplete(elementId) {
 	delete pendingAutocompleteValues[elementId];
+	delete selectedPlaceLocations[elementId];
 	if (autocompletes[elementId]) {
 		const widget = autocompletes[elementId];
 		// By removing the widget from the DOM and deleting the reference,
