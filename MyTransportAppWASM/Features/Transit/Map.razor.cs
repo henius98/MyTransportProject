@@ -496,9 +496,11 @@ public partial class Map : IAsyncDisposable
 
       if (!string.Equals(mode, "TRANSIT", StringComparison.Ordinal))
       {
-        await mapModule.InvokeVoidAsync("showRouteByName", origin, destination, mode);
+        var routeFound = await mapModule.InvokeAsync<bool>("showRouteByName", origin, destination, mode);
         _activeRouteId = -1;
-        locationStatus = $"{char.ToUpperInvariant(mode[0])}{mode[1..].ToLowerInvariant()} route ready.";
+        locationStatus = routeFound
+          ? $"{char.ToUpperInvariant(mode[0])}{mode[1..].ToLowerInvariant()} route ready."
+          : $"No {mode.ToLowerInvariant()} routes found.";
         StateHasChanged();
         return;
       }
