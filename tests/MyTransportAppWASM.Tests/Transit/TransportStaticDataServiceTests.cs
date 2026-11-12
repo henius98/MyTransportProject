@@ -20,8 +20,12 @@ public sealed class TransportStaticDataServiceTests
     var prodProviders = prodSettings.GetSection("TransportProviders").Get<List<TransportProvider>>()!;
     Assert.All(prodProviders, p =>
     {
-      Assert.False(p.HasStaticData);
-      Assert.DoesNotContain("localhost", p.StaticData?.BaseUrl ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+      var baseUrl = p.StaticData?.BaseUrl ?? string.Empty;
+      Assert.DoesNotContain("localhost", baseUrl, StringComparison.OrdinalIgnoreCase);
+      if (p.HasStaticData)
+      {
+        Assert.StartsWith("https://", baseUrl, StringComparison.OrdinalIgnoreCase);
+      }
     });
     Assert.DoesNotContain("localhost", prodSettings["BaziFlow:BaseUrl"] ?? string.Empty, StringComparison.OrdinalIgnoreCase);
 

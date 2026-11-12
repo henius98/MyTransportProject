@@ -46,8 +46,9 @@ test("maps static data and BaziFlow base URLs by provider name", () => {
 });
 
 test("leaves endpoints untouched when no base URLs are supplied", () => {
+    const original = parse(appsettings);
     const updated = configureAppSettings(appsettings, { FIREBASE_CONFIG_JSON: JSON.stringify(firebase) }, devSettings);
     const settings = parse(updated);
-    assert.ok(settings.TransportProviders.every(p => !p.StaticData || p.StaticData.BaseUrl === ""));
-    assert.equal(settings.BaziFlow.BaseUrl, "");
+    assert.deepEqual(settings.TransportProviders, original.TransportProviders);
+    assert.deepEqual(settings.BaziFlow, original.BaziFlow);
 });
