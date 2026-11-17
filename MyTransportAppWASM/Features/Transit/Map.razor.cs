@@ -131,6 +131,15 @@ public partial class Map : IAsyncDisposable
   }
 
   [JSInvokable]
+  public async Task OnVehicleDeselected(string providerName)
+  {
+    if (_isDisposed || !Session.HasStaticDataForProvider(providerName)) return;
+    if (!Session.ClearVehicleRouteSelection(providerName)) return;
+    await UpdateStaticOverlayAsync(() => Task.FromResult<string?>(null));
+    if (!_isDisposed) StateHasChanged();
+  }
+
+  [JSInvokable]
   public async Task OnStaticStopSelected(string stopId, string stopName)
   {
     if (_isDisposed) return;
@@ -218,12 +227,29 @@ public partial class Map : IAsyncDisposable
     {
       while (await timer.WaitForNextTickAsync(cancellationToken))
       {
+        if (await IsPageHiddenAsync())
+        {
+          continue;
+        }
         await InvokeAsync(() => RefreshBusPosition(force: false));
       }
     }
     catch (OperationCanceledException)
     {
       // Normal shutdown — timer was cancelled via CancellationTokenSource
+    }
+  }
+
+  private async ValueTask<bool> IsPageHiddenAsync()
+  {
+    if (mapModule == null || _isDisposed) return false;
+    try
+    {
+      return await mapModule.InvokeAsync<bool>("isPageHidden");
+    }
+    catch (Exception ex) when (ex is JSException or JSDisconnectedException or ObjectDisposedException or OperationCanceledException)
+    {
+      return false;
     }
   }
 
@@ -416,13 +442,20 @@ public partial class Map : IAsyncDisposable
   private async Task RefreshBusPosition(bool force)
   {
     if (mapModule == null || _isDisposed || Session.MapAuthFailed) return;
+    var previousStatus = Session.LocationStatus;
     var result = await Session.RefreshVehiclesAsync(force, _cts.Token);
     if (_isDisposed || result == null || mapModule == null || Session.MapAuthFailed) return;
 
     try
     {
-      await mapModule.InvokeVoidAsync("syncMarkers", result.Vehicles);
-      if (!_isDisposed) StateHasChanged();
+      if (force || result.VehiclesChanged)
+      {
+        await mapModule.InvokeVoidAsync("syncMarkers", result.Vehicles);
+      }
+      if (!_isDisposed && (force || result.VehiclesChanged || !string.Equals(previousStatus, Session.LocationStatus, StringComparison.Ordinal)))
+      {
+        StateHasChanged();
+      }
     }
     catch (OperationCanceledException) { }
     catch (ObjectDisposedException) { }

@@ -87,7 +87,7 @@
                 <!-- Project forecast markers onto the SimpleMaps map -->
                 @foreach (var location in filteredLocations)
                 {
-                  <circle class="location-picker-dot" cx="@MapX(location.Longitude)" cy="@MapY(location.Latitude)" r="4.5"
+                  <circle @key="location.LocationId" class="location-picker-dot" cx="@MapX(location.Longitude)" cy="@MapY(location.Latitude)" r="4.5"
                           data-location-name="@location.LocationName" @onclick="() => SelectMapLocation(location)" />
                 }
               </svg>

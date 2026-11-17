@@ -43,9 +43,7 @@ main {
 }
 
 .top-row {
-  background-color: var(--card-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background-color: var(--surface-elevated, var(--card-bg));
   border-bottom: 1px solid var(--border-color);
   justify-content: flex-end;
   height: 3.5rem;

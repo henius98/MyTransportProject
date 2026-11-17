@@ -20,6 +20,12 @@ namespace MyTransportAppWASM.Core.Auth
 
         public async Task InitializeAsync()
         {
+            if (!_firebase.IsConfigured)
+            {
+                if (!_initialAuthStateTcs.Task.IsCompleted) SetAuthenticationState(user: null);
+                return;
+            }
+
             _initializationTask ??= InitializeCoreAsync();
 
             try

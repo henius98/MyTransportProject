@@ -5,7 +5,7 @@ import { createContext, SourceTextModule, SyntheticModule } from "node:vm";
 
 const source = await readFile(new URL("../../MyTransportAppWASM/wwwroot/js/push-notifications.js", import.meta.url), "utf8");
 
-async function setup({ oldToken = null, oldUid = null, incomingToken = "new-fcm-token", permission = "granted", hasSubscription = true } = {}) {
+async function setup({ oldToken = null, oldUid = null, incomingToken = "new-fcm-token", permission = "granted", hasSubscription = true, registrationError = null, deleteTokenResult = true } = {}) {
   const storage = new Map();
   if (oldToken) storage.set("push-token", oldToken);
   if (oldUid) storage.set("push-uid", oldUid);
@@ -15,6 +15,8 @@ async function setup({ oldToken = null, oldUid = null, incomingToken = "new-fcm-
     registrationCalls: [],
     registeredWorkerUrls: [],
     listenedInForeground: false,
+    deletedTokens: 0,
+    unsubscribed: 0,
   };
 
   const app = {
@@ -35,16 +37,29 @@ async function setup({ oldToken = null, oldUid = null, incomingToken = "new-fcm-
     },
   };
 
+  const subscriptionObj = {
+    endpoint: "https://fcm.googleapis.com/fcm/send/123",
+    unsubscribe: async () => {
+      state.unsubscribed += 1;
+      return true;
+    },
+  };
+
   const navigatorObj = {
     serviceWorker: {
       getRegistration: async () => hasSubscription ? ({
         pushManager: {
-          getSubscription: async () => ({ endpoint: "https://fcm.googleapis.com/fcm/send/123" }),
+          getSubscription: async () => subscriptionObj,
         },
       }) : null,
       register: async (href, options) => {
         state.registeredWorkerUrls.push({ href, options });
-        return { scope: options?.scope };
+        return {
+          scope: options?.scope,
+          pushManager: {
+            getSubscription: async () => subscriptionObj,
+          },
+        };
       },
     },
   };
@@ -72,6 +87,7 @@ async function setup({ oldToken = null, oldUid = null, incomingToken = "new-fcm-
       assert.equal(name, "pushRegistration");
       return async data => {
         state.registrationCalls.push(data);
+        if (registrationError) throw registrationError;
         return { data: { success: true } };
       };
     });
@@ -83,7 +99,10 @@ async function setup({ oldToken = null, oldUid = null, incomingToken = "new-fcm-
     this.setExport("isSupported", async () => true);
     this.setExport("getMessaging", () => ({}));
     this.setExport("getToken", async () => incomingToken);
-    this.setExport("deleteToken", async () => true);
+    this.setExport("deleteToken", async () => {
+      state.deletedTokens += 1;
+      return deleteTokenResult;
+    });
     this.setExport("onMessage", () => {
       state.listenedInForeground = true;
       return () => {};
@@ -208,4 +227,33 @@ test("status() without signed-in user skips updateRegistration", async () => {
   assert.equal(state.registrationCalls.length, 0);
   assert.equal(storage.get("push-token"), "existing-token");
   assert.equal(storage.get("push-uid"), "user-123");
+});
+
+test("enable(uid) rolls back browser subscription when server registration fails", async () => {
+  const { state, storage, pushNotifications } = await setup({
+    incomingToken: "enabled-token",
+    registrationError: new Error("internal"),
+    deleteTokenResult: false,
+  });
+
+  await assert.rejects(() => pushNotifications.enable("user-123"), /internal/);
+  assert.equal(state.deletedTokens, 1);
+  assert.equal(state.unsubscribed, 1);
+  assert.equal(storage.get("push-token"), undefined);
+  assert.equal(storage.get("push-uid"), undefined);
+});
+
+test("status(uid) returns disabled when subscription exists but server registration fails", async () => {
+  const { state, storage, pushNotifications } = await setup({
+    oldToken: null,
+    oldUid: null,
+    incomingToken: "fcm-token-abc",
+    registrationError: new Error("internal"),
+  });
+
+  const status = await pushNotifications.status("user-123");
+  assert.equal(status, "disabled");
+  assert.equal(state.registrationCalls.length, 1);
+  assert.equal(storage.get("push-token"), undefined);
+  assert.equal(storage.get("push-uid"), undefined);
 });

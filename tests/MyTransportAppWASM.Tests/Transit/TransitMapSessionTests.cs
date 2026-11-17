@@ -382,4 +382,74 @@ public class TransitMapSessionTests
     Assert.False(session.IsStaticRouteVehicleFilterActive);
     Assert.Equal(3, session.GetDisplayedVehicles().Count);
   }
+
+  [Fact]
+  public async Task SelectStaticRouteAsync_SetsUnavailableErrorStatus_WhenMapThrowsOrReturnsEmpty()
+  {
+    var staticData = new Mock<ITransportStaticDataService>();
+    staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
+      .ReturnsAsync([new StaticRoute("R1", "Route 1")]);
+    staticData.SetupSequence(s => s.GetMapAsync(StaticSource, "R1", It.IsAny<CancellationToken>()))
+      .ThrowsAsync(new HttpRequestException("503"))
+      .ReturnsAsync((string)null!)
+      .ReturnsAsync("   ")
+      .ReturnsAsync("""{"type":"FeatureCollection","features":[]}""");
+
+    using var session = CreateSession(staticData: staticData);
+
+    await session.SelectStaticProviderAsync(0);
+    Assert.False(session.IsStaticErrorStatus);
+
+    Assert.Null(await session.SelectStaticRouteAsync("R1"));
+    Assert.Equal("Static route map unavailable.", session.StaticStatus);
+    Assert.True(session.IsStaticErrorStatus);
+
+    Assert.Null(await session.SelectStaticRouteAsync("R1"));
+    Assert.Equal("Static route map unavailable.", session.StaticStatus);
+    Assert.True(session.IsStaticErrorStatus);
+
+    Assert.Null(await session.SelectStaticRouteAsync("R1"));
+    Assert.Equal("Static route map unavailable.", session.StaticStatus);
+    Assert.True(session.IsStaticErrorStatus);
+
+    Assert.NotNull(await session.SelectStaticRouteAsync("R1"));
+    Assert.Equal("Select a stop on the map for departures.", session.StaticStatus);
+    Assert.False(session.IsStaticErrorStatus);
+  }
+
+  [Fact]
+  public async Task ClearVehicleRouteSelection_ClearsRouteFilterAndIgnoresInFlightSelection()
+  {
+    var allVehicles = new List<BusLocation>
+    {
+      new() { VehicleId = "kl-401", ProviderName = "Rapid KL", RouteId = "30000019", RouteShortName = "401", TransportType = "Bus" },
+      new() { VehicleId = "kl-420", ProviderName = "Rapid KL", RouteId = "U4200", RouteShortName = "420", TransportType = "Bus" }
+    };
+
+    var mapGate = new TaskCompletionSource<string>();
+    var staticData = new Mock<ITransportStaticDataService>();
+    staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
+      .ReturnsAsync([new StaticRoute("30000019", "401"), new StaticRoute("U4200", "420")]);
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "U4200", It.IsAny<CancellationToken>()))
+      .Returns(() => mapGate.Task);
+
+    var tracking = new Mock<ITransitTrackingService>();
+    tracking.Setup(t => t.CachedVehicles).Returns(allVehicles);
+
+    using var session = CreateSession(tracking: tracking, staticData: staticData);
+
+    var selectTask = session.SelectVehicleRouteAsync("Rapid KL", "U4200", "420");
+    Assert.True(session.IsStaticRouteVehicleFilterActive);
+    Assert.Single(session.GetDisplayedVehicles());
+
+    // Deselecting before the route map finishes loading cancels the in-flight map and restores all vehicles.
+    Assert.True(session.ClearVehicleRouteSelection("Rapid KL"));
+    Assert.False(session.IsStaticRouteVehicleFilterActive);
+    Assert.Equal(string.Empty, session.SelectedStaticRouteId);
+    Assert.Equal("Select a route to view its map.", session.StaticStatus);
+    Assert.Equal(2, session.GetDisplayedVehicles().Count);
+
+    mapGate.TrySetResult("""{"route":"U4200"}""");
+    Assert.Null(await selectTask);
+  }
 }

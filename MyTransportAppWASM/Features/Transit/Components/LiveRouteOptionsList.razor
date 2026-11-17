@@ -1,6 +1,4 @@
 
-@using System.Text.RegularExpressions
-
 @if (RouteOptions != null && RouteOptions.Count > 0)
 {
     <div class="route-options mt-3">
@@ -186,7 +184,6 @@
 }
 
 @code {
-    private static readonly Regex HexColorRegex = new("^#[0-9a-fA-F]{6}$", RegexOptions.Compiled);
     private readonly HashSet<int> expandedRouteIds = [];
 
     [CascadingParameter]
@@ -226,10 +223,20 @@
         _ => "🚌"
     };
 
+    private static bool IsValidHexColor(string? value)
+    {
+        if (value is not { Length: 7 } || value[0] != '#') return false;
+        for (var i = 1; i < 7; i++)
+        {
+            if (!char.IsAsciiHexDigit(value[i])) return false;
+        }
+        return true;
+    }
+
     private static string GetLineBadgeStyle(RouteSegment seg)
     {
-        var bg = HexColorRegex.IsMatch(seg.LineColor) ? seg.LineColor : "#1a73e8";
-        var fg = HexColorRegex.IsMatch(seg.LineTextColor) ? seg.LineTextColor : "#ffffff";
+        var bg = IsValidHexColor(seg.LineColor) ? seg.LineColor : "#1a73e8";
+        var fg = IsValidHexColor(seg.LineTextColor) ? seg.LineTextColor : "#ffffff";
         return $"background-color: {bg}; color: {fg};";
     }
 }

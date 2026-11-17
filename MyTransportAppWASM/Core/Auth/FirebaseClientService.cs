@@ -19,6 +19,15 @@ public sealed class FirebaseClientService : IAsyncDisposable
     private Task? _configureTask;
     private bool _disposed;
 
+    public bool IsConfigured =>
+        IsValidConfigValue(_options.ApiKey)
+        && IsValidConfigValue(_options.AuthDomain)
+        && IsValidConfigValue(_options.ProjectId)
+        && IsValidConfigValue(_options.AppId);
+
+    private static bool IsValidConfigValue(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && !value.StartsWith("YOUR_", StringComparison.Ordinal);
+
     public FirebaseClientService(IJSRuntime jsRuntime, IOptions<FirebaseOptions>? options = null)
     {
         _jsRuntime = jsRuntime;
@@ -83,12 +92,13 @@ public sealed class FirebaseClientService : IAsyncDisposable
 
     public async Task DisposeAuthStateChangedAsync()
     {
-        var module = await GetAuthModuleAsync();
+        if (_authModule.LoadedModule is not { } module) return;
         await module.InvokeVoidAsync("disposeAuthStateChanged");
     }
 
     public async Task InitializeOneTapAsync(string? clientId = null)
     {
+        if (!IsConfigured) return;
         var effectiveClientId = string.IsNullOrWhiteSpace(clientId) ? _options.GoogleClientId : clientId;
         if (string.IsNullOrWhiteSpace(effectiveClientId)) return;
         var module = await GetAuthModuleAsync();
@@ -97,7 +107,7 @@ public sealed class FirebaseClientService : IAsyncDisposable
 
     public async Task CancelOneTapAsync()
     {
-        var module = await GetAuthModuleAsync();
+        if (await _authModule.GetIfStartedAsync() is not { } module) return;
         await module.InvokeVoidAsync("cancelOneTap");
     }
 

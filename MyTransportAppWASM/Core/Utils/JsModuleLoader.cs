@@ -49,6 +49,27 @@ public sealed class JsModuleLoader : IAsyncDisposable
     }
   }
 
+  public async ValueTask<IJSObjectReference?> GetIfStartedAsync()
+  {
+    Task<IJSObjectReference>? moduleTask;
+    lock (_sync)
+    {
+      if (_disposed || _moduleTask is null || _moduleTask.IsFaulted || _moduleTask.IsCanceled)
+        return null;
+
+      moduleTask = _moduleTask;
+    }
+
+    try
+    {
+      return await moduleTask;
+    }
+    catch (Exception ex) when (ex is JSException or JSDisconnectedException or ObjectDisposedException or OperationCanceledException || moduleTask.IsFaulted || moduleTask.IsCanceled)
+    {
+      return null;
+    }
+  }
+
   public async Task<IJSObjectReference> GetAsync(CancellationToken cancellationToken = default)
   {
     cancellationToken.ThrowIfCancellationRequested();

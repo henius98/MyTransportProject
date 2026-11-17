@@ -43,11 +43,7 @@ public sealed class TransitMapSession : IDisposable
 
   public string LocationStatus { get; private set; } = "Initializing...";
   public bool MapAuthFailed { get; private set; }
-  public bool IsErrorStatus =>
-    !string.IsNullOrEmpty(LocationStatus) &&
-    (LocationStatus.Contains("fail", StringComparison.OrdinalIgnoreCase) ||
-     LocationStatus.Contains("error", StringComparison.OrdinalIgnoreCase) ||
-     LocationStatus.Contains("unavailable", StringComparison.OrdinalIgnoreCase));
+  public bool IsErrorStatus => IsStatusErrorMessage(LocationStatus);
 
   public int SelectedStaticProviderIndex { get; private set; } = -1;
   public string SelectedStaticRouteId { get; private set; } = string.Empty;
@@ -56,6 +52,13 @@ public sealed class TransitMapSession : IDisposable
   public string SelectedStaticStopId { get; private set; } = string.Empty;
   public string StaticStopName { get; private set; } = string.Empty;
   public string StaticStatus { get; private set; } = string.Empty;
+  public bool IsStaticErrorStatus => IsStatusErrorMessage(StaticStatus);
+
+  private static bool IsStatusErrorMessage(string? status) =>
+    !string.IsNullOrEmpty(status) &&
+    (status.Contains("fail", StringComparison.OrdinalIgnoreCase) ||
+     status.Contains("error", StringComparison.OrdinalIgnoreCase) ||
+     status.Contains("unavailable", StringComparison.OrdinalIgnoreCase));
 
   public List<EnrichedRoute> RouteOptions { get; private set; } = [];
   public int ActiveRouteId { get; private set; } = -1;
@@ -315,6 +318,42 @@ public sealed class TransitMapSession : IDisposable
     }
   }
 
+  public bool ClearVehicleRouteSelection(string? providerName = null)
+  {
+    if (_disposed) return false;
+
+    if (!string.IsNullOrWhiteSpace(providerName))
+    {
+      var providerIndex = FindStaticProviderIndex(providerName);
+      if (providerIndex < 0) return false;
+      if (SelectedStaticProviderIndex >= 0 && SelectedStaticProviderIndex != providerIndex) return false;
+    }
+
+    Interlocked.Increment(ref _staticRouteSeq);
+    Interlocked.Increment(ref _staticStopSeq);
+
+    SelectedStaticRouteId = string.Empty;
+    IsStaticRouteVehicleFilterActive = false;
+    ClearStaticStopSelection();
+
+    if (SelectedStaticData == null)
+    {
+      StaticStatus = string.Empty;
+      return true;
+    }
+
+    if (StaticRoutes.Count == 0)
+    {
+      Interlocked.Increment(ref _staticProviderSeq);
+      SelectedStaticProviderIndex = -1;
+      StaticStatus = string.Empty;
+      return true;
+    }
+
+    StaticStatus = "Select a route to view its map.";
+    return true;
+  }
+
   private async Task<string?> LoadStaticRouteMapAsync(
     TransportStaticData source,
     string routeId,
@@ -327,6 +366,11 @@ public sealed class TransitMapSession : IDisposable
     {
       var geoJson = await _staticData.GetMapAsync(source, routeId, cancellationToken);
       if (IsStaleStaticRouteSelection(providerSeq, routeSeq)) return null;
+      if (string.IsNullOrWhiteSpace(geoJson))
+      {
+        StaticStatus = "Static route map unavailable.";
+        return null;
+      }
       StaticStatus = "Select a stop on the map for departures.";
       return geoJson;
     }

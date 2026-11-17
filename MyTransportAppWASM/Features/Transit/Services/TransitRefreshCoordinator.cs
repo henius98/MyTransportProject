@@ -19,7 +19,8 @@ public readonly record struct TransitRefreshOutcome(
   int DeferredProviderCount,
   int FailedProviderCount,
   int StaleProviderCount,
-  int ExpiredProviderCount);
+  int ExpiredProviderCount,
+  bool VehiclesChanged = true);
 
 /// <summary>
 /// Coordinates provider refresh schedules and retains only recently validated vehicle snapshots.
@@ -85,7 +86,7 @@ public sealed class TransitRefreshCoordinator
       activeEndpoints.Add(provider.Endpoint);
     }
 
-    RemoveInactiveProviders(activeEndpoints);
+    var vehiclesChanged = RemoveInactiveProviders(activeEndpoints);
 
     var refreshByEndpoint = new Dictionary<string, ProviderVehicleRefresh>(
       refreshes.Count,
@@ -112,6 +113,7 @@ public sealed class TransitRefreshCoordinator
         {
           case ProviderVehicleRefreshStatus.Updated when refresh.Vehicles is not null:
             state.Vehicles = refresh.Vehicles;
+            vehiclesChanged = true;
             MarkValidated(state, now);
             break;
 
@@ -130,6 +132,7 @@ public sealed class TransitRefreshCoordinator
       {
         state.Vehicles = null;
         expiredProviderCount++;
+        vehiclesChanged = true;
       }
     }
 
@@ -159,7 +162,8 @@ public sealed class TransitRefreshCoordinator
       nearbyProviders.Count - refreshes.Count,
       failedProviderCount,
       staleProviderCount,
-      expiredProviderCount);
+      expiredProviderCount,
+      vehiclesChanged);
   }
 
   public void Clear() => _states.Clear();
@@ -182,22 +186,28 @@ public sealed class TransitRefreshCoordinator
     state.NextAttemptAt = now + TimeSpan.FromTicks(backoffTicks);
   }
 
-  private void RemoveInactiveProviders(HashSet<string> activeEndpoints)
+  private bool RemoveInactiveProviders(HashSet<string> activeEndpoints)
   {
     List<string>? endpointsToRemove = null;
-    foreach (var endpoint in _states.Keys)
+    var removedVehicles = false;
+    foreach (var (endpoint, state) in _states)
     {
       if (!activeEndpoints.Contains(endpoint))
       {
+        if (state.Vehicles is { Count: > 0 })
+        {
+          removedVehicles = true;
+        }
         (endpointsToRemove ??= []).Add(endpoint);
       }
     }
 
-    if (endpointsToRemove is null) return;
+    if (endpointsToRemove is null) return false;
     foreach (var endpoint in endpointsToRemove)
     {
       _states.Remove(endpoint);
     }
+    return removedVehicles;
   }
 
   private sealed class ProviderState

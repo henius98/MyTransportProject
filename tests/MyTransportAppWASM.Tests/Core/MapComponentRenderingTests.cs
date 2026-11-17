@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
+using Microsoft.JSInterop.Infrastructure;
 using Moq;
 using MapPage = MyTransportAppWASM.Features.Transit.Map;
 
@@ -219,7 +220,45 @@ public class MapComponentRenderingTests
         Assert.Contains("Route One (route-1)", html);
         Assert.Contains("Test Stop", html);
         Assert.Contains("Scheduled estimates, not live arrivals.", html);
+        Assert.DoesNotContain("tracker-status--error", html);
         Assert.Contains("Time unavailable", html);
+    }
+
+    [Fact]
+    public async Task StaticRoutePanel_RendersAlertStyle_WhenIsErrorStatusIsTrue()
+    {
+        var services = new ServiceCollection().AddLogging().BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+
+        var providers = new List<TransportProvider>
+        {
+            new()
+            {
+                Name = "Rapid Bus KL",
+                StaticData = new TransportStaticData("https://example.com", "routes.json", "map.geojson", "departures.json")
+            }
+        };
+
+        var html = await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            var component = await renderer.RenderComponentAsync<StaticRoutePanel>(
+                ParameterView.FromDictionary(new Dictionary<string, object?>
+                {
+                    [nameof(StaticRoutePanel.TransportProviders)] = providers,
+                    [nameof(StaticRoutePanel.SelectedProviderIndex)] = 0,
+                    [nameof(StaticRoutePanel.HasSelectedStaticData)] = true,
+                    [nameof(StaticRoutePanel.SelectedRouteId)] = "route-1",
+                    [nameof(StaticRoutePanel.Routes)] = new List<StaticRoute> { new("route-1", "Route One") },
+                    [nameof(StaticRoutePanel.Status)] = "Static route map unavailable.",
+                    [nameof(StaticRoutePanel.IsErrorStatus)] = true
+                }));
+            return component.ToHtmlString();
+        });
+
+        Assert.Contains("tracker-status--error", html);
+        Assert.Contains("role=\"alert\"", html);
+        Assert.Contains("bi-exclamation-triangle-fill", html);
+        Assert.Contains("Static route map unavailable.", html);
     }
 
     [Fact]
@@ -415,6 +454,95 @@ public class MapComponentRenderingTests
 
             await (Task)selectRoute.Invoke(mapComponent, [new ChangeEventArgs { Value = "" }])!;
             Assert.NotNull(syncedVehicles);
+            Assert.Equal(3, syncedVehicles!.Count);
+        });
+
+        session.Dispose();
+    }
+
+    [Fact]
+    public async Task Map_ShowsAndClearsFullRoute_WhenVehicleSelectedThenDeselected()
+    {
+        var staticSource = new TransportStaticData("https://worker.example/rapid", "/routes", "/map", "/departures");
+        var providers = new[]
+        {
+            new TransportProvider("Rapid Bus KL", "https://feed.test/kl", 3.139, 101.6869, 30, "Bus", staticSource),
+            new TransportProvider("KTMB National Rail", "https://feed.test/ktmb", 3.1344, 101.6865, 500, "KTMB")
+        };
+        var allVehicles = new List<BusLocation>
+        {
+            new() { VehicleId = "kl-401", ProviderName = "Rapid Bus KL", RouteId = "30000019", RouteShortName = "401", TransportType = "Bus" },
+            new() { VehicleId = "kl-420", ProviderName = "Rapid Bus KL", RouteId = "U4200", RouteShortName = "420", TransportType = "Bus" },
+            new() { VehicleId = "ktmb-1", ProviderName = "KTMB National Rail", RouteId = "Port Klang", TransportType = "KTMB" }
+        };
+
+        var tracking = new Mock<ITransitTrackingService>();
+        tracking.Setup(t => t.CachedVehicles).Returns(allVehicles);
+
+        var staticData = new Mock<ITransportStaticDataService>();
+        staticData.Setup(s => s.GetRoutesAsync(staticSource, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new StaticRoute("30000019", "401"), new StaticRoute("U4200", "420")]);
+        staticData.Setup(s => s.GetMapAsync(staticSource, "U4200", It.IsAny<CancellationToken>()))
+            .ReturnsAsync("""{"type":"FeatureCollection","features":[]}""");
+
+        var location = new Mock<ILocationService>();
+        var session = new TransitMapSession(
+            tracking.Object,
+            staticData.Object,
+            location.Object,
+            Options.Create(new TransitOptions { Providers = providers }),
+            Options.Create(new DefaultLocationOptions { Latitude = 3.139, Longitude = 101.6869 }));
+
+        var js = new Mock<IJSRuntime>();
+        var mapModule = new Mock<IJSObjectReference>();
+        IReadOnlyList<BusLocation>? syncedVehicles = null;
+        var clearCalls = 0;
+        var showCalls = 0;
+        mapModule
+            .Setup(m => m.InvokeAsync<IJSVoidResult>("clearStaticRoute", It.IsAny<object?[]?>()))
+            .Callback(() => clearCalls++)
+            .Returns(ValueTask.FromResult(Mock.Of<IJSVoidResult>()));
+        mapModule
+            .Setup(m => m.InvokeAsync<IJSVoidResult>("showStaticRoute", It.IsAny<object?[]?>()))
+            .Callback(() => showCalls++)
+            .Returns(ValueTask.FromResult(Mock.Of<IJSVoidResult>()));
+        mapModule
+            .Setup(m => m.InvokeAsync<IJSVoidResult>("syncMarkers", It.IsAny<object?[]?>()))
+            .Callback<string, object?[]?>((_, args) =>
+            {
+                syncedVehicles = args?[0] as IReadOnlyList<BusLocation>;
+            })
+            .Returns(ValueTask.FromResult(Mock.Of<IJSVoidResult>()));
+
+        var activator = new MapActivator();
+        var services = new ServiceCollection()
+            .AddLogging()
+            .AddSingleton(js.Object)
+            .AddSingleton(session)
+            .AddSingleton<IConfiguration>(new ConfigurationBuilder().Build())
+            .AddSingleton(location.Object)
+            .AddSingleton(new Mock<IPlaceResolutionService>().Object)
+            .AddSingleton<IComponentActivator>(activator)
+            .AddCascadingValue(_ => new LanguageService(new HttpClient()))
+            .AddCascadingValue(_ => new ThemeService(js.Object, new Mock<IUserSettingsService>().Object))
+            .BuildServiceProvider();
+
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            await renderer.RenderComponentAsync<MapPage>();
+            var mapComponent = activator.Component!;
+            typeof(MapPage).GetField("mapModule", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(mapComponent, mapModule.Object);
+
+            await mapComponent.OnVehicleSelected("Rapid Bus KL", "U4200", "420");
+            Assert.Equal(1, showCalls);
+            Assert.Equal(["kl-420"], syncedVehicles!.Select(v => v.VehicleId ?? "").ToArray());
+
+            await mapComponent.OnVehicleDeselected("Rapid Bus KL");
+            Assert.Equal(2, clearCalls);
+            Assert.Equal(1, showCalls);
             Assert.Equal(3, syncedVehicles!.Count);
         });
 

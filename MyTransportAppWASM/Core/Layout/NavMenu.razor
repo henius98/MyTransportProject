@@ -146,7 +146,7 @@
 
           <div class="nav-item px-3">
             <NavLink class="nav-link" href="fortune">
-              <span class="bi bi-brilliance" aria-hidden="true"></span>
+              <span class="bi bi-brilliance-nav-menu" aria-hidden="true"></span>
               <span class="nav-text ms-2">@Language["Fortune"]</span>
             </NavLink>
           </div>
@@ -198,6 +198,7 @@
   {
     showUserMenu = !showUserMenu;
     if (!showUserMenu) return;
+    pushError = null;
     try
     {
       var state = await AuthStateProvider.GetAuthenticationStateAsync();
@@ -230,9 +231,32 @@
         await Firebase.EnablePushAsync(uid);
       pushStatus = pushStatus == "enabled" ? "disabled" : "enabled";
     }
-    catch (JSException ex)
+    catch (JSException)
     {
-      pushError = ex.Message;
+      if (pushStatus == "enabled")
+      {
+        pushError = Language["DisableNotificationsFailed"];
+      }
+      else
+      {
+        try
+        {
+          var state = await AuthStateProvider.GetAuthenticationStateAsync();
+          var uid = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+          pushStatus = await Firebase.GetPushStatusAsync(uid);
+        }
+        catch (JSException)
+        {
+          pushStatus = "unsupported";
+        }
+
+        pushError = pushStatus switch
+        {
+          "denied" => Language["NotificationsDenied"],
+          "unsupported" => Language["NotificationsUnsupported"],
+          _ => Language["EnableNotificationsFailed"]
+        };
+      }
     }
     finally
     {

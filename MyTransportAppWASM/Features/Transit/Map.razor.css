@@ -40,9 +40,7 @@
   top: 16px;
   left: 16px;
   width: 372px;
-  background: var(--card-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: var(--surface-elevated, var(--card-bg));
   border: 1px solid var(--border-color);
   border-radius: 20px;
   box-shadow: var(--shadow-lg);
@@ -193,7 +191,8 @@
   color: var(--text-dim);
 }
 
-.tracker-status {
+.tracker-status,
+::deep .tracker-status {
   padding: 10px 12px;
   border-radius: 10px;
   background: var(--surface-subtle);
@@ -205,10 +204,12 @@
   color: var(--text-dim);
 }
 
-.tracker-status.tracker-status--error {
+.tracker-status.tracker-status--error,
+::deep .tracker-status.tracker-status--error {
   color: var(--status-danger-fg);
   border-color: var(--status-danger-border);
   background: var(--status-danger-bg);
+  font-weight: 600;
 }
 
 /* Google-style Route Planner header */
@@ -749,8 +750,6 @@
 /* Style Google Maps InfoWindow to match theme */
 ::deep .gm-style .gm-style-iw-c {
   background: var(--infowindow-bg, var(--card-bg)) !important;
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
   border: 1px solid var(--border-color);
   box-shadow: var(--shadow-lg) !important;
   color: var(--text-color) !important;
@@ -792,7 +791,7 @@
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: #202124;
   color: #e8eaed;
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  font-family: system-ui, -apple-system, sans-serif;
   font-size: 0.78rem;
   font-weight: 700;
   line-height: 1.15;

@@ -9,69 +9,24 @@
       content="Real-time public transit tracking and weather-aware trip planning for Malaysia. Track buses, plan routes, and check weather forecasts."
     />
     <base href="/" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
-      rel="preload"
-      as="style"
-      onload="this.onload=null;this.rel='stylesheet'"
-    />
-    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap" /></noscript>
 
     <!-- The splash is fully inlined below, so app styles can download without blocking FCP. -->
-    <link rel="preload" as="style" href="css/base/variables.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <link rel="preload" as="style" href="css/base/typography.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <link rel="preload" as="style" href="css/components/card.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <link rel="preload" as="style" href="css/components/button.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <link rel="preload" as="style" href="css/components/form.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <link rel="preload" as="style" href="css/components/badge.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <link rel="preload" as="style" href="css/components/modal.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <link rel="preload" as="style" href="css/components/stats.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <link rel="preload" as="style" href="css/components/navigation.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <link rel="preload" as="style" href="css/components/error.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <link rel="preload" as="style" href="css/app.css" onload="this.onload=null;this.rel='stylesheet'" />
     <link rel="preload" as="style" href="MyTransportAppWASM.styles.css" onload="this.onload=null;this.rel='stylesheet'" />
     <noscript>
-      <link rel="stylesheet" href="css/base/variables.css" />
-      <link rel="stylesheet" href="css/base/typography.css" />
-      <link rel="stylesheet" href="css/components/card.css" />
-      <link rel="stylesheet" href="css/components/button.css" />
-      <link rel="stylesheet" href="css/components/form.css" />
-      <link rel="stylesheet" href="css/components/badge.css" />
-      <link rel="stylesheet" href="css/components/modal.css" />
-      <link rel="stylesheet" href="css/components/stats.css" />
-      <link rel="stylesheet" href="css/components/navigation.css" />
-      <link rel="stylesheet" href="css/components/error.css" />
+      <link rel="stylesheet" href="css/app.css" />
       <link rel="stylesheet" href="MyTransportAppWASM.styles.css" />
     </noscript>
 
     <!-- Non-critical CSS loaded asynchronously -->
-    <link
-      rel="preload"
-      as="style"
-      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
-      integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
-      crossorigin="anonymous"
-      onload="this.onload=null;this.rel='stylesheet'"
-      onerror="this.onerror=null;this.removeAttribute('integrity');this.removeAttribute('crossorigin');this.href='lib/bootstrap/dist/css/bootstrap.min.css'"
-    />
-    <noscript>
-      <link
-        rel="stylesheet"
-        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
-        integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
-        crossorigin="anonymous"
-      />
-    </noscript>
+    <link rel="preload" as="style" href="css/bootstrap-subset.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link rel="stylesheet" href="css/bootstrap-subset.css" /></noscript>
 
-    <link rel="preload" as="style" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" crossorigin="anonymous" onload="this.onload=null;this.rel='stylesheet'" />
-    <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" crossorigin="anonymous" /></noscript>
+    <link rel="preload" as="style" href="css/icons.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <noscript><link rel="stylesheet" href="css/icons.css" /></noscript>
 
     <link rel="icon" type="image/svg+xml" href="myTransport.svg" />
-    <link rel="preload" href="myTransport.svg" as="image" fetchpriority="high" />
-    <link rel="preload" href="i18n/en-US.json" as="fetch" crossorigin="anonymous" fetchpriority="low" />
-    <!-- SVG icon fetched by browser via <link rel="icon"> and splash <img> — redundant preload added for LCP optimization -->
+    <link rel="preload" href="i18n/en-US.json" as="fetch" crossorigin="anonymous" />
     <link href="manifest.webmanifest" rel="manifest" />
     <meta
       name="theme-color"
@@ -95,8 +50,6 @@
         align-items: center;
         justify-content: center;
         background: rgba(0, 0, 0, 1); /* fallback dark */
-        backdrop-filter: blur(16px);
-        -webkit-backdrop-filter: blur(16px);
         z-index: 9999;
       }
       .splash-logo {
@@ -107,7 +60,7 @@
       }
       .splash-text {
         margin-top: 24px;
-        font-family: "Outfit", sans-serif;
+        font-family: system-ui, -apple-system, sans-serif;
         font-size: 1.25rem;
         font-weight: 600;
         color: #f8fafc;
@@ -188,7 +141,16 @@
     <script src="_framework/blazor.webassembly.js"></script>
     <script>
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });
+        window.addEventListener('load', function () {
+          var register = function () {
+            navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });
+          };
+          if ('requestIdleCallback' in window) {
+            requestIdleCallback(register, { timeout: 2500 });
+          } else {
+            setTimeout(register, 1000);
+          }
+        }, { once: true });
       }
     </script>
 

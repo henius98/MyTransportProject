@@ -6,9 +6,29 @@ namespace MyTransportAppWASM.Tests;
 public class FirebaseAuthenticationStateProviderTests
 {
     [Fact]
+    public async Task GetAuthenticationStateAsync_SkipsJsInteropAndContinuesAnonymously_WhenUnconfigured()
+    {
+        var stub = new StubJsRuntime(shouldFail: false);
+        var firebase = new FirebaseClientService(stub);
+        var provider = new FirebaseAuthenticationStateProvider(firebase);
+
+        var state = await provider.GetAuthenticationStateAsync();
+
+        Assert.False(state.User.Identity?.IsAuthenticated);
+        Assert.Empty(stub.Invocations);
+    }
+
+    [Fact]
     public async Task GetAuthenticationStateAsync_ContinuesAnonymously_WhenInteropInitializationFails()
     {
-        var firebase = new FirebaseClientService(new StubJsRuntime(shouldFail: true));
+        var options = Options.Create(new FirebaseOptions
+        {
+            ApiKey = "test-api-key",
+            AuthDomain = "test.firebaseapp.com",
+            ProjectId = "test-project",
+            AppId = "1:123:web:abc"
+        });
+        var firebase = new FirebaseClientService(new StubJsRuntime(shouldFail: true), options);
         var provider = new FirebaseAuthenticationStateProvider(firebase);
 
         var state = await provider.GetAuthenticationStateAsync();
@@ -106,29 +126,61 @@ public class FirebaseAuthenticationStateProviderTests
         Assert.Empty(signInCall.Args!);
     }
 
-    private sealed class StubJsRuntime(bool shouldFail) : IJSRuntime
+    [Fact]
+    public async Task CancelOneTapAsync_SkipsWhenNotStarted_AndCancelsInFlightImport()
+    {
+        var unstartedStub = new StubJsRuntime(false);
+        await using var unstartedFirebase = new FirebaseClientService(unstartedStub);
+        await unstartedFirebase.CancelOneTapAsync();
+        Assert.Empty(unstartedStub.Invocations);
+
+        var gate = new TaskCompletionSource();
+        var pendingStub = new StubJsRuntime(false, importGate: gate.Task);
+        var options = Options.Create(new FirebaseOptions
+        {
+            ApiKey = "test-api-key",
+            AuthDomain = "test.firebaseapp.com",
+            ProjectId = "test-project",
+            AppId = "1:123:web:abc",
+            GoogleClientId = "client-123"
+        });
+        await using var firebase = new FirebaseClientService(pendingStub, options);
+
+        var initTask = firebase.InitializeOneTapAsync();
+        var cancelTask = firebase.CancelOneTapAsync();
+
+        Assert.False(cancelTask.IsCompleted);
+        gate.SetResult();
+        await Task.WhenAll(initTask, cancelTask);
+
+        Assert.Contains(pendingStub.Invocations, i => i.Module == "./js/firebase-auth.js" && i.Identifier == "cancelOneTap");
+    }
+
+    private sealed class StubJsRuntime(bool shouldFail, Task? importGate = null) : IJSRuntime
     {
         public List<(string Module, string Identifier, object?[]? Args)> Invocations { get; } = [];
 
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
             InvokeAsync<TValue>(identifier, CancellationToken.None, args);
 
-        public ValueTask<TValue> InvokeAsync<TValue>(
+        public async ValueTask<TValue> InvokeAsync<TValue>(
             string identifier,
             CancellationToken cancellationToken,
             object?[]? args)
         {
             if (shouldFail)
-                return ValueTask.FromException<TValue>(new JSException("Interop unavailable"));
+                throw new JSException("Interop unavailable");
 
             if (identifier == "import")
             {
                 var path = Assert.IsType<string>(args![0]);
-                return ValueTask.FromResult((TValue)(object)new StubJsModule(path, Invocations));
+                if (importGate is not null && path == "./js/firebase-auth.js")
+                    await importGate;
+                return (TValue)(object)new StubJsModule(path, Invocations);
             }
 
             Invocations.Add(("", identifier, args));
-            return ValueTask.FromResult(default(TValue)!);
+            return default(TValue)!;
         }
 
         private sealed class StubJsModule(string path, List<(string Module, string Identifier, object?[]? Args)> invocations) : IJSObjectReference

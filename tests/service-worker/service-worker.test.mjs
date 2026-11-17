@@ -25,7 +25,7 @@ function createMockCache() {
     },
     async addAll(requests) {
       for (const req of requests) {
-        store.set(req.url, { url: req.url, status: 200, cloned: true });
+        store.set(req.url, { url: req.url, opts: req.opts, status: 200, cloned: true });
       }
     },
     _store: store
@@ -307,4 +307,22 @@ test("dev and prod workers do not mistake /map SPA navigation for GTFS static da
 
   const prodFailResponse = await dispatchFetch(prodHandlers, "http://localhost:8787/rapid-bus-kl/data/routes");
   assert.equal(prodFailResponse.status, 503);
+});
+
+test("prod worker uses force-cache only for fingerprinted _framework assets", async () => {
+  const manifest = [
+    { url: "_framework/dotnet.js", hash: "sha256-dotnet" },
+    { url: "_framework/blazor.webassembly.js", hash: "sha256-blazor" },
+    { url: "_framework/System.Private.CoreLib.abc123def0.wasm", hash: "sha256-core" },
+    { url: "css/app.css", hash: "sha256-css" }
+  ];
+
+  const { handlers, caches } = setupProdWorker(async () => ({ status: 200, clone() { return this; } }), manifest);
+  await dispatchInstall(handlers);
+
+  const offlineCache = await caches.open("offline-cache-test-v1");
+  assert.equal((await offlineCache.match("https://example.com/_framework/dotnet.js"))?.opts?.cache, "no-cache");
+  assert.equal((await offlineCache.match("https://example.com/_framework/blazor.webassembly.js"))?.opts?.cache, "no-cache");
+  assert.equal((await offlineCache.match("https://example.com/_framework/System.Private.CoreLib.abc123def0.wasm"))?.opts?.cache, "force-cache");
+  assert.equal((await offlineCache.match("https://example.com/css/app.css"))?.opts?.cache, "no-cache");
 });

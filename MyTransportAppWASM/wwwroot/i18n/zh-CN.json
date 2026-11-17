@@ -10,6 +10,8 @@
   "DisableNotifications": "关闭通知",
   "NotificationsDenied": "请在浏览器设置中允许此网站发送通知。",
   "NotificationsUnsupported": "通知需要 HTTPS 和受支持的浏览器。",
+  "EnableNotificationsFailed": "无法启用通知，请重试。",
+  "DisableNotificationsFailed": "无法关闭通知，请重试。",
   "Home": "首页",
   "Calendar": "日历",
   "Tasks": "任务",

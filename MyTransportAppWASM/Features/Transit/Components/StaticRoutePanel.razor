@@ -24,7 +24,15 @@
                     <option value="@route.Id">@route.Name (@route.Id)</option>
                 }
             </select>
-            <div class="small mt-2" role="status" aria-live="polite">@Status</div>
+            <div class="@(IsErrorStatus ? "tracker-status tracker-status--error mt-2" : "small mt-2")"
+                 role="@(IsErrorStatus ? "alert" : "status")"
+                 aria-live="@(IsErrorStatus ? "assertive" : "polite")">
+                @if (IsErrorStatus)
+                {
+                    <i class="bi bi-exclamation-triangle-fill flex-shrink-0" aria-hidden="true"></i>
+                }
+                <span>@Status</span>
+            </div>
             @if (!string.IsNullOrEmpty(StopName))
             {
                 <h4 class="fs-6 mt-3">@StopName</h4>
@@ -58,6 +66,9 @@
 
     [Parameter]
     public string Status { get; set; } = string.Empty;
+
+    [Parameter]
+    public bool IsErrorStatus { get; set; }
 
     [Parameter]
     public string StopName { get; set; } = string.Empty;

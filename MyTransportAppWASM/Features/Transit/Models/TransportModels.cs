@@ -113,5 +113,6 @@ namespace MyTransportAppWASM.Features.Transit.Models
     public int ExpiredProviderCount { get; init; }
     public int NearbyProviderCount { get; init; }
     public bool HasNearbyFeeds { get; init; }
+    public bool VehiclesChanged { get; init; } = true;
   }
 }

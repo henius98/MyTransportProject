@@ -70,9 +70,39 @@ public sealed class TransitRefreshCoordinatorTests
 
     Assert.Single(revalidated.Vehicles);
     Assert.Equal(0, revalidated.StaleProviderCount);
+    Assert.False(revalidated.VehiclesChanged);
     Assert.Empty(coordinator.GetProvidersToRefresh([ProviderA], Start.AddSeconds(59), force: false));
     Assert.Single(coordinator.GetProvidersToRefresh([ProviderA], Start.AddSeconds(60), force: false));
     Assert.True(coordinator.HasUsableSnapshot(ProviderA.Endpoint, Start.AddSeconds(165)));
+  }
+
+  [Fact]
+  public void ApplyResults_ReportsVehiclesChangedOnlyWhenVehicleSetMutates()
+  {
+    var coordinator = CreateCoordinator();
+    var initial = coordinator.ApplyResults(
+      [ProviderA],
+      [Updated(ProviderA, "vehicle-a")],
+      Start);
+    Assert.True(initial.VehiclesChanged);
+
+    var notModified = coordinator.ApplyResults(
+      [ProviderA],
+      [new ProviderVehicleRefresh(ProviderA.Endpoint, ProviderVehicleRefreshStatus.NotModified)],
+      Start.AddSeconds(15));
+    Assert.False(notModified.VehiclesChanged);
+
+    var failedBeforeExpiry = coordinator.ApplyResults(
+      [ProviderA],
+      [Failed(ProviderA)],
+      Start.AddSeconds(30));
+    Assert.False(failedBeforeExpiry.VehiclesChanged);
+
+    var expired = coordinator.ApplyResults(
+      [ProviderA],
+      [],
+      Start.AddSeconds(150));
+    Assert.True(expired.VehiclesChanged);
   }
 
   [Fact]

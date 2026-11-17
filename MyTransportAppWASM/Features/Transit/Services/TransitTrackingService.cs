@@ -91,6 +91,7 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
 
       if (nearbyProviders.Count == 0)
       {
+        var hadVehicles = _cachedVehicles.Count > 0;
         _transitRefresh.Clear();
         _cachedVehicles = [];
         _cache?.Remove("transit_cached_vehicles");
@@ -100,7 +101,8 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
           StatusMessage = "No live vehicle feeds nearby. Scheduled routes are available below.",
           LastUpdated = _lastUpdated,
           HasNearbyFeeds = false,
-          NearbyProviderCount = 0
+          NearbyProviderCount = 0,
+          VehiclesChanged = hadVehicles
         };
       }
 
@@ -128,7 +130,7 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
         refreshResults,
         DateTimeOffset.UtcNow);
 
-      ApplyRouteShortNames(outcome.Vehicles, nearbyProviders);
+      var updatedRouteNames = ApplyRouteShortNames(outcome.Vehicles, nearbyProviders);
 
       _cachedVehicles = outcome.Vehicles;
       if (_cache != null)
@@ -158,7 +160,8 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
         StaleProviderCount = outcome.StaleProviderCount,
         ExpiredProviderCount = outcome.ExpiredProviderCount,
         NearbyProviderCount = nearbyProviders.Count,
-        HasNearbyFeeds = true
+        HasNearbyFeeds = true,
+        VehiclesChanged = outcome.VehiclesChanged || updatedRouteNames
       };
     }
     finally
@@ -377,11 +380,11 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
     }
   }
 
-  private void ApplyRouteShortNames(
+  private bool ApplyRouteShortNames(
     List<BusLocation> vehicles,
     IReadOnlyList<TransportProvider> nearbyProviders)
   {
-    if (vehicles.Count == 0) return;
+    if (vehicles.Count == 0) return false;
 
     var routeMapsByProvider = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.Ordinal);
     foreach (var provider in nearbyProviders)
@@ -392,8 +395,9 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
       }
     }
 
-    if (routeMapsByProvider.Count == 0) return;
+    if (routeMapsByProvider.Count == 0) return false;
 
+    var updated = false;
     foreach (var vehicle in vehicles)
     {
       if (!string.IsNullOrWhiteSpace(vehicle.RouteShortName) ||
@@ -407,8 +411,11 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
           routeMap.TryGetValue(vehicle.RouteId.Trim(), out var shortName))
       {
         vehicle.RouteShortName = shortName;
+        updated = true;
       }
     }
+
+    return updated;
   }
 
   private bool TryGetCachedRouteMap(string key, out IReadOnlyDictionary<string, string> map)
