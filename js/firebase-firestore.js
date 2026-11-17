@@ -18,34 +18,33 @@ export async function getFirestoreContext() {
     return firestoreContextPromise;
 }
 
-window.firebaseFirestoreInterop = {
-    getUserSettings: async function (uid) {
-        try {
-            const { db, sdk } = await getFirestoreContext();
-            await requireSignedInUser(uid);
-            const docRef = sdk.doc(db, "users", uid, "data", "settings");
-            const docSnap = await sdk.getDoc(docRef);
+export async function getUserSettings(uid) {
+    try {
+        const { db, sdk } = await getFirestoreContext();
+        await requireSignedInUser(uid);
+        const docRef = sdk.doc(db, "users", uid, "data", "settings");
+        const docSnap = await sdk.getDoc(docRef);
 
-            if (docSnap.exists()) {
-                return docSnap.data();
-            } else {
-                return null;
-            }
-        } catch (error) {
-            console.error("Firestore get error:", error);
-            throw error;
+        if (docSnap.exists()) {
+            return docSnap.data();
+        } else {
+            return null;
         }
-    },
-    setUserSettings: async function (uid, settings) {
-        try {
-            const { db, sdk } = await getFirestoreContext();
-            await requireSignedInUser(uid);
-            const docRef = sdk.doc(db, "users", uid, "data", "settings");
-            await sdk.setDoc(docRef, settings, { merge: true });
-            return true;
-        } catch (error) {
-            console.error("Firestore set error:", error);
-            throw error;
-        }
+    } catch (error) {
+        console.error("Firestore get error:", error);
+        throw error;
     }
-};
+}
+
+export async function setUserSettings(uid, settings) {
+    try {
+        const { db, sdk } = await getFirestoreContext();
+        await requireSignedInUser(uid);
+        const docRef = sdk.doc(db, "users", uid, "data", "settings");
+        await sdk.setDoc(docRef, settings, { merge: true });
+        return true;
+    } catch (error) {
+        console.error("Firestore set error:", error);
+        throw error;
+    }
+}

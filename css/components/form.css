@@ -2,17 +2,29 @@
 .form-input {
   width: 100%;
   height: 3rem;
-  padding: 0 1rem;
+  min-height: 44px;
+  padding: 0 0.85rem;
   border-radius: 12px;
   border: 1px solid var(--border-color);
-  background: var(--bg-color);
+  background: var(--input-bg, var(--bg-color));
   color: var(--text-color);
   font-size: 0.95rem;
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
-.form-input:focus {
-  outline: none;
+input[type="date"].form-input {
+  padding: 0 0.65rem;
+  font-size: 0.9rem;
+}
+
+select.form-input {
+  cursor: pointer;
+}
+
+.form-input:focus,
+.form-input:focus-visible {
+  outline: 2px solid var(--focus-ring, var(--primary-blue));
+  outline-offset: 1px;
   border-color: var(--primary-blue);
   box-shadow: 0 0 0 4px var(--primary-blue-transparent);
 }
@@ -27,7 +39,7 @@
 
 .autocomplete-container gmp-place-autocomplete {
   width: 100%;
-  --gmpx-color-surface: var(--bg-color);
+  --gmpx-color-surface: var(--input-bg, var(--bg-color));
   --gmpx-color-on-surface: var(--text-color);
   --gmpx-font-size-base: 0.95rem;
 }
@@ -42,15 +54,17 @@
 
 /* Form validation states */
 .valid.modified:not([type="checkbox"]) {
-  outline: 1px solid #26b050;
+  outline: 1px solid var(--status-live-fg);
 }
 
 .invalid {
-  outline: 1px solid #ff0000;
+  outline: 1px solid var(--status-danger-fg);
 }
 
 .validation-message {
-  color: #ff0000;
+  color: var(--status-danger-fg);
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
 }
 
 /* Form floating placeholder behavior */

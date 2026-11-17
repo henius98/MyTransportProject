@@ -4,7 +4,7 @@ import { loadGoogleIdentity, requireSignedInUser } from "./firebase-auth.js";
 let callablePromise = null;
 const preparations = new Map();
 
-const serviceScopes = {
+export const serviceScopes = {
     calendar: [
         "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
         "https://www.googleapis.com/auth/calendar.events"
@@ -28,7 +28,7 @@ async function invoke(uid, data) {
         result = await callable(data);
     } catch (err) {
         await requireSignedInUser(uid);
-        if (err?.code === "functions/not-found" || (err?.code === "functions/internal" && err?.message === "internal")) {
+        if (err?.code === "functions/not-found" || err?.code === "functions/internal") {
             if (data.action === "get" || data.action === "invalidate") {
                 return null;
             }
@@ -71,54 +71,68 @@ export function prepareAuthorization(uid, service) {
     return preparations.get(key);
 }
 
-export async function authorizeConnection(uid, service, email, requireSession) {
-    const [identity, configuration] = await prepareAuthorization(uid, service);
-    requireSession();
-    await requireSignedInUser(uid);
-    if (configuration?.clientSide) {
-        const tokenResponse = await new Promise((resolve, reject) => {
-            const tokenClient = identity.oauth2.initTokenClient({
-                client_id: configuration.clientId,
-                scope: configuration.scopes.join(" "),
-                hint: email,
-                callback: response => {
-                    if (response.access_token && !response.error) {
-                        resolve(response);
-                    } else {
-                        reject(new Error("Google did not grant access. Connect again and allow the requested permissions."));
-                    }
-                },
-                error_callback: error => reject(new Error(error.type === "popup_failed_to_open"
-                    ? "Allow pop-ups for this site, then connect again."
-                    : "The Google permission window was closed. Connect again when you are ready."))
-            });
-            tokenClient.requestAccessToken({ prompt: "" });
-        });
-        requireSession();
-        await requireSignedInUser(uid);
-        const expiresIn = Number(tokenResponse.expires_in) || 3600;
-        return {
-            accessToken: tokenResponse.access_token,
-            expiresAt: Date.now() + expiresIn * 1000
-        };
-    }
-
-    const code = await new Promise((resolve, reject) => {
-        identity.oauth2.initCodeClient({
-            client_id: configuration.clientId,
-            scope: configuration.scopes.join(" "),
-            login_hint: email,
-            include_granted_scopes: true,
-            ux_mode: "popup",
+function requestGisConsent(init, extractValue, trigger) {
+    return new Promise((resolve, reject) => {
+        const client = init({
             callback: response => {
-                if (response.code && !response.error) resolve(response.code);
-                else reject(new Error("Google did not grant access. Connect again and allow the requested permissions."));
+                const value = extractValue(response);
+                if (value && !response?.error) {
+                    resolve(value);
+                } else {
+                    reject(new Error("Google did not grant access. Connect again and allow the requested permissions."));
+                }
             },
             error_callback: error => reject(new Error(error.type === "popup_failed_to_open"
                 ? "Allow pop-ups for this site, then connect again."
                 : "The Google permission window was closed. Connect again when you are ready."))
-        }).requestCode();
+        });
+        trigger(client);
     });
+}
+
+export async function authorizeConnection(uid, service, email, requireSession) {
+    const [identity, configuration] = await prepareAuthorization(uid, service);
+    requireSession();
+    await requireSignedInUser(uid);
+    const baseClientOptions = {
+        client_id: configuration.clientId,
+        scope: configuration.scopes.join(" "),
+        login_hint: email,
+        include_granted_scopes: true,
+    };
+    if (configuration?.clientSide) {
+        const tokenResponse = await requestGisConsent(
+            callbacks => identity.oauth2.initTokenClient({
+                ...baseClientOptions,
+                hint: email,
+                prompt: "",
+                ...callbacks,
+            }),
+            response => response.access_token ? response : null,
+            client => client.requestAccessToken({ prompt: "" }),
+        );
+        requireSession();
+        await requireSignedInUser(uid);
+        const expiresIn = Number(tokenResponse.expires_in) || 3600;
+        const grantedScopes = typeof tokenResponse.scope === "string"
+            ? tokenResponse.scope.split(" ").filter(Boolean)
+            : null;
+        return {
+            accessToken: tokenResponse.access_token,
+            expiresAt: Date.now() + expiresIn * 1000,
+            ...(grantedScopes?.length ? { scopes: grantedScopes } : {})
+        };
+    }
+
+    const code = await requestGisConsent(
+        callbacks => identity.oauth2.initCodeClient({
+            ...baseClientOptions,
+            ux_mode: "popup",
+            ...callbacks,
+        }),
+        response => response.code,
+        client => client.requestCode(),
+    );
     requireSession();
     return invoke(uid, { action: "exchange", service, code });
 }

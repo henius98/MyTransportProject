@@ -30,12 +30,12 @@ export async function loadGoogleIdentity() {
   return googleIdentityPromise;
 }
 
-function cancelOneTap() {
+export function cancelOneTap() {
   oneTapCancelled = true;
   googleIdentity?.cancel();
 }
 
-async function initializeOneTap(clientId) {
+export async function initializeOneTap(clientId) {
   if (oneTapStarted || oneTapCancelled || !clientId?.trim()) return;
   oneTapStarted = true;
 
@@ -131,132 +131,133 @@ export async function requireSignedInUser(uid) {
   }
 }
 
-window.firebaseAuthInterop = {
-  initializeOneTap,
-  cancelOneTap,
-  signInWithGoogle: async function (explicitClientId) {
-    try {
-      cancelOneTap();
-      const { auth, provider, sdk } =
-        resolvedAuthContext || (await getAuthContext());
-      const app = await getFirebaseApp();
-      const clientId =
-        explicitClientId?.trim() ||
-        app.options?.googleClientId?.trim();
+export async function signInWithGoogle(explicitClientId) {
+  try {
+    cancelOneTap();
+    const { auth, provider, sdk } =
+      resolvedAuthContext || (await getAuthContext());
+    const app = await getFirebaseApp();
+    const clientId =
+      explicitClientId?.trim() ||
+      app.options?.googleClientId?.trim();
 
-      if (clientId) {
-        try {
-          const identity = await loadGoogleIdentity();
-          if (identity?.oauth2?.initTokenClient) {
-            const user = await new Promise((resolve, reject) => {
-              const tokenClient = identity.oauth2.initTokenClient({
-                client_id: clientId,
-                scope: "email profile openid",
-                callback: async (tokenResponse) => {
-                  if (tokenResponse.error) {
-                    const error = new Error(
-                      tokenResponse.error_description || tokenResponse.error,
-                    );
-                    error.code =
-                      tokenResponse.error === "access_denied"
-                        ? "auth/popup-closed-by-user"
-                        : tokenResponse.error;
-                    reject(error);
-                    return;
-                  }
-                  try {
-                    const credential = sdk.GoogleAuthProvider.credential(
-                      null,
-                      tokenResponse.access_token,
-                    );
-                    const result = await sdk.signInWithCredential(
-                      auth,
-                      credential,
-                    );
-                    resolve(result.user);
-                  } catch (err) {
-                    reject(err);
-                  }
-                },
-                error_callback: (err) => {
+    if (clientId) {
+      try {
+        const identity = await loadGoogleIdentity();
+        if (identity?.oauth2?.initTokenClient) {
+          const user = await new Promise((resolve, reject) => {
+            const tokenClient = identity.oauth2.initTokenClient({
+              client_id: clientId,
+              scope: "email profile openid",
+              callback: async (tokenResponse) => {
+                if (tokenResponse.error) {
                   const error = new Error(
-                    err.message || "Google sign-in was cancelled.",
+                    tokenResponse.error_description || tokenResponse.error,
                   );
                   error.code =
-                    err.type === "popup_failed_to_open"
-                      ? "auth/popup-blocked"
-                      : "auth/popup-closed-by-user";
+                    tokenResponse.error === "access_denied"
+                      ? "auth/popup-closed-by-user"
+                      : tokenResponse.error;
                   reject(error);
-                },
-              });
-              tokenClient.requestAccessToken({ prompt: "select_account" });
+                  return;
+                }
+                try {
+                  const credential = sdk.GoogleAuthProvider.credential(
+                    null,
+                    tokenResponse.access_token,
+                  );
+                  const result = await sdk.signInWithCredential(
+                    auth,
+                    credential,
+                  );
+                  resolve(result.user);
+                } catch (err) {
+                  reject(err);
+                }
+              },
+              error_callback: (err) => {
+                const error = new Error(
+                  err.message || "Google sign-in was cancelled.",
+                );
+                error.code =
+                  err.type === "popup_failed_to_open"
+                    ? "auth/popup-blocked"
+                    : "auth/popup-closed-by-user";
+                reject(error);
+              },
             });
-            // Result includes credential and user info; only send the profile to Blazor.
-            return userProfile(user);
-          }
-        } catch (gisError) {
-          if (
-            gisError?.code === "auth/popup-closed-by-user" ||
-            gisError?.code === "auth/popup-blocked"
-          ) {
-            throw gisError;
-          }
-          console.warn("Google Identity Services unavailable; falling back to popup.", gisError);
+            tokenClient.requestAccessToken({ prompt: "select_account" });
+          });
+          // Result includes credential and user info; only send the profile to Blazor.
+          return userProfile(user);
         }
-      }
-
-      const result = await sdk.signInWithPopup(auth, provider);
-      // Result includes credential and user info; only send the profile to Blazor.
-      return userProfile(result.user);
-    } catch (error) {
-      if (error?.code !== "auth/popup-closed-by-user") {
-        console.error("Firebase Auth Error:", error);
-      }
-      throw error;
-    }
-  },
-  signOut: async function () {
-    try {
-      cancelOneTap();
-      googleIdentity?.disableAutoSelect();
-      const { auth, sdk } = await getAuthContext();
-      if (auth.currentUser && window.pushNotifications) {
-        try {
-          await window.pushNotifications.disable(auth.currentUser.uid);
-        } catch (err) {
-          console.warn("Failed to unregister push notifications during sign-out:", err);
+      } catch (gisError) {
+        if (
+          gisError?.code === "auth/popup-closed-by-user" ||
+          gisError?.code === "auth/popup-blocked"
+        ) {
+          throw gisError;
         }
+        console.warn("Google Identity Services unavailable; falling back to popup.", gisError);
       }
-      await sdk.signOut(auth);
-      clearConnections();
-      return true;
-    } catch (error) {
-      console.error("Firebase SignOut Error:", error);
-      throw error;
-    }
-  },
-  // Allows Blazor to listen to auth state changes
-  onAuthStateChanged: async function (dotNetHelper) {
-    const { auth, sdk } = await getAuthContext();
-
-    if (unsubscribeAuthStateChanged) {
-      unsubscribeAuthStateChanged();
     }
 
-    unsubscribeAuthStateChanged = sdk.onAuthStateChanged(auth, (user) => {
-      // Pass basic user info to Blazor
-      void dotNetHelper
-        .invokeMethodAsync("OnAuthStateChanged", userProfile(user))
-        .catch((error) =>
-          console.error("Could not update the sign-in display:", error),
-        );
-    });
-  },
-  disposeAuthStateChanged: function () {
+    const result = await sdk.signInWithPopup(auth, provider);
+    // Result includes credential and user info; only send the profile to Blazor.
+    return userProfile(result.user);
+  } catch (error) {
+    if (error?.code !== "auth/popup-closed-by-user") {
+      console.error("Firebase Auth Error:", error);
+    }
+    throw error;
+  }
+}
+
+export async function signOut() {
+  try {
     cancelOneTap();
-    if (unsubscribeAuthStateChanged) {
-      unsubscribeAuthStateChanged();
-      unsubscribeAuthStateChanged = null;
+    googleIdentity?.disableAutoSelect();
+    const { auth, sdk } = await getAuthContext();
+    if (auth.currentUser && typeof localStorage !== "undefined" &&
+      (localStorage?.getItem("push-token") || localStorage?.getItem("push-uid"))) {
+      try {
+        const { disable } = await import("./push-notifications.js");
+        await disable(auth.currentUser.uid);
+      } catch (err) {
+        console.warn("Failed to unregister push notifications during sign-out:", err);
+      }
     }
-  },
-};
+    await sdk.signOut(auth);
+    clearConnections();
+    return true;
+  } catch (error) {
+    console.error("Firebase SignOut Error:", error);
+    throw error;
+  }
+}
+
+// Allows Blazor to listen to auth state changes
+export async function onAuthStateChanged(dotNetHelper) {
+  const { auth, sdk } = await getAuthContext();
+
+  if (unsubscribeAuthStateChanged) {
+    unsubscribeAuthStateChanged();
+  }
+
+  unsubscribeAuthStateChanged = sdk.onAuthStateChanged(auth, (user) => {
+    // Pass basic user info to Blazor
+    void dotNetHelper
+      .invokeMethodAsync("OnAuthStateChanged", userProfile(user))
+      .catch((error) =>
+        console.error("Could not update the sign-in display:", error),
+      );
+  });
+}
+
+export function disposeAuthStateChanged() {
+  cancelOneTap();
+  if (unsubscribeAuthStateChanged) {
+    unsubscribeAuthStateChanged();
+    unsubscribeAuthStateChanged = null;
+  }
+}

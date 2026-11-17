@@ -1,5 +1,5 @@
 /* Common Cards */
-.card {
+body .card {
   background:
     linear-gradient(
       135deg,
@@ -24,4 +24,10 @@
     0 20px 25px -5px rgba(0, 0, 0, 0.05);
   border-color: var(--primary-blue);
   transform: translateY(-4px) scale(1.01);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-animated:hover {
+    transform: none;
+  }
 }

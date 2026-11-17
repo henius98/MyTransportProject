@@ -84,8 +84,7 @@ async function listenInForeground(registration) {
   });
 }
 
-window.pushNotifications = {
-  status: async (uid) => {
+export async function status(uid) {
     if (!supported()) return "unsupported";
     if (Notification.permission === "denied") return "denied";
     const registration = await navigator.serviceWorker.getRegistration(
@@ -118,8 +117,9 @@ window.pushNotifications = {
       }
     }
     return "enabled";
-  },
-  enable: async (uid) => {
+}
+
+export async function enable(uid) {
     if (!supported())
       throw new Error(
         "Push notifications require HTTPS and a supported browser.",
@@ -147,8 +147,9 @@ window.pushNotifications = {
     localStorage.setItem("push-uid", uid);
     await listenInForeground(registration);
     return true;
-  },
-  disable: async (uid) => {
+}
+
+export async function disable(uid) {
     const token = localStorage.getItem("push-token");
     const registration = supported()
       ? await navigator.serviceWorker.getRegistration(
@@ -193,8 +194,7 @@ window.pushNotifications = {
     localStorage.removeItem("push-token");
     localStorage.removeItem("push-uid");
     return true;
-  },
-};
+}
 
 if (
   supported() &&

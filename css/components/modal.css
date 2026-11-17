@@ -8,7 +8,7 @@
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(0, 0, 0, 0.4);
+  background-color: var(--backdrop-overlay);
   padding: 20px;
   z-index: 9999;
   backdrop-filter: blur(12px);
@@ -17,17 +17,17 @@
 }
 
 div.modal, form.modal {
-  background: var(--card-bg);
+  background: var(--surface-elevated, var(--card-bg));
   color: var(--text-color);
   border: 1px solid var(--border-color);
   border-radius: 28px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25), 0 0 0 1px rgba(255,255,255,0.05) inset;
+  box-shadow: var(--shadow-lg);
   width: 100%;
   max-width: 480px;
   height: auto; /* Override Bootstrap's height: 100% */
   max-height: 90vh;
   overflow-y: auto; /* Allow scrolling if content is too long */
-  padding: 3rem 2.5rem;
+  padding: 2rem 1.75rem;
   position: relative;
   text-align: center;
   display: block;
@@ -90,8 +90,8 @@ div.modal, form.modal {
 }
 
 .modal__icon {
-  font-size: 4rem;
-  margin-bottom: 1.5rem;
+  font-size: 3rem;
+  margin-bottom: 0.75rem;
   display: inline-block;
   animation: waveHand 2.5s infinite;
   transform-origin: 70% 70%;
@@ -118,7 +118,7 @@ div.modal, form.modal {
 .modal h2 {
   font-family: "Outfit", sans-serif;
   font-weight: 800;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
   background: linear-gradient(135deg, var(--text-color) 0%, var(--text-dim) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -126,8 +126,8 @@ div.modal, form.modal {
 
 .modal p {
   color: var(--text-dim);
-  line-height: 1.6;
-  margin-bottom: 2rem;
+  line-height: 1.5;
+  margin-bottom: 1.25rem;
 }
 
 /* Consolidated Component Styles from Home.razor & Others */

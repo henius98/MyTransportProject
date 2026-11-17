@@ -103,30 +103,33 @@ async function callGeocoder(geocoder, request) {
 	});
 }
 
-export async function geocodePlaceName(name, apiKey) {
-	if (!name || typeof name !== "string" || !name.trim()) return null;
+async function geocodeFirst(apiKey, request) {
 	try {
 		const geocoder = await getGeocoder(apiKey);
-		const results = await callGeocoder(geocoder, {
-			address: name.trim(),
-			region: "my",
-		});
-		if (results && results.length > 0) {
-			const loc = results[0].geometry?.location;
-			const lat = typeof loc?.lat === "function" ? loc.lat() : loc?.lat;
-			const lng = typeof loc?.lng === "function" ? loc.lng() : loc?.lng;
-			return {
-				lat,
-				lng,
-				formattedAddress: results[0].formatted_address || ""
-			};
-		}
-		return null;
+		const results = await callGeocoder(geocoder, request);
+		return results && results.length > 0 ? results[0] : null;
 	} catch (err) {
 		const msg = String(err?.message || err);
 		if (msg.includes("ZERO_RESULTS")) return null;
 		throw err;
 	}
+}
+
+export async function geocodePlaceName(name, apiKey) {
+	if (!name || typeof name !== "string" || !name.trim()) return null;
+	const match = await geocodeFirst(apiKey, {
+		address: name.trim(),
+		region: "my",
+	});
+	if (!match) return null;
+	const loc = match.geometry?.location;
+	const lat = typeof loc?.lat === "function" ? loc.lat() : loc?.lat;
+	const lng = typeof loc?.lng === "function" ? loc.lng() : loc?.lng;
+	return {
+		lat,
+		lng,
+		formattedAddress: match.formatted_address || ""
+	};
 }
 
 export async function reverseGeocode(lat, lng, apiKey) {
@@ -135,20 +138,10 @@ export async function reverseGeocode(lat, lng, apiKey) {
 	if (!Number.isFinite(numLat) || !Number.isFinite(numLng) || numLat < -90 || numLat > 90 || numLng < -180 || numLng > 180) {
 		return null;
 	}
-	try {
-		const geocoder = await getGeocoder(apiKey);
-		const results = await callGeocoder(geocoder, {
-			location: { lat: numLat, lng: numLng },
-		});
-		if (results && results.length > 0) {
-			return results[0].formatted_address || null;
-		}
-		return null;
-	} catch (err) {
-		const msg = String(err?.message || err);
-		if (msg.includes("ZERO_RESULTS")) return null;
-		throw err;
-	}
+	const match = await geocodeFirst(apiKey, {
+		location: { lat: numLat, lng: numLng },
+	});
+	return match?.formatted_address || null;
 }
 
 // Global auth failure handler for Google Maps JS API
@@ -161,20 +154,27 @@ window.gm_authFailure = function () {
 	}
 };
 const transportMarkerTypes = {
-	bus: { icon: "🚌", className: "bus-marker", label: "Bus" },
-	lrt: { icon: "🚈", className: "lrt-marker", label: "LRT" },
-	mrt: { icon: "🚇", className: "mrt-marker", label: "MRT" },
-	ktmb: { icon: "🚆", className: "ktmb-marker", label: "KTMB" },
+	bus: { icon: "🚌", className: "bus-marker", label: "Bus", sideFacing: true },
+	lrt: { icon: "🚈", className: "lrt-marker", label: "LRT", sideFacing: true },
+	mrt: { icon: "🚅", className: "mrt-marker", label: "MRT", sideFacing: true },
+	ktmb: { icon: "🚄", className: "ktmb-marker", label: "KTMB", sideFacing: true },
+	rail: { icon: "🚄", className: "rail-marker", label: "Rail", sideFacing: true },
 };
-const unknownTransportMarker = { icon: "🚉", className: "unknown-marker", label: "Vehicle" };
+const unknownTransportMarker = { icon: "🚉", className: "unknown-marker", label: "Vehicle", sideFacing: false };
 
 // Route rendering state (replaces legacy DirectionsRenderer)
 let routePolylines = [];
 let routeMarkers = [];
+let routeCalloutMarkers = [];
 let routeOptionsMap = new Map();
+let cachedTransitRoutes = new Map();
+let renderedRoutesData = [];
+let activeRouteDotNetRef = null;
+let currentColorScheme = "DARK";
 let currentActiveRouteId = -1;
 let staticRouteLayer = null;
 let staticRouteDotNetRef = null;
+let transitLayer = null;
 
 export function clearStaticRoute() {
 	if (!staticRouteLayer) return;
@@ -253,6 +253,7 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 	mapAuthFailed = false;
 	activeDotNetHelper = dotNetHelper;
 	pendingUserPosition = null;
+	currentColorScheme = (theme || "DARK").toUpperCase();
 	await loadGoogleMaps(apiKey);
 	if (!timeZone) throw new Error("Display time zone not provided.");
 	displayTimeZone = timeZone;
@@ -261,7 +262,7 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 	if (!el) throw new Error(`Element #${elementId} not found.`);
 
 	// Using modern importLibrary pattern
-	const [{ Map, InfoWindow }, { AdvancedMarkerElement }] = await Promise.all([
+	const [{ Map, InfoWindow, TransitLayer }, { AdvancedMarkerElement }] = await Promise.all([
 		google.maps.importLibrary("maps"),
 		google.maps.importLibrary("marker"),
 	]);
@@ -282,6 +283,15 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 		fullscreenControl: false,
 	});
 
+	if (transitLayer) {
+		transitLayer.setMap(null);
+		transitLayer = null;
+	}
+	if (TransitLayer) {
+		transitLayer = new TransitLayer();
+		transitLayer.setMap(map);
+	}
+
 	infoWindow = new InfoWindow({ disableAutoPan: true, headerDisabled: true });
 
 	// Close infoWindow when clicking anywhere else on the map
@@ -294,58 +304,105 @@ export async function initGoogleMaps(elementId, lat, lng, zoom = 13, apiKey, dot
 	pin.textContent = "🚶";
 	pin.style.fontSize = "33px";
 
+	let latestDragSeq = 0;
+
 	async function handleUserMarkerDragEnd(rawPos) {
 		const coords = toLatLngLiteral(rawPos);
 		if (!coords) return;
+		const dragSeq = ++latestDragSeq;
 		try {
-			const address = await reverseGeocode(coords.lat, coords.lng);
+			if (dotNetHelper) {
+				await dotNetHelper.invokeMethodAsync("UpdateUserPosition", coords.lat, coords.lng);
+			}
+			const address = (await reverseGeocode(coords.lat, coords.lng)) || `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
+			if (dragSeq !== latestDragSeq) return;
 			if (dotNetHelper) {
 				await dotNetHelper.invokeMethodAsync("UpdateOrigin", address);
-				await dotNetHelper.invokeMethodAsync("UpdateUserPosition", coords.lat, coords.lng);
 
-				// Update the origin autocomplete widget value visually
-				setAutocompleteValue("origin-input", address);
+				// Update the origin autocomplete widget value visually while retaining dragged coordinates
+				setAutocompleteValue("origin-input", address, coords);
 			}
 		} catch (err) {
 			console.error("Dragend geocode failed:", err);
 		}
 	}
 
-	try {
-		userMarker = new AdvancedMarkerElement({
-			position: { lat, lng },
-			map,
-			title: "Me",
-			gmpDraggable: true,
-			content: pin,
-		});
+	userMarker = createMarkerWithFallback(
+		() => {
+			const marker = new AdvancedMarkerElement({
+				position: { lat, lng },
+				map,
+				title: "Me",
+				gmpDraggable: true,
+				content: pin,
+			});
 
-		// Add gmp-dragend listener to update origin in Blazor
-		addAdvancedMarkerEventListener(userMarker, "gmp-dragend", () => handleUserMarkerDragEnd(userMarker.position));
-	} catch (markerErr) {
-		console.debug("Could not create user marker with AdvancedMarkerElement, falling back:", markerErr);
-		try {
-			if (google.maps.Marker) {
-				userMarker = new google.maps.Marker({
-					position: { lat, lng },
-					map,
-					title: "Me",
-					draggable: true,
-					label: "🚶",
-				});
-				userMarker.addListener("dragend", (e) => handleUserMarkerDragEnd(e?.latLng));
-			}
-		} catch (fallbackErr) {
-			console.warn("User marker fallback failed:", fallbackErr);
-		}
-	}
+			// Add gmp-dragend listener to update origin in Blazor
+			addAdvancedMarkerEventListener(marker, "gmp-dragend", () => handleUserMarkerDragEnd(marker.position));
+			return marker;
+		},
+		() => {
+			const marker = new google.maps.Marker({
+				position: { lat, lng },
+				map,
+				title: "Me",
+				draggable: true,
+				label: "🚶",
+			});
+			marker.addListener("dragend", (e) => handleUserMarkerDragEnd(e?.latLng));
+			return marker;
+		},
+		"Could not create user marker with AdvancedMarkerElement, falling back:",
+		"User marker fallback failed:",
+	);
 
 	return map;
 }
 
 export async function setMapTheme(theme) {
+	currentColorScheme = (theme || "DARK").toUpperCase();
 	if (map) {
-		map.setOptions({ colorScheme: theme.toUpperCase() });
+		map.setOptions({ colorScheme: currentColorScheme });
+		if (renderedRoutesData.length > 0 && currentActiveRouteId >= 0) {
+			await renderMultipleRoutes(renderedRoutesData, currentActiveRouteId, activeRouteDotNetRef, false);
+		}
+	}
+}
+
+function createMarkerWithFallback(createAdvanced, createLegacy, fallbackDebugMessage, fallbackErrorMessage) {
+	try {
+		return createAdvanced();
+	} catch (markerErr) {
+		if (fallbackDebugMessage) console.debug(fallbackDebugMessage, markerErr);
+		try {
+			return google.maps.Marker ? createLegacy() : null;
+		} catch (fallbackErr) {
+			console.warn(fallbackErrorMessage, fallbackErr);
+			return null;
+		}
+	}
+}
+
+function attachAutocompleteWidget(container, elementId, methodName, widget) {
+	const placeholderText = methodName === "UpdateOrigin" ? "Enter origin..." : "Enter destination...";
+	widget.id = `${elementId}-field`;
+	widget.name = `${elementId}-field`;
+	widget.setAttribute(
+		"aria-label",
+		methodName === "UpdateOrigin" ? "Origin" : "Destination",
+	);
+	widget.setAttribute("aria-labelledby", `${elementId}-label`);
+	widget.setAttribute("placeholder", placeholderText);
+
+	container.innerHTML = "";
+	container.appendChild(widget);
+	autocompletes[elementId] = widget;
+	if (Object.hasOwn(pendingAutocompleteValues, elementId)) {
+		setAutocompleteValue(
+			elementId,
+			pendingAutocompleteValues[elementId],
+			selectedPlaceLocations[elementId]?.location ?? null
+		);
 	}
 }
 
@@ -356,7 +413,6 @@ export async function setMapTheme(theme) {
 export async function initAutocomplete(elementId, dotNetHelper, methodName, apiKey) {
 	const container = document.getElementById(elementId);
 	if (!container) return;
-	const placeholderText = methodName === "UpdateOrigin" ? "Enter origin..." : "Enter destination...";
 
 	try {
 		await loadGoogleMaps(apiKey);
@@ -367,25 +423,12 @@ export async function initAutocomplete(elementId, dotNetHelper, methodName, apiK
 			requestedRegion: "my",
 			includedRegionCodes: ["my"],
 		});
-		placeAutocomplete.id = `${elementId}-field`;
-		placeAutocomplete.name = `${elementId}-field`;
-		placeAutocomplete.setAttribute(
-			"aria-label",
-			methodName === "UpdateOrigin" ? "Origin" : "Destination",
-		);
-		placeAutocomplete.setAttribute("aria-labelledby", `${elementId}-label`);
-		placeAutocomplete.setAttribute("placeholder", placeholderText);
 
 		// Style the widget to fill its parent container
 		placeAutocomplete.style.width = "100%";
 
 		// Clear the container and append the new element
-		container.innerHTML = "";
-		container.appendChild(placeAutocomplete);
-		autocompletes[elementId] = placeAutocomplete;
-		if (Object.hasOwn(pendingAutocompleteValues, elementId)) {
-			setAutocompleteValue(elementId, pendingAutocompleteValues[elementId]);
-		}
+		attachAutocompleteWidget(container, elementId, methodName, placeAutocomplete);
 
 		// Listen for place selection via the new gmp-select event
 		placeAutocomplete.addEventListener("gmp-select", async ({ placePrediction }) => {
@@ -416,38 +459,39 @@ export async function initAutocomplete(elementId, dotNetHelper, methodName, apiK
 		});
 	} catch (err) {
 		console.debug(`PlaceAutocompleteElement unavailable for ${elementId}, falling back to text input:`, err);
-		container.innerHTML = "";
 		const fallbackInput = document.createElement("input");
 		fallbackInput.type = "text";
-		fallbackInput.id = `${elementId}-field`;
-		fallbackInput.name = `${elementId}-field`;
 		fallbackInput.className = "w-100";
 		fallbackInput.style.border = "none";
 		fallbackInput.style.background = "transparent";
 		fallbackInput.style.outline = "none";
 		fallbackInput.style.color = "inherit";
 		fallbackInput.style.font = "inherit";
-		fallbackInput.placeholder = placeholderText;
-		fallbackInput.setAttribute("aria-label", methodName === "UpdateOrigin" ? "Origin" : "Destination");
-		fallbackInput.setAttribute("aria-labelledby", `${elementId}-label`);
 		fallbackInput.addEventListener("input", async (e) => {
 			if (dotNetHelper) {
 				await dotNetHelper.invokeMethodAsync(methodName, e.target.value);
 			}
 		});
-		container.appendChild(fallbackInput);
-		autocompletes[elementId] = fallbackInput;
-		if (Object.hasOwn(pendingAutocompleteValues, elementId)) {
-			setAutocompleteValue(elementId, pendingAutocompleteValues[elementId]);
-		}
+		attachAutocompleteWidget(container, elementId, methodName, fallbackInput);
 	}
 }
 
 /**
  * Updates the text value of a PlaceAutocompleteElement widget or fallback input.
  */
-export function setAutocompleteValue(elementId, value) {
-	delete selectedPlaceLocations[elementId];
+export function setAutocompleteValue(elementId, value, location = null) {
+	if (
+		location &&
+		Number.isFinite(Number(location.lat)) &&
+		Number.isFinite(Number(location.lng))
+	) {
+		selectedPlaceLocations[elementId] = {
+			text: value || "",
+			location: { lat: Number(location.lat), lng: Number(location.lng) },
+		};
+	} else {
+		delete selectedPlaceLocations[elementId];
+	}
 	pendingAutocompleteValues[elementId] = value || "";
 	const widget = autocompletes[elementId];
 	if (widget) {
@@ -462,6 +506,27 @@ export function setAutocompleteValue(elementId, value) {
 			internalInput.value = value || "";
 		}
 	}
+}
+
+function getAutocompleteValueAndLocation(elementId) {
+	const cached = selectedPlaceLocations[elementId];
+	const widget = autocompletes[elementId];
+	const internalInput = widget?.querySelector ? widget.querySelector("input") : null;
+	const text =
+		(typeof widget?.value === "string" && widget.value) ||
+		(typeof internalInput?.value === "string" && internalInput.value) ||
+		pendingAutocompleteValues[elementId] ||
+		cached?.text ||
+		"";
+	const location = cached && cached.text === text ? cached.location : null;
+	return { text, location };
+}
+
+export function swapAutocompleteLocations(firstId, secondId) {
+	const first = getAutocompleteValueAndLocation(firstId);
+	const second = getAutocompleteValueAndLocation(secondId);
+	setAutocompleteValue(firstId, second.text, second.location);
+	setAutocompleteValue(secondId, first.text, first.location);
 }
 
 export async function updateUserMarker(lat, lng) {
@@ -487,15 +552,24 @@ export async function updateUserMarker(lat, lng) {
 	}
 }
 
-/**
- * Clears any previously rendered route polylines and markers from the map.
- */
-export function clearRoute() {
+function clearRenderedRouteOverlays() {
 	routePolylines.forEach(p => p.setMap(null));
 	routePolylines = [];
 	routeMarkers.forEach(removeAdvancedMarker);
 	routeMarkers = [];
+	routeCalloutMarkers.forEach(entry => removeAdvancedMarker(entry.marker));
+	routeCalloutMarkers = [];
 	routeOptionsMap.clear();
+}
+
+/**
+ * Clears any previously rendered route polylines, markers, and cached route state.
+ */
+export function clearRoute() {
+	clearRenderedRouteOverlays();
+	cachedTransitRoutes.clear();
+	renderedRoutesData = [];
+	activeRouteDotNetRef = null;
 	currentActiveRouteId = -1;
 }
 
@@ -517,6 +591,259 @@ function normalizeRoutesTravelMode(mode) {
 	return m || "TRANSIT";
 }
 
+function normalizeHexColor(color, fallback = "#1a73e8") {
+	if (typeof color !== "string") return fallback;
+	const trimmed = color.trim();
+	if (/^#[0-9a-fA-F]{6}$/.test(trimmed)) return trimmed;
+	if (/^[0-9a-fA-F]{6}$/.test(trimmed)) return `#${trimmed}`;
+	return fallback;
+}
+
+function toValidDate(value) {
+	if (!value) return null;
+	const ms = typeof value.getTime === "function" ? value.getTime() : new Date(value).getTime();
+	return Number.isFinite(ms) ? new Date(ms) : null;
+}
+
+function formatRouteTime(value) {
+	const date = toValidDate(value);
+	if (!date) return "";
+	try {
+		return new Intl.DateTimeFormat(undefined, {
+			hour: "numeric",
+			minute: "2-digit",
+			timeZone: displayTimeZone || undefined,
+		}).format(date);
+	} catch (_) {
+		return new Intl.DateTimeFormat(undefined, {
+			hour: "numeric",
+			minute: "2-digit",
+		}).format(date);
+	}
+}
+
+function formatDurationLabel(durationSeconds) {
+	const totalMins = Math.max(1, Math.round((durationSeconds || 0) / 60));
+	if (totalMins < 60) return `${totalMins} min`;
+	const hours = Math.floor(totalMins / 60);
+	const mins = totalMins % 60;
+	return mins > 0 ? `${hours} hr ${mins} min` : `${hours} hr`;
+}
+
+function createOriginMarkerContent() {
+	const dot = document.createElement("div");
+	dot.className = "route-origin-dot";
+	return dot;
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function createTransitCalloutSvg() {
+	const svg = document.createElementNS(SVG_NS, "svg");
+	svg.setAttribute("viewBox", "0 0 24 24");
+	svg.setAttribute("width", "14");
+	svg.setAttribute("height", "14");
+	svg.setAttribute("aria-hidden", "true");
+	const path = document.createElementNS(SVG_NS, "path");
+	path.setAttribute("fill", "currentColor");
+	path.setAttribute(
+		"d",
+		"M12 2c-4 0-8 .5-8 4v9.5C4 17.43 5.57 19 7.5 19L6 20.5v.5h2l2-2h4l2 2h2v-.5L16.5 19c1.93 0 3.5-1.57 3.5-3.5V6c0-3.5-4-4-8-4zM7.5 17c-.83 0-1.5-.67-1.5-1.5S6.67 14 7.5 14s1.5.67 1.5 1.5S8.33 17 7.5 17zm3.5-7H6V6h5v4zm5.5 7c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm1.5-7h-5V6h5v4z"
+	);
+	svg.appendChild(path);
+	return svg;
+}
+
+function createCalloutPillElement(durationLabel, headwayMinutes, isActive, showTransitIcon = true) {
+	const pill = document.createElement("button");
+	pill.type = "button";
+	pill.className = isActive ? "route-callout-pill route-callout-pill--active" : "route-callout-pill";
+
+	if (showTransitIcon) {
+		const iconWrap = document.createElement("span");
+		iconWrap.className = "route-callout-icon";
+		iconWrap.appendChild(createTransitCalloutSvg());
+		pill.appendChild(iconWrap);
+	}
+
+	const textWrap = document.createElement("span");
+	textWrap.className = "route-callout-text";
+
+	const durationEl = document.createElement("span");
+	durationEl.className = "route-callout-duration";
+	durationEl.textContent = durationLabel;
+	textWrap.appendChild(durationEl);
+
+	if (Number.isFinite(headwayMinutes) && headwayMinutes > 0) {
+		const subEl = document.createElement("span");
+		subEl.className = "route-callout-sub";
+		subEl.textContent = `every ${headwayMinutes} min`;
+		textWrap.appendChild(subEl);
+	}
+
+	pill.appendChild(textWrap);
+	return pill;
+}
+
+async function createRouteEndpointMarkers(startPos, endPos) {
+	if (!startPos || !endPos) return;
+	try {
+		const { PinElement, AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+		if (AdvancedMarkerElement) {
+			const originMarker = new AdvancedMarkerElement({
+				position: startPos,
+				content: createOriginMarkerContent(),
+				title: "Origin",
+				zIndex: 150,
+			});
+			originMarker.map = map;
+			routeMarkers.push(originMarker);
+
+			const destContent = PinElement
+				? new PinElement({
+					background: "#EA4335",
+					borderColor: "#B31412",
+					glyphColor: "#FFFFFF",
+				})
+				: undefined;
+			const destMarker = new AdvancedMarkerElement({
+				position: endPos,
+				content: destContent,
+				title: "Destination",
+				zIndex: 150,
+			});
+			destMarker.map = map;
+			routeMarkers.push(destMarker);
+			return;
+		}
+	} catch (_) { }
+
+	if (google.maps.Marker) {
+		try {
+			routeMarkers.push(
+				new google.maps.Marker({ position: startPos, map, title: "Origin", label: "A" }),
+				new google.maps.Marker({ position: endPos, map, title: "Destination", label: "B" }),
+			);
+		} catch (_) { }
+	}
+}
+
+async function addRouteCalloutMarker(routeId, position, durationLabel, headwayMinutes, isActive, onSelect, showTransitIcon = true) {
+	if (!position || !durationLabel) return;
+	try {
+		const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+		if (!AdvancedMarkerElement) return;
+
+		const pill = createCalloutPillElement(durationLabel, headwayMinutes, isActive, showTransitIcon);
+		const marker = new AdvancedMarkerElement({
+			position,
+			map,
+			content: pill,
+			title: durationLabel,
+			zIndex: isActive ? 200 : 50,
+			gmpClickable: typeof onSelect === "function",
+		});
+
+		if (typeof onSelect === "function") {
+			addAdvancedMarkerEventListener(marker, "gmp-click", () => onSelect(routeId));
+		}
+
+		routeCalloutMarkers.push({ routeId, marker, pill });
+	} catch (_) { }
+}
+
+function buildSegmentPolylineOptions(defaultOptions, details, isActive) {
+	const base = defaultOptions ? { ...defaultOptions } : {};
+	const isWalking = details?.travelMode === "WALKING";
+
+	if (isActive) {
+		const activeOpts = {
+			...base,
+			clickable: true,
+			zIndex: isWalking ? 110 : 100,
+		};
+		if (!isWalking) {
+			activeOpts.strokeWeight = Math.max(base.strokeWeight || 6, 6);
+			activeOpts.strokeOpacity = 1;
+		}
+		return activeOpts;
+	}
+
+	const isDark = currentColorScheme !== "LIGHT";
+	const mutedColor = isDark ? "#7c83b8" : "#7e89a8";
+	const inactiveOpts = {
+		...base,
+		strokeColor: mutedColor,
+		strokeWeight: 4,
+		strokeOpacity: isWalking ? 0 : 0.65,
+		zIndex: 10,
+		clickable: true,
+	};
+
+	if (Array.isArray(base.icons)) {
+		inactiveOpts.icons = base.icons.map(entry => ({
+			...entry,
+			icon: entry?.icon
+				? {
+					...entry.icon,
+					fillColor: mutedColor,
+					strokeColor: mutedColor,
+					fillOpacity: 0.5,
+					strokeOpacity: 0.5,
+				}
+				: entry?.icon,
+		}));
+	}
+
+	return inactiveOpts;
+}
+
+function pickCalloutPosition(route, fallbackPath, usedPositions) {
+	const rawPath = (Array.isArray(route?.path) && route.path.length > 0) ? route.path : fallbackPath;
+	if (!Array.isArray(rawPath) || rawPath.length === 0) return null;
+
+	const points = rawPath.map(toLatLngLiteral).filter(Boolean);
+	if (points.length === 0) return null;
+
+	const fractions = [0.5, 0.35, 0.65, 0.25, 0.75, 0.18, 0.82];
+	let bestPoint = points[Math.floor(points.length / 2)];
+	let bestScore = -1;
+
+	for (const fraction of fractions) {
+		const idx = Math.min(points.length - 1, Math.max(0, Math.floor((points.length - 1) * fraction)));
+		const candidate = points[idx];
+		if (usedPositions.length === 0) {
+			bestPoint = candidate;
+			break;
+		}
+		let minDist = Infinity;
+		for (const used of usedPositions) {
+			const dist = distanceMeters(candidate, used);
+			if (dist < minDist) minDist = dist;
+		}
+		if (minDist > bestScore) {
+			bestScore = minDist;
+			bestPoint = candidate;
+		}
+	}
+
+	usedPositions.push(bestPoint);
+	return bestPoint;
+}
+
+function getRouteEndpoints(route, fallbackStart, fallbackEnd) {
+	const legs = route?.legs;
+	if (Array.isArray(legs) && legs.length > 0) {
+		const firstLoc = legs[0].startLocation?.latLng || legs[0].startLocation;
+		const lastLoc = legs[legs.length - 1].endLocation?.latLng || legs[legs.length - 1].endLocation;
+		return {
+			startPos: firstLoc || fallbackStart,
+			endPos: lastLoc || fallbackEnd,
+		};
+	}
+	return { startPos: fallbackStart, endPos: fallbackEnd };
+}
+
 /**
  * Computes and renders a route using the new Routes library (Route.computeRoutes).
  * Replaces legacy DirectionsService.route() + DirectionsRenderer.setDirections().
@@ -527,7 +854,6 @@ async function showRoute(origin, destination, travelMode = "TRANSIT") {
 
 	const { Route } = await google.maps.importLibrary("routes");
 
-	// Clear any existing route before drawing a new one
 	clearRoute();
 
 	const originLoc = toLatLngLiteral(origin) || origin;
@@ -538,7 +864,7 @@ async function showRoute(origin, destination, travelMode = "TRANSIT") {
 		origin: originLoc,
 		destination: destinationLoc,
 		travelMode: routesTravelMode,
-		fields: ["path", "legs", "viewport"],
+		fields: ["path", "durationMillis", "distanceMeters", "legs", "viewport", "localizedValues"],
 	};
 
 	const { routes } = await Route.computeRoutes(request);
@@ -549,86 +875,22 @@ async function showRoute(origin, destination, travelMode = "TRANSIT") {
 
 	const route = routes[0];
 
-	// Draw polylines on the map
-	routePolylines = route.createPolylines();
-	routePolylines.forEach(polyline => {
-		polyline.setOptions({
-			strokeColor: "#4285F4",
-			strokeWeight: 5,
-		});
-		polyline.setMap(map);
+	routePolylines = route.createPolylines({
+		colorScheme: currentColorScheme,
+		polylineOptions: (defaultOptions, details) => buildSegmentPolylineOptions(defaultOptions, details, true),
 	});
+	routePolylines.forEach(polyline => polyline.setMap(map));
 
-	// Draw origin/destination markers
-	try {
-		routeMarkers = [];
+	const { startPos, endPos } = getRouteEndpoints(route, originLoc, destinationLoc);
+	await createRouteEndpointMarkers(startPos, endPos);
 
-		const startPos = (route.legs && route.legs.length > 0)
-			? (route.legs[0].startLocation?.latLng || route.legs[0].startLocation)
-			: originLoc;
-		const endPos = (route.legs && route.legs.length > 0)
-			? (route.legs[route.legs.length - 1].endLocation?.latLng || route.legs[route.legs.length - 1].endLocation)
-			: destinationLoc;
-
-		if (startPos && endPos) {
-			let addedWithAdvanced = false;
-			try {
-				const { PinElement, AdvancedMarkerElement } = await google.maps.importLibrary("marker");
-				if (AdvancedMarkerElement && PinElement) {
-					const startPin = new PinElement({
-						glyphText: 'A',
-						background: '#4285F4',
-						borderColor: '#FFFFFF'
-					});
-					const startMarker = new AdvancedMarkerElement({
-						position: startPos,
-						content: startPin,
-						title: "Origin"
-					});
-					startMarker.map = map;
-					routeMarkers.push(startMarker);
-
-					const endPin = new PinElement({
-						glyphText: 'B',
-						background: '#EA4335',
-						borderColor: '#FFFFFF'
-					});
-					const endMarker = new AdvancedMarkerElement({
-						position: endPos,
-						content: endPin,
-						title: "Destination"
-					});
-					endMarker.map = map;
-					routeMarkers.push(endMarker);
-					addedWithAdvanced = true;
-				}
-			} catch (_) { }
-
-			if (!addedWithAdvanced && google.maps.Marker) {
-				try {
-					const startMarker = new google.maps.Marker({
-						position: startPos,
-						map,
-						title: "Origin",
-						label: "A"
-					});
-					routeMarkers.push(startMarker);
-
-					const endMarker = new google.maps.Marker({
-						position: endPos,
-						map,
-						title: "Destination",
-						label: "B"
-					});
-					routeMarkers.push(endMarker);
-				} catch (_) { }
-			}
-		}
-	} catch (err) {
-		console.error("Manual marker creation failed:", err);
+	const durationSec = route.durationMillis ? Math.round(route.durationMillis / 1000) : 0;
+	const durationLabel = route.localizedValues?.duration || (durationSec > 0 ? formatDurationLabel(durationSec) : "");
+	const pillPos = pickCalloutPosition(route, null, []);
+	if (pillPos && durationLabel) {
+		await addRouteCalloutMarker(0, pillPos, durationLabel, null, true, null, routesTravelMode === "TRANSIT");
 	}
 
-	// Fit map bounds to the route
 	if (route.viewport) map.fitBounds(route.viewport);
 	return true;
 }
@@ -665,7 +927,141 @@ export async function showRouteByName(originName, destinationName, travelMode = 
 	}
 }
 
-export async function getTransitRoutes(originName, destinationName) {
+function extractRouteMetadata(route, fallbackDepartureDate) {
+	const transitSteps = [];
+	const rawSteps = [];
+
+	if (Array.isArray(route.legs)) {
+		route.legs.forEach(leg => {
+			if (!Array.isArray(leg.steps)) return;
+			leg.steps.forEach(step => {
+				const stepDurationSec = step.staticDurationMillis ? Math.round(step.staticDurationMillis / 1000) : 0;
+				if (step.transitDetails) {
+					const td = step.transitDetails;
+					const line = td.transitLine;
+					const departureLoc = toLatLngLiteral(td.departureStop?.location);
+					const shortName = line?.shortName || line?.nameShort || td.tripShortText || line?.name || "";
+					const headwayMin = Number.isFinite(td.headwayMillis) && td.headwayMillis > 0
+						? Math.round(td.headwayMillis / 60000)
+						: null;
+
+					transitSteps.push({
+						lineShortName: shortName,
+						lineName: line?.name || "",
+						departureLat: departureLoc?.lat ?? 0,
+						departureLng: departureLoc?.lng ?? 0,
+						departureStopName: td.departureStop?.name || "",
+					});
+
+					rawSteps.push({
+						travelMode: "TRANSIT",
+						vehicleType: line?.vehicle?.vehicleType || "",
+						lineShortName: shortName,
+						lineName: line?.name || "",
+						lineColor: normalizeHexColor(line?.color, "#1a73e8"),
+						lineTextColor: normalizeHexColor(line?.textColor, "#ffffff"),
+						headsign: td.headsign || "",
+						departureStopName: td.departureStop?.name || "",
+						arrivalStopName: td.arrivalStop?.name || "",
+						departureTime: td.departureTime || null,
+						arrivalTime: td.arrivalTime || null,
+						departureTimeText: formatRouteTime(td.departureTime),
+						arrivalTimeText: formatRouteTime(td.arrivalTime),
+						durationSeconds: stepDurationSec,
+						distanceMeters: step.distanceMeters || 0,
+						stopCount: td.stopCount || 0,
+						headwayMinutes: headwayMin,
+						instructions: step.instructions || "",
+					});
+				} else {
+					rawSteps.push({
+						travelMode: step.travelMode || "WALKING",
+						vehicleType: "",
+						lineShortName: "",
+						lineName: "",
+						lineColor: "",
+						lineTextColor: "",
+						headsign: "",
+						departureStopName: "",
+						arrivalStopName: "",
+						departureTime: null,
+						arrivalTime: null,
+						departureTimeText: "",
+						arrivalTimeText: "",
+						durationSeconds: stepDurationSec,
+						distanceMeters: step.distanceMeters || 0,
+						stopCount: 0,
+						headwayMinutes: null,
+						instructions: step.instructions || "",
+					});
+				}
+			});
+		});
+	}
+
+	// Merge consecutive WALKING steps into one summary walking segment, matching Google Maps cards.
+	const segments = [];
+	for (const step of rawSteps) {
+		const prev = segments[segments.length - 1];
+		if (step.travelMode === "WALKING" && prev && prev.travelMode === "WALKING") {
+			prev.durationSeconds += step.durationSeconds;
+			prev.distanceMeters += step.distanceMeters;
+			if (!prev.instructions && step.instructions) prev.instructions = step.instructions;
+		} else {
+			segments.push({ ...step });
+		}
+	}
+
+	let departureDate = null;
+	let arrivalDate = null;
+	let leadingWalkSec = 0;
+	for (const seg of segments) {
+		if (seg.travelMode === "TRANSIT") {
+			const dep = toValidDate(seg.departureTime);
+			if (dep) {
+				departureDate = new Date(dep.getTime() - leadingWalkSec * 1000);
+				break;
+			}
+		}
+		leadingWalkSec += seg.durationSeconds;
+	}
+
+	let trailingWalkSec = 0;
+	for (let i = segments.length - 1; i >= 0; i--) {
+		const seg = segments[i];
+		if (seg.travelMode === "TRANSIT") {
+			const arr = toValidDate(seg.arrivalTime);
+			if (arr) {
+				arrivalDate = new Date(arr.getTime() + trailingWalkSec * 1000);
+				break;
+			}
+		}
+		trailingWalkSec += seg.durationSeconds;
+	}
+
+	const durationSeconds = route.durationMillis ? Math.round(route.durationMillis / 1000) : 0;
+	if (!departureDate && fallbackDepartureDate) {
+		departureDate = fallbackDepartureDate;
+	}
+	if (!arrivalDate && departureDate && durationSeconds > 0) {
+		arrivalDate = new Date(departureDate.getTime() + durationSeconds * 1000);
+	}
+
+	const firstTransit = segments.find(s => s.travelMode === "TRANSIT");
+	return {
+		durationSeconds,
+		distanceMeters: route.distanceMeters || 0,
+		localizedDuration: route.localizedValues?.duration || (durationSeconds > 0 ? formatDurationLabel(durationSeconds) : ""),
+		localizedDistance: route.localizedValues?.distance || "",
+		departureTimeText: formatRouteTime(departureDate),
+		arrivalTimeText: formatRouteTime(arrivalDate),
+		headwayMinutes: firstTransit?.headwayMinutes ?? null,
+		transitSteps,
+		segments: segments.map(({ departureTime, arrivalTime, ...serializable }) => serializable),
+	};
+}
+
+export async function getTransitRoutes(originName, destinationName, options = null) {
 	await loadGoogleMaps();
 	try {
 		const { originLoc, destinationLoc } = await resolveRouteEndpoints(originName, destinationName);
@@ -678,49 +1074,44 @@ export async function getTransitRoutes(originName, destinationName) {
 			destination: destinationLoc,
 			travelMode: "TRANSIT",
 			computeAlternativeRoutes: true,
-			fields: ["path", "durationMillis", "distanceMeters", "legs"],
+			fields: ["path", "durationMillis", "distanceMeters", "legs", "viewport", "localizedValues", "routeLabels"],
 		};
+
+		let fallbackDeparture = null;
+		if (options?.departureMode === "depart" && options.dateTimeIso) {
+			const dt = new Date(options.dateTimeIso);
+			if (!Number.isNaN(dt.getTime())) {
+				request.departureTime = dt;
+				fallbackDeparture = dt;
+			}
+		} else if (options?.departureMode === "arrive" && options.dateTimeIso) {
+			const dt = new Date(options.dateTimeIso);
+			if (!Number.isNaN(dt.getTime())) {
+				request.arrivalTime = dt;
+			}
+		}
 
 		const { routes } = await Route.computeRoutes(request);
 
+		cachedTransitRoutes.clear();
 		if (!routes || routes.length === 0) {
 			return [];
 		}
 
 		return routes.map((r, index) => {
-			const steps = [];
-			if (r.legs && r.legs.length > 0) {
-				r.legs.forEach(leg => {
-					if (leg.steps) {
-						leg.steps.forEach(step => {
-							if (step.transitDetails) {
-								const td = step.transitDetails;
-								const departureLoc = toLatLngLiteral(td.departureStop?.location);
-								steps.push({
-									lineShortName: td.transitLine?.shortName || td.transitLine?.nameShort || "",
-									lineName: td.transitLine?.name || "",
-									departureLat: departureLoc?.lat ?? 0,
-									departureLng: departureLoc?.lng ?? 0,
-									departureStopName: td.departureStop?.name || ""
-								});
-							}
-						});
-					}
-				});
-			}
-
 			let encodedPolyline = "";
 			if (r.path) {
 				encodedPolyline = encoding.encodePath(r.path);
 			}
 
-			return {
+			const meta = extractRouteMetadata(r, fallbackDeparture);
+			const summary = {
 				routeId: index,
 				encodedPolyline,
-				durationSeconds: r.durationMillis ? Math.round(r.durationMillis / 1000) : 0,
-				distanceMeters: r.distanceMeters || 0,
-				transitSteps: steps
+				...meta,
 			};
+			cachedTransitRoutes.set(index, { route: r, summary });
+			return summary;
 		});
 
 	} catch (err) {
@@ -729,69 +1120,141 @@ export async function getTransitRoutes(originName, destinationName) {
 	}
 }
 
-export async function drawMultipleRoutes(routesData, activeRouteId, dotNetRef) {
-	await loadGoogleMaps();
-	if (!map) throw new Error("Map not initialized.");
-	
+function selectRouteFromMap(routeId, dotNetRef) {
+	if (currentActiveRouteId !== routeId) {
+		setActiveRoute(routeId);
+	}
+	dotNetRef?.invokeMethodAsync("OnRouteSelected", routeId)?.catch(() => {});
+}
+
+async function renderMultipleRoutes(routesData, activeRouteId, dotNetRef, fitViewport = true) {
 	const [{ Polyline }, { LatLngBounds }, { encoding }] = await Promise.all([
 		google.maps.importLibrary("maps"),
 		google.maps.importLibrary("core"),
 		google.maps.importLibrary("geometry")
 	]);
 
-	clearRoute();
+	clearRenderedRouteOverlays();
+	renderedRoutesData = routesData.slice();
+	activeRouteDotNetRef = dotNetRef;
 	currentActiveRouteId = activeRouteId;
 
 	const bounds = new LatLngBounds();
+	const usedCalloutPositions = [];
 
-	routesData.forEach(routeData => {
-		if (!routeData.path) return;
-		
-		const path = encoding.decodePath(routeData.path);
-		
-		const polyline = new Polyline({
-			path: path,
-			strokeColor: "#808080",
-			strokeWeight: 3,
-			zIndex: 1,
-			clickable: true
-		});
+	// Draw inactive alternatives first so the active route renders cleanly on top.
+	const ordered = [
+		...routesData.filter(r => r.id !== activeRouteId),
+		...routesData.filter(r => r.id === activeRouteId),
+	];
 
-		polyline.addListener("click", () => {
-			if (currentActiveRouteId !== routeData.id) {
-				setActiveRoute(routeData.id);
-				dotNetRef?.invokeMethodAsync('OnRouteSelected', routeData.id);
+	for (const routeData of ordered) {
+		const isActive = routeData.id === activeRouteId;
+		const cached = cachedTransitRoutes.get(routeData.id);
+		const routeObj = cached?.route;
+		const segments = [];
+		let fallbackPath = null;
+
+		if (routeObj && typeof routeObj.createPolylines === "function") {
+			const segmentOptionPairs = [];
+			const polylines = routeObj.createPolylines({
+				colorScheme: currentColorScheme,
+				polylineOptions: (defaultOptions, details) => {
+					const activeOpts = buildSegmentPolylineOptions(defaultOptions, details, true);
+					const inactiveOpts = buildSegmentPolylineOptions(defaultOptions, details, false);
+					segmentOptionPairs.push({ activeOpts, inactiveOpts });
+					return isActive ? activeOpts : inactiveOpts;
+				},
+			});
+
+			polylines.forEach((polyline, idx) => {
+				const pair = segmentOptionPairs[idx] || {
+					activeOpts: buildSegmentPolylineOptions(null, null, true),
+					inactiveOpts: buildSegmentPolylineOptions(null, null, false),
+				};
+				polyline.addListener("click", () => selectRouteFromMap(routeData.id, dotNetRef));
+				polyline.setMap(map);
+				routePolylines.push(polyline);
+				segments.push({ polyline, ...pair });
+			});
+
+			if (Array.isArray(routeObj.path)) {
+				routeObj.path.forEach(latLng => bounds.extend(latLng));
 			}
-		});
+		} else {
+			if (!routeData.path) continue;
+			fallbackPath = encoding.decodePath(routeData.path);
+			if (fallbackPath.length === 0) continue;
 
-		polyline.setMap(map);
-		routePolylines.push(polyline);
-		routeOptionsMap.set(routeData.id, { polyline, hasLiveBus: routeData.hasLiveBus });
-		
-		path.forEach(latLng => bounds.extend(latLng));
-	});
+			const activeOpts = { strokeColor: "#4285F4", strokeWeight: 6, strokeOpacity: 1, zIndex: 100, clickable: true };
+			const inactiveOpts = { strokeColor: "#7c83b8", strokeWeight: 4, strokeOpacity: 0.65, zIndex: 10, clickable: true };
+			const polyline = new Polyline({
+				path: fallbackPath,
+				...(isActive ? activeOpts : inactiveOpts),
+			});
+			polyline.addListener("click", () => selectRouteFromMap(routeData.id, dotNetRef));
+			polyline.setMap(map);
+			routePolylines.push(polyline);
+			segments.push({ polyline, activeOpts, inactiveOpts });
+			fallbackPath.forEach(latLng => bounds.extend(latLng));
+		}
 
-	if (routesData.length > 0) {
-		if (!bounds.isEmpty()) map.fitBounds(bounds);
-		setActiveRoute(activeRouteId);
+		routeOptionsMap.set(routeData.id, { segments, hasLiveBus: routeData.hasLiveBus });
+
+		const durationLabel = routeData.localizedDuration
+			|| cached?.summary?.localizedDuration
+			|| (routeData.durationSeconds > 0 ? formatDurationLabel(routeData.durationSeconds) : "");
+		const headwayMinutes = routeData.headwayMinutes ?? cached?.summary?.headwayMinutes ?? null;
+		const pillPos = pickCalloutPosition(routeObj, fallbackPath, usedCalloutPositions);
+		if (pillPos && durationLabel) {
+			await addRouteCalloutMarker(
+				routeData.id,
+				pillPos,
+				durationLabel,
+				headwayMinutes,
+				isActive,
+				(id) => selectRouteFromMap(id, dotNetRef),
+				true
+			);
+		}
 	}
+
+	const activeCached = cachedTransitRoutes.get(activeRouteId)?.route;
+	if (activeCached) {
+		const { startPos, endPos } = getRouteEndpoints(activeCached, null, null);
+		await createRouteEndpointMarkers(startPos, endPos);
+	}
+
+	if (fitViewport && routesData.length > 0 && !bounds.isEmpty()) {
+		map.fitBounds(bounds);
+	}
+}
+
+export async function drawMultipleRoutes(routesData, activeRouteId, dotNetRef) {
+	await loadGoogleMaps();
+	if (!map) throw new Error("Map not initialized.");
+	await renderMultipleRoutes(routesData, activeRouteId, dotNetRef, true);
 }
 
 export function setActiveRoute(routeId) {
 	currentActiveRouteId = routeId;
-	
+
 	routeOptionsMap.forEach((data, id) => {
 		const isActive = (id === routeId);
-		const color = isActive ? (data.hasLiveBus ? "#0F9D58" : "#4285F4") : "#808080";
-		const weight = isActive ? 6 : 3;
-		const zIndex = isActive ? 100 : 1;
-
-		data.polyline.setOptions({
-			strokeColor: color,
-			strokeWeight: weight,
-			zIndex: zIndex
-		});
+		for (const seg of data.segments || []) {
+			seg.polyline.setOptions(isActive ? seg.activeOpts : seg.inactiveOpts);
+		}
 	});
+
+	for (const entry of routeCalloutMarkers) {
+		const isActive = entry.routeId === routeId;
+		if (entry.pill) {
+			entry.pill.className = isActive ? "route-callout-pill route-callout-pill--active" : "route-callout-pill";
+		}
+		if (entry.marker) {
+			entry.marker.zIndex = isActive ? 200 : 50;
+		}
+	}
 }
 
 
@@ -801,10 +1264,83 @@ function getTransportMarker(location) {
 	return Object.hasOwn(transportMarkerTypes, type) ? transportMarkerTypes[type] : unknownTransportMarker;
 }
 
-function updateTransportMarkerElement(element, location) {
+const MIN_HEADING_MOVEMENT_METERS = 15;
+const EARTH_RADIUS_METERS = 6371000;
+const DEG_TO_RAD = Math.PI / 180;
+
+function distanceMeters(from, to) {
+	// Equirectangular approximation is accurate enough for poll-to-poll distances.
+	const x = (to.lng - from.lng) * DEG_TO_RAD * Math.cos(((from.lat + to.lat) / 2) * DEG_TO_RAD);
+	const y = (to.lat - from.lat) * DEG_TO_RAD;
+	return Math.hypot(x, y) * EARTH_RADIUS_METERS;
+}
+
+function headingDegrees(from, to) {
+	const lat1 = from.lat * DEG_TO_RAD;
+	const lat2 = to.lat * DEG_TO_RAD;
+	const dLng = (to.lng - from.lng) * DEG_TO_RAD;
+	const y = Math.sin(dLng) * Math.cos(lat2);
+	const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+	return (Math.atan2(y, x) / DEG_TO_RAD + 360) % 360;
+}
+
+// Feed bearing 0 is treated as absent: the parser cannot distinguish an unset field,
+// and some feeds (KTMB) send 0 for every vehicle. The anchor only moves when a heading
+// is fixed, so slow vehicles still accumulate enough movement across polls.
+export function resolveVehicleHeading(state, location) {
+	const current = { lat: location.lat, lng: location.lng };
+	const bearing = location.bearing;
+	if (Number.isFinite(bearing) && bearing > 0 && bearing <= 360) {
+		return { heading: bearing % 360, anchor: current };
+	}
+	const anchor = state?.anchor;
+	if (anchor && distanceMeters(anchor, current) >= MIN_HEADING_MOVEMENT_METERS) {
+		return { heading: headingDegrees(anchor, current), anchor: current };
+	}
+	return { heading: state?.heading ?? null, anchor: anchor ?? current };
+}
+
+// Side-view vehicle emojis face left (270deg). Flip horizontally on eastbound
+// headings (0..180deg) so the wheels remain at the bottom while tilting along the route.
+export function getIconHeadingTransform(heading) {
+	const normalized = ((Math.round(heading) % 360) + 360) % 360;
+	const isEast = normalized <= 180;
+	return {
+		heading: normalized,
+		tilt: isEast ? normalized - 90 : normalized - 270,
+		scaleX: isEast ? -1 : 1,
+	};
+}
+
+function updateTransportMarkerElement(element, location, heading) {
 	const markerType = getTransportMarker(location);
-	element.textContent = location.icon || markerType.icon;
 	element.className = `transport-marker ${markerType.className}`;
+	let icon = element.querySelector(".transport-marker-icon");
+	if (!icon) {
+		const arrow = document.createElement("span");
+		arrow.className = "transport-marker-arrow";
+		icon = document.createElement("span");
+		icon.className = "transport-marker-icon";
+		element.replaceChildren(arrow, icon);
+	}
+	icon.textContent = location.icon || markerType.icon;
+	const hasHeading = Number.isFinite(heading);
+	element.classList.toggle("has-heading", hasHeading);
+	if (hasHeading) {
+		const { heading: normalized, tilt, scaleX } = getIconHeadingTransform(heading);
+		element.style.setProperty("--heading", `${normalized}deg`);
+		if (markerType.sideFacing) {
+			element.style.setProperty("--icon-tilt", `${tilt}deg`);
+			element.style.setProperty("--icon-scale-x", String(scaleX));
+		} else {
+			element.style.removeProperty?.("--icon-tilt");
+			element.style.removeProperty?.("--icon-scale-x");
+		}
+	} else {
+		element.style.removeProperty?.("--heading");
+		element.style.removeProperty?.("--icon-tilt");
+		element.style.removeProperty?.("--icon-scale-x");
+	}
 }
 
 export async function syncMarkers(locations) {
@@ -832,7 +1368,8 @@ export async function syncMarkers(locations) {
 
 			const speedKmh = (loc.speed || 0) * 3.6;
 			loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
-			const title = `Route ${loc.routeId || 'Unknown'} - ${id}`;
+			const routeLabel = loc.routeShortName || loc.routeId;
+			const title = `Route ${routeLabel || 'Unknown'} - ${id}`;
 			
 			if (activeMarkers[markerKey]) {
 				const marker = activeMarkers[markerKey];
@@ -846,8 +1383,9 @@ export async function syncMarkers(locations) {
 							marker.position = { lat: loc.lat, lng: loc.lng };
 						}
 						marker.title = title;
+						marker.headingState = resolveVehicleHeading(marker.headingState, loc);
 						if (marker.content) {
-							updateTransportMarkerElement(marker.content, loc);
+							updateTransportMarkerElement(marker.content, loc, marker.headingState.heading);
 						}
 					}
 					marker.busData = loc;
@@ -868,44 +1406,46 @@ export async function syncMarkers(locations) {
 					currentInfoWindowAnchor = marker;
 				};
 
-				try {
-					const el = document.createElement("div");
-					updateTransportMarkerElement(el, loc);
-					el.style.fontSize = "28px";
+				marker = createMarkerWithFallback(
+					() => {
+						const headingState = resolveVehicleHeading(null, loc);
+						const el = document.createElement("div");
+						updateTransportMarkerElement(el, loc, headingState.heading);
+						el.style.fontSize = "28px";
 
-					marker = new AdvancedMarkerElement({
-						position: pos,
-						map,
-						title,
-						content: el,
-						gmpClickable: true,
-					});
+						const advanced = new AdvancedMarkerElement({
+							position: pos,
+							map,
+							title,
+							content: el,
+							gmpClickable: true,
+						});
 
-					marker.busData = loc;
-					addAdvancedMarkerEventListener(marker, "gmp-click", toggleInfoWindow);
-					activeMarkers[markerKey] = marker;
-				} catch (markerErr) {
-					// AdvancedMarkerElement failed; attempt fallback to google.maps.Marker
-					try {
-						if (google.maps.Marker) {
-							const markerType = getTransportMarker(loc);
-							marker = new google.maps.Marker({
-								position: pos,
-								map,
-								title,
-								label: {
-									text: loc.icon || markerType.icon,
-									fontSize: "20px",
-								},
-							});
-							marker.busData = loc;
-							marker.addListener("click", toggleInfoWindow);
-							activeMarkers[markerKey] = marker;
-						}
-					} catch (fallbackErr) {
-						console.warn("syncMarkers: both AdvancedMarkerElement and fallback failed:", fallbackErr);
-					}
-				}
+						advanced.busData = loc;
+						advanced.headingState = headingState;
+						addAdvancedMarkerEventListener(advanced, "gmp-click", toggleInfoWindow);
+						return advanced;
+					},
+					// Attempt fallback to google.maps.Marker when AdvancedMarkerElement fails
+					() => {
+						const markerType = getTransportMarker(loc);
+						const legacy = new google.maps.Marker({
+							position: pos,
+							map,
+							title,
+							label: {
+								text: loc.icon || markerType.icon,
+								fontSize: "20px",
+							},
+						});
+						legacy.busData = loc;
+						legacy.addListener("click", toggleInfoWindow);
+						return legacy;
+					},
+					null,
+					"syncMarkers: both AdvancedMarkerElement and fallback failed:",
+				);
+				if (marker) activeMarkers[markerKey] = marker;
 			}
 		}
 
@@ -930,7 +1470,7 @@ function buildVehicleInfoContent(id, location) {
 	header.textContent = `${getTransportMarker(location).label} ${id}`;
 	content.appendChild(header);
 
-	appendBusInfoRow(content, "Route", location.routeId || "N/A");
+	appendBusInfoRow(content, "Route", location.routeShortName || location.routeId || "N/A");
 	appendBusInfoRow(
 		content,
 		"Speed",
@@ -967,6 +1507,10 @@ export function cleanupMap() {
 		staticRouteLayer.setMap(null);
 		staticRouteLayer = null;
 		staticRouteDotNetRef = null;
+	}
+	if (transitLayer) {
+		transitLayer.setMap(null);
+		transitLayer = null;
 	}
 	for (const id in activeMarkers) {
 		removeAdvancedMarker(activeMarkers[id]);

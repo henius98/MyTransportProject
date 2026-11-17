@@ -1,57 +1,22 @@
-// Set Firebase in appsettings.json (also used by deployment), with overrides in appsettings.{Environment}.json.
+// Firebase configuration is pushed from Blazor IConfiguration via configureFirebase(config).
 export const firebaseSdkBase = "https://www.gstatic.com/firebasejs/11.4.0";
+let configuredConfig = null;
 let appPromise = null;
 
-function parseSettings(text) {
-  // appsettings.json contains explanatory line comments outside JSON strings.
-  let result = "";
-  let quoted = false;
-  let escaped = false;
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    if (quoted) {
-      result += char;
-      if (escaped) escaped = false;
-      else if (char === "\\") escaped = true;
-      else if (char === '"') quoted = false;
-    } else if (char === '"') {
-      quoted = true;
-      result += char;
-    } else if (char === "/" && text[i + 1] === "/") {
-      while (i < text.length && text[i] !== "\n") i++;
-      result += "\n";
-    } else {
-      result += char;
-    }
-  }
-  return JSON.parse(result);
+export function configureFirebase(config) {
+  configuredConfig = config && typeof config === "object" ? { ...config } : null;
 }
 
 export async function getFirebaseApp() {
   if (!appPromise) {
     const pending = (async () => {
-      const { applicationEnvironment, appsettings } = window.Blazor.runtime.getConfig();
-      const environmentFile = `appsettings.${applicationEnvironment}.json`;
-      const files = ["appsettings.json"];
-      if (appsettings?.some(path => path.split("/").pop() === environmentFile)) {
-        files.push(environmentFile);
-      }
-      const settings = await Promise.all(files.map(async file => {
-        const response = await fetch(new URL(`../${file}`, import.meta.url), { cache: "no-cache" });
-        if (!response.ok) throw new Error("Could not load sign-in configuration.");
-        const settings = typeof response.text === "function"
-          ? parseSettings(await response.text()) : await response.json();
-        return settings.Firebase;
-      }));
-      const config = Object.assign({}, ...settings);
+      const config = configuredConfig || {};
       if (!["apiKey", "authDomain", "projectId", "appId"].every(
         key => typeof config[key] === "string" && config[key] && !config[key].startsWith("YOUR_"))) {
         throw new Error("Google sign-in has not been configured for this app yet.");
       }
       const { initializeApp } = await import(`${firebaseSdkBase}/firebase-app.js`);
-      const app = initializeApp(config);
-      window.firebaseApp = app;
-      return app;
+      return initializeApp(config);
     })();
     appPromise = pending;
     void pending.catch(() => {
