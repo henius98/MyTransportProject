@@ -1092,3 +1092,86 @@ test("clicking route callout pill invokes OnRouteSelected even for active route"
   activeMarker.listeners["gmp-click"]();
   assert.deepEqual(invocations, [["OnRouteSelected", 0]]);
 });
+
+test("clicking bus marker opens info window and invokes OnVehicleSelected once per open", async () => {
+  const createdMarkers = [];
+  const openedInfo = [];
+  let closedCount = 0;
+  class RecordingMarker {
+    constructor(opts) {
+      this.listeners = {};
+      Object.assign(this, opts);
+      createdMarkers.push(this);
+    }
+    addEventListener(type, fn) { this.listeners[type] = fn; }
+    removeEventListener() {}
+  }
+  class RecordingInfoWindow {
+    setContent(content) { this.lastContent = content; }
+    open({ anchor }) { openedInfo.push({ anchor, content: this.lastContent }); }
+    close() { closedCount++; }
+  }
+
+  const mock = createMockGoogleMaps();
+  const origImport = mock.maps.importLibrary;
+  mock.maps.importLibrary = async (lib) => {
+    if (lib === "maps") {
+      const m = await origImport(lib);
+      return { ...m, InfoWindow: RecordingInfoWindow };
+    }
+    if (lib === "marker") {
+      const m = await origImport(lib);
+      return { ...m, AdvancedMarkerElement: RecordingMarker };
+    }
+    return origImport(lib);
+  };
+
+  const makeNode = (tag) => ({
+    tag,
+    style: { setProperty() {}, removeProperty() {} },
+    classList: { toggle() {} },
+    children: [],
+    textContent: "",
+    setAttribute() {},
+    querySelector() { return null; },
+    replaceChildren(...items) { this.children = [...items]; },
+    append(...items) { this.children.push(...items); },
+    appendChild(item) { this.children.push(item); },
+    addEventListener() {},
+  });
+  const api = await loadMapModule(mock, {
+    createElement: makeNode,
+    createElementNS: makeNode,
+    getElementById: () => makeNode("div"),
+  });
+
+  const { invocations, dotNetHelper } = createDotNetRecorder();
+  await api.initGoogleMaps("map", 3.14, 101.69, 13, "test-api-key", dotNetHelper, "DARK", "Asia/Kuala_Lumpur");
+  createdMarkers.length = 0;
+
+  await api.syncMarkers([
+    {
+      providerName: "Rapid Bus KL",
+      transportType: "Bus",
+      routeId: "U4200",
+      routeShortName: "420",
+      vehicleId: "BUS-420",
+      lat: 3.14,
+      lng: 101.69,
+      speed: 5,
+      timestamp: 1794885820,
+    },
+  ]);
+
+  assert.equal(createdMarkers.length, 1);
+
+  // First click opens info window and requests the full route line.
+  createdMarkers[0].listeners["gmp-click"]();
+  assert.equal(openedInfo.length, 1);
+  assert.deepEqual(invocations, [["OnVehicleSelected", "Rapid Bus KL", "U4200", "420"]]);
+
+  // Second click closes info window without re-invoking OnVehicleSelected.
+  createdMarkers[0].listeners["gmp-click"]();
+  assert.equal(closedCount, 1);
+  assert.equal(invocations.length, 1);
+});

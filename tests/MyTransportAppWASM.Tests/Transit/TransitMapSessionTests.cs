@@ -263,4 +263,71 @@ public class TransitMapSessionTests
     Assert.Equal(-1, session.ActiveRouteId);
     Assert.Equal(2, session.GetDisplayedVehicles().Count);
   }
+
+  [Fact]
+  public async Task SelectVehicleRouteAsync_ResolvesRouteByIdOrName_AndUpdatesStaticSelection()
+  {
+    var staticData = new Mock<ITransportStaticDataService>();
+    staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
+      .ReturnsAsync([
+        new StaticRoute("U4200", "420"),
+        new StaticRoute("30000019", "401")
+      ]);
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "U4200", It.IsAny<CancellationToken>()))
+      .ReturnsAsync("""{"route":"U4200"}""");
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "30000019", It.IsAny<CancellationToken>()))
+      .ReturnsAsync("""{"route":"30000019"}""");
+
+    var noStaticProvider = new TransportProvider("Rapid Kuantan", "https://feed.test/kuantan", 3.8, 103.3, 40, "Bus");
+    var providers = new[]
+    {
+      noStaticProvider,
+      new TransportProvider("Rapid KL", "https://feed.test/kl", 3.139, 101.6869, 30, "Bus", StaticSource)
+    };
+
+    using var session = CreateSession(staticData: staticData, providers: providers);
+
+    // Provider without static data returns null without altering selection.
+    Assert.False(session.HasStaticDataForProvider("Rapid Kuantan"));
+    Assert.Null(await session.SelectVehicleRouteAsync("Rapid Kuantan", "K100"));
+    Assert.Equal(-1, session.SelectedStaticProviderIndex);
+
+    // Direct route_id match loads the full route GeoJSON and syncs static panel state.
+    Assert.True(session.HasStaticDataForProvider("Rapid KL"));
+    var geoJson = await session.SelectVehicleRouteAsync("Rapid KL", "U4200", "420");
+    Assert.Equal("""{"route":"U4200"}""", geoJson);
+    Assert.Equal(1, session.SelectedStaticProviderIndex);
+    Assert.Equal("U4200", session.SelectedStaticRouteId);
+    Assert.Equal(2, session.StaticRoutes.Count);
+    Assert.Equal("Select a stop on the map for departures.", session.StaticStatus);
+
+    // Feeds sending route_short_name in routeId (e.g. "401") resolve to the static route_id ("30000019").
+    var shortNameGeoJson = await session.SelectVehicleRouteAsync("Rapid KL", "401");
+    Assert.Equal("""{"route":"30000019"}""", shortNameGeoJson);
+    Assert.Equal("30000019", session.SelectedStaticRouteId);
+    staticData.Verify(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()), Times.Once);
+  }
+
+  [Fact]
+  public async Task SelectVehicleRouteAsync_IgnoresStaleCompletionAfterNewerSelection()
+  {
+    var staticData = new Mock<ITransportStaticDataService>();
+    var firstGate = new TaskCompletionSource<string>();
+    staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
+      .ReturnsAsync([new StaticRoute("R1", "Route 1"), new StaticRoute("R2", "Route 2")]);
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "R1", It.IsAny<CancellationToken>()))
+      .Returns(() => firstGate.Task);
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "R2", It.IsAny<CancellationToken>()))
+      .ReturnsAsync("""{"route":"R2"}""");
+
+    using var session = CreateSession(staticData: staticData);
+
+    var firstTask = session.SelectVehicleRouteAsync("Rapid KL", "R1");
+    var secondGeoJson = await session.SelectVehicleRouteAsync("Rapid KL", "R2");
+    firstGate.TrySetResult("""{"route":"R1"}""");
+
+    Assert.Equal("""{"route":"R2"}""", secondGeoJson);
+    Assert.Null(await firstTask);
+    Assert.Equal("R2", session.SelectedStaticRouteId);
+  }
 }

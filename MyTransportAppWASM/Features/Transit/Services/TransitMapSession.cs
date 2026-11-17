@@ -200,6 +200,9 @@ public sealed class TransitMapSession : IDisposable
     }
   }
 
+  public bool HasStaticDataForProvider(string? providerName) =>
+    FindStaticProviderIndex(providerName) >= 0;
+
   public async Task<string?> SelectStaticRouteAsync(string routeId, CancellationToken cancellationToken = default)
   {
     var providerSeq = Volatile.Read(ref _staticProviderSeq);
@@ -207,9 +210,52 @@ public sealed class TransitMapSession : IDisposable
     Interlocked.Increment(ref _staticStopSeq);
 
     SelectedStaticRouteId = routeId;
-    StaticDepartures = [];
-    SelectedStaticStopId = string.Empty;
-    StaticStopName = string.Empty;
+    ClearStaticStopSelection();
+
+    var source = SelectedStaticData;
+    if (source == null)
+    {
+      StaticStatus = string.Empty;
+      return null;
+    }
+
+    return await LoadStaticRouteMapAsync(source, routeId, providerSeq, routeSeq, cancellationToken);
+  }
+
+  public async Task<string?> SelectVehicleRouteAsync(
+    string? providerName,
+    string? routeId,
+    string? routeShortName = null,
+    CancellationToken cancellationToken = default)
+  {
+    var providerIndex = FindStaticProviderIndex(providerName);
+    if (providerIndex < 0) return null;
+
+    var candidateId = routeId?.Trim();
+    var candidateShortName = routeShortName?.Trim();
+    if (string.IsNullOrEmpty(candidateId) && string.IsNullOrEmpty(candidateShortName)) return null;
+
+    int providerSeq;
+    int routeSeq;
+    if (SelectedStaticProviderIndex != providerIndex || StaticRoutes.Count == 0)
+    {
+      providerSeq = Interlocked.Increment(ref _staticProviderSeq);
+      routeSeq = Interlocked.Increment(ref _staticRouteSeq);
+      Interlocked.Increment(ref _staticStopSeq);
+
+      SelectedStaticProviderIndex = providerIndex;
+      SelectedStaticRouteId = string.Empty;
+      StaticRoutes = [];
+      ClearStaticStopSelection();
+    }
+    else
+    {
+      providerSeq = Volatile.Read(ref _staticProviderSeq);
+      routeSeq = Interlocked.Increment(ref _staticRouteSeq);
+      Interlocked.Increment(ref _staticStopSeq);
+
+      ClearStaticStopSelection();
+    }
 
     var source = SelectedStaticData;
     if (source == null)
@@ -221,8 +267,48 @@ public sealed class TransitMapSession : IDisposable
     StaticStatus = "Loading route map...";
     try
     {
+      if (StaticRoutes.Count == 0)
+      {
+        var routes = await _staticData.GetRoutesAsync(source, cancellationToken);
+        if (IsStaleStaticRouteSelection(providerSeq, routeSeq)) return null;
+        StaticRoutes = routes;
+      }
+
+      var resolvedRouteId = ResolveStaticRouteId(StaticRoutes, candidateId, candidateShortName);
+      if (string.IsNullOrEmpty(resolvedRouteId))
+      {
+        StaticStatus = "Static route map unavailable.";
+        return null;
+      }
+
+      SelectedStaticRouteId = resolvedRouteId;
+      return await LoadStaticRouteMapAsync(source, resolvedRouteId, providerSeq, routeSeq, cancellationToken);
+    }
+    catch (OperationCanceledException)
+    {
+      return null;
+    }
+    catch (Exception ex)
+    {
+      if (IsStaleStaticRouteSelection(providerSeq, routeSeq)) return null;
+      StaticStatus = "Static route map unavailable.";
+      _logger.LogWarning("Static route map failed: {Message}", ex.Message);
+      return null;
+    }
+  }
+
+  private async Task<string?> LoadStaticRouteMapAsync(
+    TransportStaticData source,
+    string routeId,
+    int providerSeq,
+    int routeSeq,
+    CancellationToken cancellationToken)
+  {
+    StaticStatus = "Loading route map...";
+    try
+    {
       var geoJson = await _staticData.GetMapAsync(source, routeId, cancellationToken);
-      if (_disposed || providerSeq != Volatile.Read(ref _staticProviderSeq) || routeSeq != Volatile.Read(ref _staticRouteSeq)) return null;
+      if (IsStaleStaticRouteSelection(providerSeq, routeSeq)) return null;
       StaticStatus = "Select a stop on the map for departures.";
       return geoJson;
     }
@@ -232,12 +318,60 @@ public sealed class TransitMapSession : IDisposable
     }
     catch (Exception ex)
     {
-      if (_disposed || providerSeq != Volatile.Read(ref _staticProviderSeq) || routeSeq != Volatile.Read(ref _staticRouteSeq)) return null;
+      if (IsStaleStaticRouteSelection(providerSeq, routeSeq)) return null;
       StaticStatus = "Static route map unavailable.";
       _logger.LogWarning("Static route map failed: {Message}", ex.Message);
       return null;
     }
   }
+
+  private int FindStaticProviderIndex(string? providerName)
+  {
+    if (_disposed || string.IsNullOrWhiteSpace(providerName)) return -1;
+    var trimmed = providerName.Trim();
+    for (var i = 0; i < Providers.Count; i++)
+    {
+      if (Providers[i].HasStaticData &&
+          string.Equals(Providers[i].Name, trimmed, StringComparison.OrdinalIgnoreCase))
+      {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  private static string? ResolveStaticRouteId(
+    IReadOnlyList<StaticRoute> routes,
+    string? routeId,
+    string? routeShortName)
+  {
+    if (!string.IsNullOrEmpty(routeId))
+    {
+      var byId = routes.FirstOrDefault(r => string.Equals(r.Id?.Trim(), routeId, StringComparison.OrdinalIgnoreCase));
+      if (byId != null) return byId.Id;
+
+      var byName = routes.FirstOrDefault(r => string.Equals(r.Name?.Trim(), routeId, StringComparison.OrdinalIgnoreCase));
+      if (byName != null) return byName.Id;
+    }
+
+    if (!string.IsNullOrEmpty(routeShortName))
+    {
+      var byShortName = routes.FirstOrDefault(r => string.Equals(r.Name?.Trim(), routeShortName, StringComparison.OrdinalIgnoreCase));
+      if (byShortName != null) return byShortName.Id;
+    }
+
+    return !string.IsNullOrEmpty(routeId) ? routeId : null;
+  }
+
+  private void ClearStaticStopSelection()
+  {
+    StaticDepartures = [];
+    SelectedStaticStopId = string.Empty;
+    StaticStopName = string.Empty;
+  }
+
+  private bool IsStaleStaticRouteSelection(int providerSeq, int routeSeq) =>
+    _disposed || providerSeq != Volatile.Read(ref _staticProviderSeq) || routeSeq != Volatile.Read(ref _staticRouteSeq);
 
   public async Task<bool> LoadStaticDeparturesAsync(string stopId, string stopName, CancellationToken cancellationToken = default)
   {

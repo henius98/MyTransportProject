@@ -119,6 +119,14 @@ public partial class Map : IAsyncDisposable
   }
 
   [JSInvokable]
+  public async Task OnVehicleSelected(string providerName, string routeId, string routeShortName)
+  {
+    if (_isDisposed || !Session.HasStaticDataForProvider(providerName)) return;
+    await UpdateStaticOverlayAsync(() => Session.SelectVehicleRouteAsync(providerName, routeId, routeShortName, _cts.Token));
+    if (!_isDisposed) StateHasChanged();
+  }
+
+  [JSInvokable]
   public async Task OnStaticStopSelected(string stopId, string stopName)
   {
     if (_isDisposed) return;
