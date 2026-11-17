@@ -1,4 +1,4 @@
-/* Manifest version: csyMHejR */
+/* Manifest version: 1AIwFhBX */
 // Caution! Be sure you understand the caveats before publishing an application with
 // offline support. See https://aka.ms/blazor-offline-considerations
 
@@ -36,7 +36,12 @@ async function onInstall(event) {
   const assetsRequests = self.assetsManifest.assets
     .filter(asset => offlineAssetsInclude.some(pattern => pattern.test(asset.url)))
     .filter(asset => !offlineAssetsExclude.some(pattern => pattern.test(asset.url)))
-    .map(asset => new Request(asset.url, { integrity: asset.hash, cache: 'no-cache' }));
+    .map(asset => new Request(asset.url, {
+      integrity: asset.hash,
+      cache: asset.url.startsWith('_framework/') && !/^_framework\/(blazor\.webassembly|dotnet)\.js$/.test(asset.url)
+        ? 'force-cache'
+        : 'no-cache'
+    }));
   await caches.open(cacheName).then(cache => cache.addAll(assetsRequests));
 }
 

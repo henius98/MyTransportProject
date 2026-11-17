@@ -104,16 +104,25 @@ export async function status(uid) {
           const old = localStorage.getItem("push-token");
           const oldUid = localStorage.getItem("push-uid");
           if (old !== token || oldUid !== uid) {
-            await updateRegistration(uid, "add", token);
+            try {
+              await updateRegistration(uid, "add", token);
+            } catch (error) {
+              console.warn("Could not refresh push registration:", error.message);
+              return "disabled";
+            }
             if (old && old !== token)
               await updateRegistration(uid, "remove", old);
             localStorage.setItem("push-token", token);
             localStorage.setItem("push-uid", uid);
           }
           await listenInForeground(current);
+        } else if (localStorage.getItem("push-uid") !== uid) {
+          return "disabled";
         }
       } catch (error) {
         console.warn("Could not refresh push registration:", error.message);
+        if (!localStorage.getItem("push-token") || localStorage.getItem("push-uid") !== uid)
+          return "disabled";
       }
     }
     return "enabled";
@@ -142,11 +151,30 @@ export async function enable(uid) {
     });
     if (!token)
       throw new Error("This device could not subscribe to push notifications.");
-    await updateRegistration(uid, "add", token);
+    try {
+      await updateRegistration(uid, "add", token);
+    } catch (error) {
+      await rollbackSubscription(sdk, messaging, registration);
+      throw error;
+    }
     localStorage.setItem("push-token", token);
     localStorage.setItem("push-uid", uid);
     await listenInForeground(registration);
     return true;
+}
+
+async function rollbackSubscription(sdk, messaging, registration) {
+  try {
+    if (await sdk.deleteToken(messaging)) return;
+  } catch {
+    // Fall through to PushSubscription.unsubscribe()
+  }
+  try {
+    const subscription = await registration?.pushManager?.getSubscription();
+    if (subscription) await subscription.unsubscribe();
+  } catch {
+    // Best-effort cleanup; preserve original enable() error
+  }
 }
 
 export async function disable(uid) {

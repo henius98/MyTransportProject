@@ -10,6 +10,8 @@
   "DisableNotifications": "Matikan pemberitahuan",
   "NotificationsDenied": "Benarkan pemberitahuan untuk laman ini dalam tetapan pelayar.",
   "NotificationsUnsupported": "Pemberitahuan memerlukan HTTPS dan pelayar yang menyokongnya.",
+  "EnableNotificationsFailed": "Tidak dapat menghidupkan pemberitahuan. Sila cuba lagi.",
+  "DisableNotificationsFailed": "Tidak dapat mematikan pemberitahuan. Sila cuba lagi.",
   "Home": "Laman Utama",
   "Calendar": "Kalendar",
   "Tasks": "Tugasan",

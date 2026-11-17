@@ -10,6 +10,8 @@
   "DisableNotifications": "Disable notifications",
   "NotificationsDenied": "Allow notifications for this site in your browser settings.",
   "NotificationsUnsupported": "Notifications require HTTPS and a supported browser.",
+  "EnableNotificationsFailed": "Could not enable notifications. Please try again.",
+  "DisableNotificationsFailed": "Could not disable notifications. Please try again.",
   "Home": "Home",
   "Calendar": "Calendar",
   "Tasks": "Tasks",
