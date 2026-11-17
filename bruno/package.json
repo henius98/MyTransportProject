@@ -1,0 +1,9 @@
+{
+  "name": "my-transport-app-wasm-bruno",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Bruno API collection dependencies for MyTransportAppWASM",
+  "dependencies": {
+    "gtfs-realtime-bindings": "^2.2.0"
+  }
+}

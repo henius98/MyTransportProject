@@ -1,0 +1,91 @@
+meta {
+  name: 01 Transit - GTFS Realtime
+}
+
+script:post-response {
+  if (res.getStatus() === 200) {
+    const raw =
+      typeof res.getDataBuffer === 'function'
+        ? res.getDataBuffer()
+        : typeof res.dataBuffer === 'string'
+          ? Buffer.from(res.dataBuffer, 'base64')
+          : Buffer.isBuffer(res.dataBuffer)
+            ? res.dataBuffer
+            : Buffer.isBuffer(res.getBody())
+              ? res.getBody()
+              : null;
+
+    if (!raw) {
+      console.warn('GTFS decode skipped: raw binary buffer is unavailable on res.');
+    } else {
+      const GtfsRealtimeBindings = require('gtfs-realtime-bindings');
+      const bytes = Buffer.isBuffer(raw) ? raw : new Uint8Array(raw);
+      const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(bytes);
+      const decoded = GtfsRealtimeBindings.transit_realtime.FeedMessage.toObject(feed, {
+        longs: String,
+        enums: String,
+        bytes: String
+      });
+
+      res.setBody(decoded);
+
+      if (typeof bru.visualize === 'function') {
+        const esc = (v) =>
+          String(v ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+
+        const entities = decoded.entity || [];
+        const rows = entities
+          .map((e) => {
+            const vp = e.vehicle || {};
+            const pos = vp.position || {};
+            const trip = vp.trip || {};
+            const veh = vp.vehicle || {};
+            return `<tr>
+              <td>${esc(veh.id || veh.label || e.id)}</td>
+              <td>${esc(trip.routeId)}</td>
+              <td>${esc(trip.tripId)}</td>
+              <td>${esc(pos.latitude)}</td>
+              <td>${esc(pos.longitude)}</td>
+              <td>${esc(pos.bearing)}</td>
+              <td>${esc(pos.speed)}</td>
+              <td>${esc(vp.timestamp)}</td>
+            </tr>`;
+          })
+          .join('');
+
+        const html = `<!doctype html>
+<html>
+<head>
+<style>
+  body { font-family: system-ui, sans-serif; font-size: 13px; margin: 12px; color: #e2e8f0; background: #0f172a; }
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+  th, td { border: 1px solid #334155; padding: 6px 8px; text-align: left; }
+  th { background: #1e293b; }
+  pre { background: #1e293b; padding: 10px; overflow: auto; max-height: 400px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <p><strong>GTFS-RT v${esc(decoded.header?.gtfsRealtimeVersion)}</strong> | Vehicles: ${entities.length} | Timestamp: ${esc(decoded.header?.timestamp)}</p>
+  <table>
+    <thead><tr><th>Vehicle</th><th>Route</th><th>Trip</th><th>Lat</th><th>Lng</th><th>Bearing</th><th>Speed</th><th>Timestamp</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <details open>
+    <summary>Decoded JSON</summary>
+    <pre>${esc(JSON.stringify(decoded, null, 2))}</pre>
+  </details>
+</body>
+</html>`;
+
+        bru.visualize('html', {
+          name: 'GTFS Realtime',
+          content: html
+        });
+      }
+    }
+  }
+}

@@ -2,7 +2,7 @@
 
 Open this `bruno/` directory as a collection in Bruno, then select the **Example** environment. Requests mirror the outbound calls in `MyTransportAppWASM` and `scripts/fetch_rc_data.py`. Application configuration and source code remain the authority for active URLs and request shapes.
 
-Edit the example coordinates, location ID, dates, calendar and task IDs before sending requests. GTFS responses are binary Protocol Buffers; download the response to inspect it with a GTFS Realtime decoder. The example environment has no credentials. Set `google_maps_api_key`, `google_workspace_access_token`, `bazi_api_key`, and `firebase_id_token` as Bruno secret variables only when needed. Do not save live tokens in tracked collection files.
+Edit the example coordinates, location ID, dates, calendar and task IDs before sending requests. GTFS responses are binary Protocol Buffers; `01 Transit - GTFS Realtime/folder.bru` decodes them into JSON and an HTML vehicle table via `gtfs-realtime-bindings`. Run `npm install` inside `bruno/` and enable Bruno **Developer Mode** (or `--sandbox=developer` for Bruno CLI v3+) so `require('gtfs-realtime-bindings')` loads. The example environment has no credentials. Set `google_maps_api_key`, `google_workspace_access_token`, `bazi_api_key`, and `firebase_id_token` as Bruno secret variables only when needed. Do not save live tokens in tracked collection files.
 
 | Folder | Requests | Setup |
 | --- | --- | --- |
