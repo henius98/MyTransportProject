@@ -1,0 +1,38 @@
+<div class="card h-100">
+  <div class="d-flex align-items-center justify-content-between mb-3 border-bottom border-secondary border-opacity-10 pb-3">
+    <div>
+      <h3 class="m-0 fw-semibold" style="font-size: 1.15rem; letter-spacing: -0.01em;">@ResolvedTitle</h3>
+      <a class="text-dim mt-1 d-inline-block" style="font-size: 0.75rem;" href="@($"https://{ResolvedSourceDomain}")"
+         target="_blank" rel="noopener noreferrer">
+        <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>@ResolvedSourceDomain
+      </a>
+    </div>
+    <WeatherStatusBadge Status="@(Result?.Status ?? "Loading")" ProviderName="@ResolvedTitle"
+                        IsCached="@(Result?.IsCached == true)" IsRefreshing="IsRefreshing" OnRefresh="OnRefresh" />
+  </div>
+
+  @if (IsRefreshing)
+  {
+    <div class="d-flex justify-content-center p-4">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+    </div>
+  }
+  else
+  {
+    @ChildContent
+  }
+</div>
+
+@code {
+  [Parameter] public string DefaultTitle { get; set; } = string.Empty;
+  [Parameter] public string DefaultSource { get; set; } = string.Empty;
+  [Parameter] public WeatherProviderResult? Result { get; set; }
+  [Parameter] public bool IsRefreshing { get; set; }
+  [Parameter] public EventCallback OnRefresh { get; set; }
+  [Parameter] public RenderFragment? ChildContent { get; set; }
+
+  private string ResolvedTitle => string.IsNullOrWhiteSpace(Result?.Provider) ? DefaultTitle : Result.Provider;
+  private string ResolvedSourceDomain => string.IsNullOrWhiteSpace(Result?.Source) ? DefaultSource : Result.Source;
+}

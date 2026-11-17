@@ -1,21 +1,24 @@
 using System.Globalization;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace MyTransportAppWASM.Features.Transit.Services;
 
 public sealed class TransitTrackingService : ITransitTrackingService, IDisposable
 {
   private readonly IGtfsService _gtfsService;
-  private readonly ILiveRoutingService _liveRoutingService;
   private readonly IBaziFlowService _baziFlowService;
+  private readonly ITransportStaticDataService? _staticDataService;
   private readonly IReadOnlyList<TransportProvider> _transportProviders;
   private readonly TransitRefreshCoordinator _transitRefresh;
   private readonly SemaphoreSlim _refreshLock = new(1, 1);
   private readonly IMemoryCache? _cache;
   private readonly ILogger<TransitTrackingService> _logger;
+  private readonly Dictionary<string, IReadOnlyDictionary<string, string>> _providerRouteMaps = new(StringComparer.OrdinalIgnoreCase);
+  private readonly Dictionary<string, DateTimeOffset> _staticRouteRetryAfter = new(StringComparer.OrdinalIgnoreCase);
+  private readonly HashSet<string> _routeMapCacheKeys = new(StringComparer.Ordinal);
   private bool _disposed;
   private FortuneData? _cachedFortune;
   private string? _cachedFortuneDate;
@@ -30,38 +33,38 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
   [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
   public TransitTrackingService(
     IGtfsService gtfsService,
-    ILiveRoutingService liveRoutingService,
     IBaziFlowService baziFlowService,
-    IConfiguration config,
+    IOptions<TransitOptions> transitOptions,
     IMemoryCache? cache = null,
-    ILogger<TransitTrackingService>? logger = null)
+    ILogger<TransitTrackingService>? logger = null,
+    ITransportStaticDataService? staticDataService = null)
     : this(
         gtfsService,
-        liveRoutingService,
         baziFlowService,
-        config.GetSection("TransportProviders").Get<List<TransportProvider>>() ?? [],
-        Math.Max(5, config.GetValue("TransitPolling:IntervalSeconds", 15)),
-        Math.Max(5, config.GetValue("TransitPolling:MaximumBackoffSeconds", 120)),
-        Math.Max(5, config.GetValue("TransitPolling:MaximumSnapshotAgeSeconds", 120)),
+        transitOptions.Value.Providers,
+        transitOptions.Value.Polling.IntervalSeconds,
+        transitOptions.Value.Polling.MaximumBackoffSeconds,
+        transitOptions.Value.Polling.MaximumSnapshotAgeSeconds,
         cache,
-        logger)
+        logger,
+        staticDataService)
   {
   }
 
   public TransitTrackingService(
     IGtfsService gtfsService,
-    ILiveRoutingService liveRoutingService,
     IBaziFlowService baziFlowService,
     IReadOnlyList<TransportProvider> transportProviders,
     int intervalSeconds = 15,
     int maximumBackoffSeconds = 120,
     int maximumSnapshotAgeSeconds = 120,
     IMemoryCache? cache = null,
-    ILogger<TransitTrackingService>? logger = null)
+    ILogger<TransitTrackingService>? logger = null,
+    ITransportStaticDataService? staticDataService = null)
   {
     _gtfsService = gtfsService;
-    _liveRoutingService = liveRoutingService;
     _baziFlowService = baziFlowService;
+    _staticDataService = staticDataService;
     _transportProviders = transportProviders;
     _cache = cache;
     _logger = logger ?? NullLogger<TransitTrackingService>.Instance;
@@ -107,16 +110,25 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
         refreshStartedAt,
         force);
 
-      var refreshResults = await Task.WhenAll(
+      var vehicleRefreshTask = Task.WhenAll(
         providersToRefresh.Select(provider => FetchProviderVehiclesAsync(
           provider,
           _transitRefresh.HasUsableSnapshot(provider.Endpoint, refreshStartedAt),
           cancellationToken)));
+      var routeMapRefreshTask = RefreshMissingRouteMapsAsync(
+        nearbyProviders,
+        refreshStartedAt,
+        cancellationToken);
+
+      await Task.WhenAll(vehicleRefreshTask, routeMapRefreshTask);
+      var refreshResults = await vehicleRefreshTask;
 
       var outcome = _transitRefresh.ApplyResults(
         nearbyProviders,
         refreshResults,
         DateTimeOffset.UtcNow);
+
+      ApplyRouteShortNames(outcome.Vehicles, nearbyProviders);
 
       _cachedVehicles = outcome.Vehicles;
       if (_cache != null)
@@ -159,7 +171,7 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
     List<GoogleRoute> googleRoutes,
     CancellationToken cancellationToken = default)
   {
-    var enriched = _liveRoutingService.EnrichRoutes(googleRoutes, _cachedVehicles);
+    var enriched = LiveRouting.EnrichRoutes(googleRoutes, _cachedVehicles);
 
     try
     {
@@ -228,6 +240,16 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
     }
     _cachedFortuneDate = null;
     _cache?.Remove("transit_cached_vehicles");
+    _providerRouteMaps.Clear();
+    _staticRouteRetryAfter.Clear();
+    if (_cache != null)
+    {
+      foreach (var cacheKey in _routeMapCacheKeys)
+      {
+        _cache.Remove(cacheKey);
+      }
+    }
+    _routeMapCacheKeys.Clear();
   }
 
   public void Dispose()
@@ -273,6 +295,148 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
       ProviderVehicleRefreshStatus.Updated,
       vehicles);
   }
+
+  private async Task RefreshMissingRouteMapsAsync(
+    IReadOnlyList<TransportProvider> nearbyProviders,
+    DateTimeOffset now,
+    CancellationToken cancellationToken)
+  {
+    if (_staticDataService == null) return;
+
+    var providersToFetch = new List<TransportProvider>();
+    var queuedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var provider in nearbyProviders)
+    {
+      if (!provider.HasStaticData) continue;
+
+      var key = GetRouteMapKey(provider);
+      if (!queuedKeys.Add(key) || TryGetCachedRouteMap(key, out _)) continue;
+      if (_staticRouteRetryAfter.TryGetValue(key, out var retryAt) && now < retryAt) continue;
+
+      providersToFetch.Add(provider);
+    }
+
+    if (providersToFetch.Count == 0) return;
+
+    var results = await Task.WhenAll(
+      providersToFetch.Select(provider => FetchProviderRouteMapAsync(provider, cancellationToken)));
+
+    foreach (var (provider, map) in results)
+    {
+      var key = GetRouteMapKey(provider);
+      if (map != null)
+      {
+        _providerRouteMaps[key] = map;
+        _staticRouteRetryAfter.Remove(key);
+        if (_cache != null)
+        {
+          var cacheKey = GetRouteMapCacheKey(key);
+          _routeMapCacheKeys.Add(cacheKey);
+          _cache.Set(cacheKey, map, new MemoryCacheEntryOptions
+          {
+            Size = 1,
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24)
+          });
+        }
+      }
+      else
+      {
+        _staticRouteRetryAfter[key] = now.AddMinutes(1);
+      }
+    }
+  }
+
+  private async Task<(TransportProvider Provider, IReadOnlyDictionary<string, string>? Map)> FetchProviderRouteMapAsync(
+    TransportProvider provider,
+    CancellationToken cancellationToken)
+  {
+    try
+    {
+      var routes = await _staticDataService!.GetRoutesAsync(provider.StaticData!, cancellationToken);
+      var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+      foreach (var route in routes)
+      {
+        var id = route.Id?.Trim();
+        var name = route.Name?.Trim();
+        if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(name))
+        {
+          map[id] = name;
+        }
+      }
+
+      return (provider, map);
+    }
+    catch (OperationCanceledException)
+    {
+      throw;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug("Static route lookup failed for {Provider}: {Message}", provider.Name, ex.Message);
+      return (provider, null);
+    }
+  }
+
+  private void ApplyRouteShortNames(
+    List<BusLocation> vehicles,
+    IReadOnlyList<TransportProvider> nearbyProviders)
+  {
+    if (vehicles.Count == 0) return;
+
+    var routeMapsByProvider = new Dictionary<string, IReadOnlyDictionary<string, string>>(StringComparer.Ordinal);
+    foreach (var provider in nearbyProviders)
+    {
+      if (provider.HasStaticData && TryGetCachedRouteMap(GetRouteMapKey(provider), out var map))
+      {
+        routeMapsByProvider[provider.Name] = map;
+      }
+    }
+
+    if (routeMapsByProvider.Count == 0) return;
+
+    foreach (var vehicle in vehicles)
+    {
+      if (!string.IsNullOrWhiteSpace(vehicle.RouteShortName) ||
+          string.IsNullOrWhiteSpace(vehicle.RouteId) ||
+          string.IsNullOrWhiteSpace(vehicle.ProviderName))
+      {
+        continue;
+      }
+
+      if (routeMapsByProvider.TryGetValue(vehicle.ProviderName, out var routeMap) &&
+          routeMap.TryGetValue(vehicle.RouteId.Trim(), out var shortName))
+      {
+        vehicle.RouteShortName = shortName;
+      }
+    }
+  }
+
+  private bool TryGetCachedRouteMap(string key, out IReadOnlyDictionary<string, string> map)
+  {
+    if (_providerRouteMaps.TryGetValue(key, out map!))
+    {
+      return true;
+    }
+
+    var cacheKey = GetRouteMapCacheKey(key);
+    if (_cache != null &&
+        _cache.TryGetValue(cacheKey, out IReadOnlyDictionary<string, string>? cached) &&
+        cached != null)
+    {
+      _providerRouteMaps[key] = cached;
+      map = cached;
+      return true;
+    }
+
+    map = null!;
+    return false;
+  }
+
+  private static string GetRouteMapKey(TransportProvider provider) =>
+    provider.StaticData!.BaseUrl.Trim();
+
+  private static string GetRouteMapCacheKey(string key) =>
+    $"transit_static_routes_{key}";
 
   private string BuildTransitStatus(TransitRefreshOutcome outcome, int nearbyProviderCount)
   {

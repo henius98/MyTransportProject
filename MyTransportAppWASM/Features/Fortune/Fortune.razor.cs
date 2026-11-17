@@ -1,4 +1,3 @@
-using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using Microsoft.AspNetCore.Components;
 
@@ -13,6 +12,10 @@ namespace MyTransportAppWASM.Features.Fortune
         private bool isSaving = false;
         private bool hasApiKey = false;
         private string? errorMessage = null;
+        private string? apiKeyError = null;
+        private string? birthDateError = null;
+        private string? birthHourError = null;
+        private string? birthMinuteError = null;
         private bool _disposed;
         private readonly CancellationTokenSource _cts = new();
         
@@ -76,6 +79,11 @@ namespace MyTransportAppWASM.Features.Fortune
         private async Task HandleSetupSubmit()
         {
             errorMessage = null;
+            if (!ValidateSetupModel())
+            {
+                return;
+            }
+
             isSaving = true;
 
             try
@@ -124,6 +132,15 @@ namespace MyTransportAppWASM.Features.Fortune
             }
         }
 
+        private bool ValidateSetupModel()
+        {
+            apiKeyError = string.IsNullOrWhiteSpace(setupModel.ApiKey) ? "API Key is required" : null;
+            birthDateError = string.IsNullOrWhiteSpace(setupModel.BirthDate) ? "Birth Date is required" : null;
+            birthHourError = setupModel.BirthHour is < 0 or > 23 ? "Birth Hour must be between 0 and 23" : null;
+            birthMinuteError = setupModel.BirthMinute is < 0 or > 59 ? "Birth Minute must be between 0 and 59" : null;
+            return apiKeyError is null && birthDateError is null && birthHourError is null && birthMinuteError is null;
+        }
+
         public void Dispose()
         {
             _disposed = true;
@@ -133,14 +150,10 @@ namespace MyTransportAppWASM.Features.Fortune
 
         public class SetupModel
         {
-            [Required(ErrorMessage = "API Key is required")]
             public string ApiKey { get; set; } = string.Empty;
             public int Gender { get; set; } = 1;
-            [Required(ErrorMessage = "Birth Date is required")]
             public string BirthDate { get; set; } = MalaysiaTime.Now.AddYears(-30).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-            [Range(0, 23, ErrorMessage = "Birth Hour must be between 0 and 23")]
             public int BirthHour { get; set; } = 12;
-            [Range(0, 59, ErrorMessage = "Birth Minute must be between 0 and 59")]
             public int BirthMinute { get; set; } = 0;
         }
     }

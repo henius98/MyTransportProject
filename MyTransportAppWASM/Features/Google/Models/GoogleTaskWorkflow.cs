@@ -55,7 +55,7 @@ public static class GoogleTaskWorkflow
         foreach (var extension in extensions.Values.ToArray())
         {
             extension.DependsOn.RemoveAll(reference => deletedKeys.Contains(Key(reference)));
-            if (extension.DependsOn.Count == 0 && extension.EstimatedMinutes == null && extension.StartedAt == null)
+            if (extension.IsEmpty)
             {
                 extensions.Remove(Key(extension.TaskListId, extension.TaskId));
             }

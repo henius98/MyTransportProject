@@ -7,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Moq;
 
 namespace MyTransportAppWASM.Tests;
 
@@ -103,13 +104,6 @@ public class MetMalaysiaWeatherCardTests
             var component = await renderer.RenderComponentAsync<MetMalaysiaWeatherCard>(
                 ParameterView.FromDictionary(new Dictionary<string, object?>
                 {
-                    [nameof(MetMalaysiaWeatherCard.Options)] = new MetMalaysiaWeatherProviderOptions
-                    {
-                        Enabled = true,
-                        Name = "MetMalaysia",
-                        BaseUrl = BaseUrl,
-                        Endpoints = EndpointTemplate
-                    },
                     [nameof(MetMalaysiaWeatherCard.Result)] = result
                 }));
             return component.ToHtmlString();
@@ -117,6 +111,57 @@ public class MetMalaysiaWeatherCardTests
 
         Assert.Contains("Tiada hujan", html);
         Assert.Contains("Pagi", html);
+    }
+
+    [Fact]
+    public async Task UnifiedWeatherCard_RendersAllThreeProviderCardsViaSharedShell()
+    {
+        await using var services = new ServiceCollection()
+            .AddLogging()
+            .AddSingleton(new Mock<IWeatherPlannerService>().Object)
+            .AddSingleton(new Mock<Microsoft.JSInterop.IJSRuntime>().Object)
+            .AddCascadingValue(_ => new LanguageService(new HttpClient()))
+            .BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+
+        var met = new WeatherProviderResult
+        {
+            Provider = "MetMalaysia",
+            Source = "data.gov.my",
+            Status = "LIVE",
+            Periods = [new WeatherTimeSlice { Label = "Pagi", Time = DateTimeOffset.UtcNow, Summary = "Tiada hujan" }]
+        };
+        var openMeteo = new WeatherProviderResult
+        {
+            Provider = "Open-Meteo",
+            Source = "open-meteo.com",
+            Status = "FORECAST",
+            Periods = [new WeatherTimeSlice { Time = DateTimeOffset.UtcNow, TemperatureC = 31, Summary = "Clear sky" }]
+        };
+        var nea = new WeatherProviderResult
+        {
+            Provider = "Singapore NEA",
+            Source = "data.gov.sg",
+            Status = "TODAY",
+            Periods = [new WeatherTimeSlice { Time = DateTimeOffset.UtcNow, Summary = "Fair" }]
+        };
+
+        foreach (var providerResult in new[] { met, openMeteo, nea })
+        {
+            var html = await renderer.Dispatcher.InvokeAsync(async () =>
+            {
+                var component = await renderer.RenderComponentAsync<WeatherCard>(
+                    ParameterView.FromDictionary(new Dictionary<string, object?>
+                    {
+                        [nameof(WeatherCard.Result)] = providerResult,
+                        [nameof(WeatherCard.IsOutlook)] = providerResult.Provider == "Open-Meteo"
+                    }));
+                return component.ToHtmlString();
+            });
+
+            Assert.Contains(providerResult.Provider, html);
+            Assert.Contains(providerResult.Source, html);
+        }
     }
 
     private static async Task<Uri> RequestAndCaptureEndpointAsync(bool fetchOutlook, WeatherQuery query)

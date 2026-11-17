@@ -5,12 +5,14 @@ namespace MyTransportAppWASM.Features.Google.Services;
 
 public sealed class GoogleWorkspaceService : IGoogleWorkspaceService, IAsyncDisposable
 {
-    private readonly IJSRuntime _jsRuntime;
-    private Task<IJSObjectReference>? _moduleTask;
+    private readonly JsModuleLoader _module;
 
-    public GoogleWorkspaceService(IJSRuntime jsRuntime)
+    public GoogleWorkspaceService(IJSRuntime jsRuntime, FirebaseClientService? firebaseClient = null)
     {
-        _jsRuntime = jsRuntime;
+        _module = new JsModuleLoader(
+            jsRuntime,
+            "./js/google-services.js",
+            firebaseClient is null ? null : firebaseClient.EnsureConfiguredAsync);
     }
 
     public Task ConnectAsync(string uid, string service) =>
@@ -55,66 +57,20 @@ public sealed class GoogleWorkspaceService : IGoogleWorkspaceService, IAsyncDisp
     public Task DeleteTaskExtensionsAsync(string uid, GoogleTaskReference[] deleted) =>
         InvokeVoidAsync("deleteTaskExtensions", uid, deleted);
 
-    private readonly SemaphoreSlim _moduleLock = new(1, 1);
-
-    private async Task<IJSObjectReference> GetModuleAsync()
-    {
-        if (_moduleTask is { IsCompletedSuccessfully: true })
-            return await _moduleTask;
-
-        await _moduleLock.WaitAsync();
-        try
-        {
-            if (_moduleTask is null || _moduleTask.IsFaulted || _moduleTask.IsCanceled)
-                _moduleTask = LoadModuleAsync();
-
-            return await _moduleTask;
-        }
-        finally
-        {
-            _moduleLock.Release();
-        }
-    }
-
-    private async Task<IJSObjectReference> LoadModuleAsync()
-    {
-        return await _jsRuntime.InvokeAsync<IJSObjectReference>("import", "./js/google-services.js");
-    }
-
     private async Task<T> InvokeAsync<
         [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors |
             DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
         string identifier, params object?[] args)
     {
-        var module = await GetModuleAsync();
+        var module = await _module.GetAsync();
         return await module.InvokeAsync<T>(identifier, args);
     }
 
     private async Task InvokeVoidAsync(string identifier, params object?[] args)
     {
-        var module = await GetModuleAsync();
+        var module = await _module.GetAsync();
         await module.InvokeVoidAsync(identifier, args);
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        if (_moduleTask is not null)
-        {
-            try
-            {
-                var module = await _moduleTask;
-                await module.DisposeAsync();
-            }
-            catch (JSException)
-            {
-                // Loading may have failed while offline, or the browser may be closing.
-            }
-            catch (JSDisconnectedException)
-            {
-                // Normal during browser teardown.
-            }
-        }
-
-        _moduleLock.Dispose();
-    }
+    public ValueTask DisposeAsync() => _module.DisposeAsync();
 }

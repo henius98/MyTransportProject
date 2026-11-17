@@ -372,3 +372,4 @@ functions/.secret.local
 # Local testing secrets and variables
 .secrets
 .vars
+bruno/01 Transit - GTFS Realtime/output/

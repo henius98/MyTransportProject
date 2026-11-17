@@ -1,21 +1,21 @@
 @inject IUserSettingsService UserSettings
 
-<div class="d-flex align-items-center justify-content-between w-100 p-0 m-0">
+<div class="lang-switcher">
     <div class="d-flex align-items-center">
         <span class="bi bi-translate me-2" aria-hidden="true"></span>
-        <span style="font-size: 0.85rem;">@CurrentOption.NativeLabel</span>
+        <span class="switch-group__label">@CurrentOption.NativeLabel</span>
     </div>
 
-    <div class="btn-group" style="position: relative;">
-        <button class="btn btn-sm btn-link text-muted text-decoration-none dropdown-toggle p-0 shadow-none m-0"
-                type="button" aria-expanded="@(_isOpen.ToString().ToLower())" aria-haspopup="menu" aria-label="Select language" 
-                style="font-size: 0.85rem;" @onclick="ToggleDropdown">
+    <div class="btn-group lang-switcher__group">
+        <button class="btn btn--secondary btn--sm dropdown-toggle lang-switcher__trigger"
+                type="button" aria-expanded="@(_isOpen.ToString().ToLower())" aria-haspopup="menu" aria-label="@Language["SelectLanguage"]" 
+                @onclick="ToggleDropdown">
             @CurrentOption.ShortName
         </button>
         @if (_isOpen)
         {
-            <div style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 999;" @onclick="CloseDropdown"></div>
-            <ul class="dropdown-menu dropdown-menu-end shadow-sm show" style="position: absolute; right: 0; top: 100%; z-index: 1000;" role="menu">
+            <div class="lang-switcher__backdrop" @onclick="CloseDropdown"></div>
+            <ul class="dropdown-menu dropdown-menu-end lang-switcher__menu show" role="menu">
                 @foreach (var lang in LanguageService.SupportedLanguages)
                 {
                     <li role="presentation">

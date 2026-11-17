@@ -1,9 +1,9 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @inject IJSRuntime JS
+@inject FirebaseClientService Firebase
 @inject AuthenticationStateProvider AuthStateProvider
 @inject AppStateService AppState
 @inject NavigationManager Navigation
-@inject IConfiguration Configuration
 @implements IDisposable
 
 <dialog class="login-modal" id="loginModal" aria-labelledby="login-modal-title" @onclick="HandleBackdropClick"
@@ -49,6 +49,7 @@
 
 @code {
   private bool isLoggingIn;
+  private bool _disposed;
   private string? errorMessage;
 
   protected override void OnInitialized()
@@ -64,23 +65,30 @@
     }
   }
 
-  private void HandleShowModalRequested() => _ = InvokeAsync(ShowModalAsync);
+  private void HandleShowModalRequested()
+  {
+    if (!_disposed) _ = InvokeAsync(ShowModalAsync);
+  }
 
   private async Task ShowModalAsync()
   {
+    if (_disposed) return;
+
     // Check if already authenticated
     var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+    if (_disposed) return;
     if (authState.User.Identity?.IsAuthenticated == true)
     {
       AppState.ClearLoginRequest();
       return;
     }
 
-    await JS.InvokeVoidAsync("window.firebaseAuthInterop.cancelOneTap");
+    await Firebase.CancelOneTapAsync();
+    if (_disposed) return;
     errorMessage = null;
     isLoggingIn = false;
     StateHasChanged();
-    await JS.InvokeVoidAsync("dialogHelper.showModal", "loginModal");
+    await JS.TryShowModalAsync("loginModal");
   }
 
   private async Task CloseAsync()
@@ -90,10 +98,8 @@
     AppState.ClearReturnUrl();
   }
 
-  private async Task CloseDialogAsync()
-  {
-    await JS.InvokeVoidAsync("dialogHelper.close", "loginModal");
-  }
+  private Task CloseDialogAsync() =>
+    _disposed ? Task.CompletedTask : JS.TryCloseModalAsync("loginModal");
 
   private async Task HandleBackdropClick(MouseEventArgs e)
   {
@@ -119,19 +125,21 @@
         throw new InvalidOperationException("Firebase authentication is not available.");
       }
 
-      await firebaseAuth.SignInWithGoogleAsync(Configuration["Firebase:googleClientId"]);
+      await firebaseAuth.SignInWithGoogleAsync();
+      if (_disposed) return;
 
       var returnUrl = AppState.TakeReturnUrl();
       AppState.ClearLoginRequest();
       await CloseDialogAsync();
 
-      if (IsSafeReturnUrl(returnUrl))
+      if (!_disposed && IsSafeReturnUrl(returnUrl))
       {
         Navigation.NavigateTo(returnUrl!, replace: true);
       }
     }
     catch (Exception ex)
     {
+      if (_disposed) return;
       if (ex.Message.Contains("popup-blocked", StringComparison.OrdinalIgnoreCase))
       {
         errorMessage = "The sign-in pop-up was blocked by your browser. Please allow pop-ups for this site, or try again.";
@@ -156,7 +164,7 @@
     finally
     {
       isLoggingIn = false;
-      StateHasChanged();
+      if (!_disposed) StateHasChanged();
     }
   }
 
@@ -177,6 +185,7 @@
 
   public void Dispose()
   {
+    _disposed = true;
     AppState.OnShowLoginRequested -= HandleShowModalRequested;
   }
 }

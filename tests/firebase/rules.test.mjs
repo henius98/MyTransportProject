@@ -157,4 +157,17 @@ test("taskExtensions enforces max 20 task dependency references", async () => {
       startedAt: null,
     }),
   );
+  await assertFails(
+    setDoc(extRef, {
+      taskListId: "list1",
+      taskId: "task1",
+      estimatedMinutes: 30,
+      dependsOn: [
+        { taskListId: "list1", taskId: "dep-0" },
+        { taskListId: "", taskId: "invalid-middle" },
+        { taskListId: "list1", taskId: "dep-2" },
+      ],
+      startedAt: null,
+    }),
+  );
 });

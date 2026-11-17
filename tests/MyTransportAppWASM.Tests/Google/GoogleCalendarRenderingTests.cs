@@ -153,7 +153,8 @@ public class GoogleCalendarRenderingTests
         module.Setup(js => js.DisposeAsync()).Returns(ValueTask.CompletedTask);
         await using var services = new ServiceCollection().AddLogging()
             .AddSingleton(runtime.Object)
-            .AddSingleton<IGoogleWorkspaceService, GoogleWorkspaceService>().BuildServiceProvider();
+            .AddSingleton<IGoogleWorkspaceService, GoogleWorkspaceService>()
+            .AddTransient<GoogleCalendarWorkflowService>().BuildServiceProvider();
         await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
         var html = await renderer.Dispatcher.InvokeAsync(async () =>
         {

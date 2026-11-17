@@ -1,27 +1,9 @@
-<div class="card h-100">
-  <div
-    class="d-flex align-items-center justify-content-between mb-3 border-bottom border-secondary border-opacity-10 pb-3">
-    <div>
-      <h3 class="m-0 fw-semibold" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(Options?.Name ?? Provider?.Provider ?? "MetMalaysia")
-      </h3>
-      <a class="text-dim mt-1 d-inline-block" style="font-size: 0.75rem;" href="@($"https://{SourceDomain}")"
-         target="_blank" rel="noopener noreferrer">
-        <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>@SourceDomain
-      </a>
-    </div>
-    <WeatherStatusBadge Status="@(Provider?.Status ?? "Loading")" ProviderName="@(Options?.Name ?? Provider?.Provider ?? "MetMalaysia")"
-                        IsCached="@(Provider?.IsCached == true)" IsRefreshing="isLoading" OnRefresh="RefreshAsync" />
-  </div>
-
-  @if (isLoading)
-  {
-    <div class="d-flex justify-content-center p-4">
-      <div class="spinner-border text-primary" role="status">
-        <span class="visually-hidden">Loading...</span>
-      </div>
-    </div>
-  }
-  else if (Provider?.Periods != null)
+<WeatherCardShell DefaultTitle="MetMalaysia"
+                  DefaultSource="data.gov.my"
+                  Result="Result"
+                  IsRefreshing="IsRefreshing"
+                  OnRefresh="OnRefresh">
+  @if (Provider?.Periods != null)
   {
     var groupedPeriods = Provider.Periods.GroupBy(p => MalaysiaTime.Convert(p.Time).Date);
     <div class="d-flex flex-column gap-3">
@@ -58,44 +40,36 @@
                   <div class="d-flex flex-wrap gap-3 text-dim fw-medium" style="font-size: 0.85rem;">
                     @if (slice.MinTemperatureC.HasValue && slice.MaxTemperatureC.HasValue)
                     {
-                      <span class="text-danger"><i class="bi bi-thermometer-half me-1"></i>@($"{slice.MinTemperatureC:0.#}°C ~                {slice.MaxTemperatureC:0.#}°C")</span>
+                      <span class="text-danger"><i class="bi bi-thermometer-half me-1"></i>@($"{slice.MinTemperatureC:0.#}°C ~ {slice.MaxTemperatureC:0.#}°C")</span>
                     }
                     else if (slice.TemperatureC.HasValue)
                     {
-                      <span class="text-danger"><i
-                        class="bi bi-thermometer-half me-1"></i>@($"{slice.TemperatureC:0.#}°C")</span>
-                      }
-                      @if (!string.IsNullOrWhiteSpace(slice.Wind))
-                      {
-                        <span><i class="bi bi-wind me-1"></i>@slice.Wind</span>
-                      }
-                    </div>
+                      <span class="text-danger"><i class="bi bi-thermometer-half me-1"></i>@($"{slice.TemperatureC:0.#}°C")</span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(slice.Wind))
+                    {
+                      <span><i class="bi bi-wind me-1"></i>@slice.Wind</span>
+                    }
                   </div>
-                  @* @if (slice.Label != "Realtime" && slice.Label != "Outlook" &&
-                    !string.IsNullOrWhiteSpace(slice.Label))
-                  { *@
-                  <span class="forecast-period-trigger ms-3 flex-shrink-0" tabindex="0" aria-label="@(Language?[slice.Label] ?? slice.Label)"
-                        data-label="@(Language?[slice.Label] ?? slice.Label)">
-                    <span class="badge forecast-period-label @labelColorClass" style="font-weight: 500;">
-                      <span class="forecast-period-text">@(Language?[slice.Label] ?? slice.Label)</span>
-                    </span>
-                  </span>
-                  @* } *@
                 </div>
-              }
-            </div>
+                <span class="forecast-period-trigger ms-3 flex-shrink-0" tabindex="0" aria-label="@(Language?[slice.Label] ?? slice.Label)"
+                      data-label="@(Language?[slice.Label] ?? slice.Label)">
+                  <span class="badge forecast-period-label @labelColorClass" style="font-weight: 500;">
+                    <span class="forecast-period-text">@(Language?[slice.Label] ?? slice.Label)</span>
+                  </span>
+                </span>
+              </div>
+            }
           </div>
-        }
-      </div>
-    }
-  </div>
+        </div>
+      }
+    </div>
+  }
+</WeatherCardShell>
 
 @code {
   [CascadingParameter]
   private LanguageService Language { get; set; } = default!;
-
-  [Parameter]
-  public MetMalaysiaWeatherProviderOptions? Options { get; set; }
 
   [Parameter]
   public WeatherProviderResult? Result { get; set; }
@@ -108,14 +82,4 @@
 
   // If fetching realtime weather, just grab the closest time (handled by WeatherPlannerService shaping)
   private WeatherProviderResult? Provider => Result;
-  private bool isLoading => IsRefreshing;
-  private string SourceDomain => string.IsNullOrWhiteSpace(Options?.Source) ? (Provider?.Source ?? "data.gov.my") : Options.Source;
-
-  private async Task RefreshAsync()
-  {
-    if (OnRefresh.HasDelegate)
-    {
-      await OnRefresh.InvokeAsync();
-    }
-  }
 }

@@ -44,6 +44,31 @@ service cloud.firestore {
           && dep.taskId is string && dep.taskId.size() > 0 && dep.taskId.size() <= 1024;
       }
 
+      function validDependencies(deps) {
+        return deps is list
+          && deps.size() <= 20
+          && (deps.size() <= 0 || validDependency(deps[0]))
+          && (deps.size() <= 1 || validDependency(deps[1]))
+          && (deps.size() <= 2 || validDependency(deps[2]))
+          && (deps.size() <= 3 || validDependency(deps[3]))
+          && (deps.size() <= 4 || validDependency(deps[4]))
+          && (deps.size() <= 5 || validDependency(deps[5]))
+          && (deps.size() <= 6 || validDependency(deps[6]))
+          && (deps.size() <= 7 || validDependency(deps[7]))
+          && (deps.size() <= 8 || validDependency(deps[8]))
+          && (deps.size() <= 9 || validDependency(deps[9]))
+          && (deps.size() <= 10 || validDependency(deps[10]))
+          && (deps.size() <= 11 || validDependency(deps[11]))
+          && (deps.size() <= 12 || validDependency(deps[12]))
+          && (deps.size() <= 13 || validDependency(deps[13]))
+          && (deps.size() <= 14 || validDependency(deps[14]))
+          && (deps.size() <= 15 || validDependency(deps[15]))
+          && (deps.size() <= 16 || validDependency(deps[16]))
+          && (deps.size() <= 17 || validDependency(deps[17]))
+          && (deps.size() <= 18 || validDependency(deps[18]))
+          && (deps.size() <= 19 || validDependency(deps[19]));
+      }
+
       function validExtension() {
         let data = request.resource.data;
         let minutes = data.estimatedMinutes;
@@ -53,10 +78,7 @@ service cloud.firestore {
           && data.taskListId is string && data.taskListId.size() > 0 && data.taskListId.size() <= 1024
           && data.taskId is string && data.taskId.size() > 0 && data.taskId.size() <= 1024
           && (minutes == null || (minutes is int && minutes > 0 && minutes <= 1440))
-          && data.dependsOn is list && data.dependsOn.size() <= 20
-          && (data.dependsOn.size() == 0 || (
-            validDependency(data.dependsOn[0])
-            && validDependency(data.dependsOn[data.dependsOn.size() - 1])))
+          && validDependencies(data.dependsOn)
           && (started == null || (started is string && started.size() <= 40));
       }
 

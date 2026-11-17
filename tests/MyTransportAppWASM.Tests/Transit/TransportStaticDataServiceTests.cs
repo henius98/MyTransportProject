@@ -142,9 +142,40 @@ public sealed class TransportStaticDataServiceTests
 
     Assert.Equal(2, departures.Count);
     Assert.Equal("A1", departures[0].RouteId);
-    Assert.Equal(default, departures[0].DepartureAt);
+    Assert.Null(departures[0].DepartureAt);
     Assert.Equal("B2", departures[1].RouteId);
     Assert.Null(departures[1].Headsign);
+    Assert.Null(departures[1].DepartureAt);
+  }
+
+  [Fact]
+  public async Task CoalescesConcurrentMapFetchesAndCachesRoutesAndGeoJson()
+  {
+    const string mapPayload = """{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"LineString","coordinates":[]},"properties":{"kind":"route","route_id":"A1","route_short_name":"Airport"}}]}""";
+    var handler = new FakeHandler(request => request.RequestUri!.AbsolutePath switch
+    {
+      "/rapid-bus-kl/data/routes" => throw new HttpRequestException("CORS blocked"),
+      "/rapid-bus-kl/map" => mapPayload,
+      _ => throw new InvalidOperationException(request.RequestUri.ToString())
+    });
+    using var cache = new Microsoft.Extensions.Caching.Memory.MemoryCache(
+      new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 10 });
+    var service = new TransportStaticDataService(new HttpClient(handler), cache);
+
+    var routesTask = service.GetRoutesAsync(Source);
+    var mapTask = service.GetMapAsync(Source);
+    await Task.WhenAll(routesTask, mapTask);
+
+    Assert.Equal(new StaticRoute("A1", "Airport"), Assert.Single(await routesTask));
+    Assert.Equal(mapPayload, await mapTask);
+    Assert.Equal(1, handler.Urls.Count(u => u.EndsWith("/map", StringComparison.Ordinal)));
+
+    // Subsequent calls hit bounded MemoryCache without issuing network calls
+    var routesAgain = await service.GetRoutesAsync(Source);
+    var mapAgain = await service.GetMapAsync(Source);
+    Assert.Single(routesAgain);
+    Assert.Equal(mapPayload, mapAgain);
+    Assert.Equal(2, handler.Urls.Count); // only 1 /data/routes attempt + 1 /map fetch total
   }
 
   [Fact]

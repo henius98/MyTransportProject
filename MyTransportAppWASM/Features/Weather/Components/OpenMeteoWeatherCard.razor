@@ -2,30 +2,12 @@
 @inject IJSRuntime JS
 @implements IDisposable
 
-<div class="card h-100">
-  <div
-    class="d-flex align-items-center justify-content-between mb-3 border-bottom border-secondary border-opacity-10 pb-3">
-    <div>
-      <h3 class="m-0 fw-semibold" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(Options?.Name ?? Provider?.Provider ?? "Open-Meteo")
-      </h3>
-      <a class="text-dim mt-1 d-inline-block" style="font-size: 0.75rem;" href="@($"https://{SourceDomain}")"
-         target="_blank" rel="noopener noreferrer">
-        <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>@SourceDomain
-      </a>
-    </div>
-    <WeatherStatusBadge Status="@(Provider?.Status ?? "Loading")" ProviderName="@(Options?.Name ?? Provider?.Provider ?? "Open-Meteo")"
-                        IsCached="@(Provider?.IsCached == true)" IsRefreshing="isLoading" OnRefresh="RefreshAsync" />
-  </div>
-
-  @if (isLoading)
-  {
-    <div class="d-flex justify-content-center p-4">
-      <div class="spinner-border text-primary" role="status">
-        <span class="visually-hidden">Loading...</span>
-      </div>
-    </div>
-  }
-  else if (Provider?.Periods != null && (Provider.Periods.Count > 1 || FetchOutlook && Provider.Periods.Count > 0))
+<WeatherCardShell DefaultTitle="Open-Meteo"
+                  DefaultSource="open-meteo.com"
+                  Result="Result"
+                  IsRefreshing="IsRefreshing"
+                  OnRefresh="OnRefresh">
+  @if (Provider?.Periods != null && (Provider.Periods.Count > 1 || FetchOutlook && Provider.Periods.Count > 0))
   {
     <div class="table-responsive mt-2 bg-secondary bg-opacity-10 rounded p-2">
       <table class="table table-sm table-borderless align-middle mb-0" style="font-size: 0.95rem;">
@@ -155,7 +137,7 @@
       </div>
     </div>
   }
-</div>
+</WeatherCardShell>
 
 @if (FetchOutlook)
 {
@@ -253,9 +235,6 @@
   private LanguageService Language { get; set; } = default!;
 
   [Parameter]
-  public KeyedWeatherProviderOptions? Options { get; set; }
-
-  [Parameter]
   public WeatherQuery? Query { get; set; }
 
   [Parameter]
@@ -271,9 +250,7 @@
   public bool FetchOutlook { get; set; } = false;
 
   private WeatherProviderResult? Provider => Result;
-  private bool isLoading => IsRefreshing;
   private string? lastQueryLocationKey;
-  private string SourceDomain => string.IsNullOrWhiteSpace(Options?.Source) ? (Provider?.Source ?? "open-meteo.com") : Options.Source;
   private readonly string hourlyDialogId = $"open-meteo-hourly-{Guid.NewGuid():N}";
   private readonly CancellationTokenSource _cts = new();
   private bool _disposed;
@@ -292,7 +269,7 @@
       hourlyRequestId++;
       selectedDate = null;
       selectedDay = null;
-      await JS.InvokeVoidAsync("dialogHelper.close", hourlyDialogId);
+      await JS.TryCloseModalAsync(hourlyDialogId);
     }
 
     lastQueryLocationKey = locationKey;
@@ -301,7 +278,7 @@
   // Filter logic
   private async Task ShowHourlyForecastAsync(WeatherTimeSlice slice)
   {
-    if (!FetchOutlook || slice.IsPlaceholder)
+    if (!FetchOutlook || slice.IsPlaceholder || _disposed)
       return;
 
     selectedDate = MalaysiaTime.Convert(slice.Time).Date;
@@ -309,8 +286,11 @@
     hourlyPeriods = Array.Empty<WeatherTimeSlice>();
     isHourlyCached = false;
     isHourlyLoading = true;
-    await JS.InvokeVoidAsync("dialogHelper.showModal", hourlyDialogId);
-    await LoadHourlyForecastAsync();
+    await JS.TryShowModalAsync(hourlyDialogId);
+    if (!_disposed)
+    {
+      await LoadHourlyForecastAsync();
+    }
   }
 
   private Task RefreshHourlyForecastAsync() => LoadHourlyForecastAsync(forceRefresh: true);
@@ -353,14 +333,6 @@
     {
       if (!_disposed && requestId == hourlyRequestId)
         isHourlyLoading = false;
-    }
-  }
-
-  private async Task RefreshAsync()
-  {
-    if (OnRefresh.HasDelegate)
-    {
-      await OnRefresh.InvokeAsync();
     }
   }
 

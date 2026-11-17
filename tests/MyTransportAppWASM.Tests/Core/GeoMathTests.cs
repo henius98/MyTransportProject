@@ -33,4 +33,19 @@ public class GeoMathTests
 
     Assert.Equal(distKm * 1000.0, distMeters, tolerance: 0.1);
   }
+
+  [Theory]
+  [InlineData(0, 0, true)]
+  [InlineData(-90, -180, true)]
+  [InlineData(90, 180, true)]
+  [InlineData(90.1, 0, false)]
+  [InlineData(-90.1, 0, false)]
+  [InlineData(0, 180.1, false)]
+  [InlineData(0, -180.1, false)]
+  [InlineData(double.NaN, 101.0, false)]
+  [InlineData(3.1, double.PositiveInfinity, false)]
+  public void IsValidCoordinates_ValidatesRangeAndFiniteness(double latitude, double longitude, bool expected)
+  {
+    Assert.Equal(expected, GeoMath.IsValidCoordinates(latitude, longitude));
+  }
 }

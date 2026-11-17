@@ -1,4 +1,3 @@
-
 namespace MyTransportAppWASM.Tests;
 
 public class LiveRoutingServiceTests
@@ -6,24 +5,20 @@ public class LiveRoutingServiceTests
   [Fact]
   public void EnrichRoutes_ThrowsOnNullArgs()
   {
-    var service = new LiveRoutingService();
-    Assert.Throws<ArgumentNullException>(() => service.EnrichRoutes(null!, []));
-    Assert.Throws<ArgumentNullException>(() => service.EnrichRoutes([], null!));
+    Assert.Throws<ArgumentNullException>(() => LiveRouting.EnrichRoutes(null!, []));
+    Assert.Throws<ArgumentNullException>(() => LiveRouting.EnrichRoutes([], null!));
   }
 
   [Fact]
   public void EnrichRoutes_EmptyRoutes_ReturnsEmpty()
   {
-    var service = new LiveRoutingService();
-    var result = service.EnrichRoutes([], []);
+    var result = LiveRouting.EnrichRoutes([], []);
     Assert.Empty(result);
   }
 
   [Fact]
   public void EnrichRoutes_MatchesLiveVehicleAndRanksRoutes()
   {
-    var service = new LiveRoutingService();
-
     var route1 = new GoogleRoute
     {
       RouteId = 0,
@@ -66,7 +61,7 @@ public class LiveRoutingServiceTests
       }
     };
 
-    var enriched = service.EnrichRoutes([route2, route1], vehicles);
+    var enriched = LiveRouting.EnrichRoutes([route2, route1], vehicles);
 
     Assert.Equal(2, enriched.Count);
     // route1 has live bus, so it ranks first despite route2 having shorter original duration
@@ -83,8 +78,6 @@ public class LiveRoutingServiceTests
   [Fact]
   public void EnrichRoutes_MultiLegRoute_OnlyAddsWaitTimeToFirstStep()
   {
-    var service = new LiveRoutingService();
-
     var route = new GoogleRoute
     {
       RouteId = 0,
@@ -124,7 +117,7 @@ public class LiveRoutingServiceTests
       }
     };
 
-    var enriched = service.EnrichRoutes([route], vehicles);
+    var enriched = LiveRouting.EnrichRoutes([route], vehicles);
 
     Assert.Single(enriched);
     Assert.Equal(2, enriched[0].NearestBuses.Count);
@@ -138,11 +131,10 @@ public class LiveRoutingServiceTests
   [Fact]
   public void EnrichRoutes_DoesNotMatchBus_WhenLineShortNameIsEmpty()
   {
-    var service = new LiveRoutingService();
     var route = BuildRoute("");
     var bus = BuildBus("T10");
 
-    var result = service.EnrichRoutes([route], [bus]);
+    var result = LiveRouting.EnrichRoutes([route], [bus]);
 
     Assert.False(result.Single().HasLiveBus);
     Assert.Empty(result.Single().NearestBuses);
@@ -151,11 +143,10 @@ public class LiveRoutingServiceTests
   [Fact]
   public void EnrichRoutes_DoesNotUseSubstringRouteMatches()
   {
-    var service = new LiveRoutingService();
     var route = BuildRoute("10");
     var bus = BuildBus("T10");
 
-    var result = service.EnrichRoutes([route], [bus]);
+    var result = LiveRouting.EnrichRoutes([route], [bus]);
 
     Assert.False(result.Single().HasLiveBus);
   }
@@ -165,11 +156,10 @@ public class LiveRoutingServiceTests
   [InlineData("T-10", "t 10")]
   public void EnrichRoutes_MatchesNormalizedRouteNames(string lineName, string routeId)
   {
-    var service = new LiveRoutingService();
     var route = BuildRoute(lineName);
     var bus = BuildBus(routeId);
 
-    var result = service.EnrichRoutes([route], [bus]);
+    var result = LiveRouting.EnrichRoutes([route], [bus]);
 
     Assert.True(result.Single().HasLiveBus);
     Assert.Single(result.Single().NearestBuses);
@@ -178,7 +168,6 @@ public class LiveRoutingServiceTests
   [Fact]
   public void EnrichRoutes_SelectsNearestMatchingBus()
   {
-    var service = new LiveRoutingService();
     var route = BuildRoute("T10");
     var farBus = BuildBus("T10") with
     {
@@ -193,7 +182,7 @@ public class LiveRoutingServiceTests
       Lng = 101.6871f
     };
 
-    var result = service.EnrichRoutes([route], [farBus, nearBus]);
+    var result = LiveRouting.EnrichRoutes([route], [farBus, nearBus]);
 
     var selectedBus = Assert.Single(result.Single().NearestBuses);
     Assert.Equal("near", selectedBus.VehicleId);
@@ -203,15 +192,152 @@ public class LiveRoutingServiceTests
   [Fact]
   public void EnrichRoutes_RanksLiveRouteBeforeScheduledRoute()
   {
-    var service = new LiveRoutingService();
     var scheduledRoute = BuildRoute("T20") with { RouteId = 0 };
     var liveRoute = BuildRoute("T10") with { RouteId = 1 };
 
-    var result = service.EnrichRoutes([scheduledRoute, liveRoute], [BuildBus("T10")]);
+    var result = LiveRouting.EnrichRoutes([scheduledRoute, liveRoute], [BuildBus("T10")]);
 
     Assert.Equal(1, result[0].OriginalRoute.RouteId);
     Assert.True(result[0].HasLiveBus);
     Assert.False(result[1].HasLiveBus);
+  }
+
+  [Fact]
+  public void FilterVehiclesForRoute_ReturnsOnlyInvolvedTransports()
+  {
+    var route = new GoogleRoute
+    {
+      RouteId = 3,
+      Segments =
+      [
+        new RouteSegment { TravelMode = "WALKING" },
+        new RouteSegment { TravelMode = "TRANSIT", VehicleType = "BUS", LineShortName = "200", LineName = "Ulu Klang" },
+        new RouteSegment { TravelMode = "WALKING" },
+        new RouteSegment { TravelMode = "TRANSIT", VehicleType = "HEAVY_RAIL", LineShortName = "Port Klang Line", LineName = "Port Klang Line" },
+        new RouteSegment { TravelMode = "TRANSIT", VehicleType = "HEAVY_RAIL", LineShortName = "KLIA Ekspres 37", LineName = "KLIA Ekspres" }
+      ]
+    };
+
+    var vehicles = new List<BusLocation>
+    {
+      BuildBus("200") with { VehicleId = "bus-200" },
+      BuildBus("400") with { VehicleId = "bus-400" },
+      BuildBus("2000") with { VehicleId = "bus-2000" },
+      BuildBus("T200") with { VehicleId = "bus-t200" },
+      BuildBus("Port Klang") with { VehicleId = "ktmb-pk", TransportType = "KTMB" },
+      BuildBus("Seremban") with { VehicleId = "ktmb-seremban", TransportType = "KTMB" },
+      BuildBus("KLIA Ekspres 37") with { VehicleId = "erl-37", TransportType = "Rail" },
+      BuildBus("") with { VehicleId = "no-route" }
+    };
+
+    var filtered = LiveRouting.FilterVehiclesForRoute(route, vehicles);
+
+    Assert.Equal(["bus-200", "ktmb-pk", "erl-37"], filtered.Select(v => v.VehicleId ?? "").ToArray());
+  }
+
+  [Fact]
+  public void FilterVehiclesForRoute_WalkingOnlyRoute_ReturnsEmpty()
+  {
+    var route = new GoogleRoute
+    {
+      RouteId = 0,
+      Segments = [new RouteSegment { TravelMode = "WALKING", DurationSeconds = 300 }]
+    };
+
+    var filtered = LiveRouting.FilterVehiclesForRoute(route, [BuildBus("200")]);
+
+    Assert.Empty(filtered);
+  }
+
+  [Fact]
+  public void EnrichRoutes_MatchesMappedRouteShortName_AndUsesShortNameInLiveBusInfo()
+  {
+    var route = BuildRoute("420");
+    var bus = BuildBus("U4200") with { RouteShortName = "420" };
+
+    var result = LiveRouting.EnrichRoutes([route], [bus]);
+
+    var enriched = Assert.Single(result);
+    Assert.True(enriched.HasLiveBus);
+    var liveBus = Assert.Single(enriched.NearestBuses);
+    Assert.Equal("420", liveBus.RouteId);
+  }
+
+  [Fact]
+  public void EnrichRoutes_StillMatchesRawRouteId_WhenRouteShortNameDiffers()
+  {
+    var route = BuildRoute("U4200");
+    var bus = BuildBus("U4200") with { RouteShortName = "420" };
+
+    var result = LiveRouting.EnrichRoutes([route], [bus]);
+
+    Assert.True(Assert.Single(result).HasLiveBus);
+  }
+
+  [Fact]
+  public void EnrichRoutes_FallsBackToLineName_WhenLineShortNameIsEmpty()
+  {
+    var route = new GoogleRoute
+    {
+      DurationSeconds = 600,
+      TransitSteps =
+      [
+        new TransitStep
+        {
+          LineShortName = "",
+          LineName = "Sunway Line",
+          DepartureLat = 3.139,
+          DepartureLng = 101.687
+        }
+      ]
+    };
+    var bus = BuildBus("B1000") with { RouteShortName = "SUNWAY LINE" };
+
+    var result = LiveRouting.EnrichRoutes([route], [bus]);
+
+    var enriched = Assert.Single(result);
+    Assert.True(enriched.HasLiveBus);
+    Assert.Equal("SUNWAY LINE", Assert.Single(enriched.NearestBuses).RouteId);
+  }
+
+  [Fact]
+  public void FilterVehiclesForRoute_MatchesMappedRouteShortName()
+  {
+    var route = new GoogleRoute
+    {
+      RouteId = 0,
+      Segments = [new RouteSegment { TravelMode = "TRANSIT", VehicleType = "BUS", LineShortName = "420" }]
+    };
+
+    var filtered = LiveRouting.FilterVehiclesForRoute(route,
+    [
+      BuildBus("U4200") with { VehicleId = "bus-420", RouteShortName = "420" },
+      BuildBus("U4000") with { VehicleId = "bus-400", RouteShortName = "400" }
+    ]);
+
+    Assert.Equal("bus-420", Assert.Single(filtered).VehicleId);
+  }
+
+  [Theory]
+  [InlineData("T155 Inbound")]
+  [InlineData("T155 Outbound")]
+  public void EnrichAndFilter_MatchesDirectionalRouteSuffixes(string vehicleRouteId)
+  {
+    var route = new GoogleRoute
+    {
+      RouteId = 0,
+      DurationSeconds = 600,
+      TransitSteps = [new TransitStep { LineShortName = "T155", DepartureLat = 3.139, DepartureLng = 101.687 }],
+      Segments = [new RouteSegment { TravelMode = "TRANSIT", VehicleType = "BUS", LineShortName = "T155" }]
+    };
+    var bus = BuildBus(vehicleRouteId) with { VehicleId = "bus-t155" };
+
+    var enriched = Assert.Single(LiveRouting.EnrichRoutes([route], [bus]));
+    Assert.True(enriched.HasLiveBus);
+    Assert.Equal("bus-t155", Assert.Single(enriched.NearestBuses).VehicleId);
+
+    var filtered = LiveRouting.FilterVehiclesForRoute(route, [bus, BuildBus("T156") with { VehicleId = "other" }]);
+    Assert.Equal("bus-t155", Assert.Single(filtered).VehicleId);
   }
 
   private static GoogleRoute BuildRoute(string lineShortName) => new()

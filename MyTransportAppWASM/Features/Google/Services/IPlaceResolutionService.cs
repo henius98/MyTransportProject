@@ -6,7 +6,7 @@ namespace MyTransportAppWASM.Features.Google.Services
   public interface IPlaceResolutionService
   {
     Task<(double Lat, double Lng, string FormattedAddress)?> GeocodeAsync(string address, CancellationToken cancellationToken = default);
-    Task<List<(double Lat, double Lng, string FormattedAddress, string Name)>> GetSuggestionsAsync(string address, CancellationToken cancellationToken = default);
+    Task<List<PlaceSuggestion>> GetSuggestionsAsync(string address, CancellationToken cancellationToken = default);
     Task<string?> ReverseGeocodeAsync(double lat, double lng, CancellationToken cancellationToken = default);
   }
 }

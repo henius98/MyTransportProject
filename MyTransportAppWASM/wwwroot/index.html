@@ -185,16 +185,7 @@
     <!-- Firebase manages popup completion and auth state natively, without a delayed opener reload. -->
     <!-- Empty importmap removed — no module specifier overrides needed -->
     <script src="js/theme-manager.js"></script>
-    <script src="_framework/blazor.webassembly.js" autostart="false"></script>
-    <!-- Register the push service worker when a signed-in user opts in. -->
-    <script type="module">
-      await Promise.allSettled([
-        import("./js/firebase-auth.js"),
-        import("./js/firebase-firestore.js"),
-        import("./js/push-notifications.js"),
-      ]);
-      await Blazor.start();
-    </script>
+    <script src="_framework/blazor.webassembly.js"></script>
     <script>
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });

@@ -125,7 +125,8 @@ async function setup({ oldToken = null, oldUid = null, incomingToken = "new-fcm-
   });
   await module.evaluate();
 
-  return { state, storage, pushNotifications: context.window.pushNotifications };
+  assert.equal(context.window.pushNotifications, undefined);
+  return { state, storage, pushNotifications: module.namespace };
 }
 
 const plain = value => JSON.parse(JSON.stringify(value));

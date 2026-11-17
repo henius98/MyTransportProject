@@ -11,12 +11,14 @@ namespace MyTransportAppWASM.Core.Auth
     {
         private readonly IBrowserStorageService _localStorage;
         private readonly AuthenticationStateProvider _authStateProvider;
-        private readonly IJSRuntime _jsRuntime;
+        private readonly FirebaseClientService _firebase;
         private readonly ILogger<UserSettingsService> _logger;
         
         private UserSettings? _cachedSettings;
         private string? _cachedUserId;
         private readonly SemaphoreSlim _settingsLock = new(1, 1);
+        private readonly CancellationTokenSource _disposeCts = new();
+        private int _disposed;
 
         public string? SyncError { get; private set; }
         public event Action? SyncStatusChanged;
@@ -24,19 +26,20 @@ namespace MyTransportAppWASM.Core.Auth
         public UserSettingsService(
             IBrowserStorageService localStorage,
             AuthenticationStateProvider authStateProvider,
-            IJSRuntime jsRuntime,
+            FirebaseClientService firebase,
             ILogger<UserSettingsService>? logger = null)
         {
             _localStorage = localStorage;
             _authStateProvider = authStateProvider;
-            _jsRuntime = jsRuntime;
+            _firebase = firebase;
             _logger = logger ?? NullLogger<UserSettingsService>.Instance;
             _authStateProvider.AuthenticationStateChanged += HandleAuthenticationStateChanged;
         }
 
         public async Task<UserSettings> GetSettingsAsync()
         {
-            await _settingsLock.WaitAsync();
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            await _settingsLock.WaitAsync(_disposeCts.Token);
             try
             {
                 var (_, settings) = await LoadCurrentSettingsAsync();
@@ -44,7 +47,7 @@ namespace MyTransportAppWASM.Core.Auth
             }
             finally
             {
-                _settingsLock.Release();
+                ReleaseLockSafely();
             }
         }
 
@@ -78,7 +81,7 @@ namespace MyTransportAppWASM.Core.Auth
             {
                 try
                 {
-                    var firestoreSettings = await _jsRuntime.InvokeAsync<UserSettings?>("window.firebaseFirestoreInterop.getUserSettings", TimeSpan.FromSeconds(10), uid);
+                    var firestoreSettings = await _firebase.GetUserSettingsAsync(uid, TimeSpan.FromSeconds(10));
                     
                     if (firestoreSettings != null)
                     {
@@ -109,7 +112,7 @@ namespace MyTransportAppWASM.Core.Auth
             {
                 try
                 {
-                    await _jsRuntime.InvokeVoidAsync("window.firebaseFirestoreInterop.setUserSettings", TimeSpan.FromSeconds(10), uid, changes ?? settings);
+                    await _firebase.SetUserSettingsAsync(uid, changes ?? settings, TimeSpan.FromSeconds(10));
                     if (uid == await GetUserIdAsync()) SetSyncError(null);
                 }
                 catch (Exception ex) when (ex is JSException or OperationCanceledException)
@@ -144,8 +147,9 @@ namespace MyTransportAppWASM.Core.Auth
 
         private async Task UpdateSettingsAsync(Func<UserSettings, UserSettings> update, string field, object value)
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
             var requestedUid = await GetUserIdAsync();
-            await _settingsLock.WaitAsync();
+            await _settingsLock.WaitAsync(_disposeCts.Token);
             try
             {
                 var (uid, settings) = await LoadCurrentSettingsAsync();
@@ -156,7 +160,7 @@ namespace MyTransportAppWASM.Core.Auth
             }
             finally
             {
-                _settingsLock.Release();
+                ReleaseLockSafely();
             }
         }
 
@@ -212,21 +216,44 @@ namespace MyTransportAppWASM.Core.Auth
 
         private void HandleAuthenticationStateChanged(Task<AuthenticationState> task)
         {
+            if (Volatile.Read(ref _disposed) != 0) return;
             _ = InvalidateCacheAsync();
         }
 
         private async Task InvalidateCacheAsync()
         {
-            await _settingsLock.WaitAsync();
+            if (Volatile.Read(ref _disposed) != 0) return;
+            var lockAcquired = false;
             try
             {
+                await _settingsLock.WaitAsync(_disposeCts.Token);
+                lockAcquired = true;
+                if (Volatile.Read(ref _disposed) != 0) return;
                 _cachedSettings = null;
                 _cachedUserId = null;
                 SetSyncError(null);
             }
+            catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException)
+            {
+            }
             finally
             {
+                if (lockAcquired)
+                {
+                    ReleaseLockSafely();
+                }
+            }
+        }
+
+        private void ReleaseLockSafely()
+        {
+            if (Volatile.Read(ref _disposed) != 0) return;
+            try
+            {
                 _settingsLock.Release();
+            }
+            catch (ObjectDisposedException)
+            {
             }
         }
 
@@ -239,7 +266,10 @@ namespace MyTransportAppWASM.Core.Auth
 
         public void Dispose()
         {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
             _authStateProvider.AuthenticationStateChanged -= HandleAuthenticationStateChanged;
+            _disposeCts.Cancel();
+            _disposeCts.Dispose();
             _settingsLock.Dispose();
         }
     }

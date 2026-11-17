@@ -1,4 +1,3 @@
-
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -7,161 +6,133 @@ namespace MyTransportAppWASM.Features.Transit;
 public partial class Map : IAsyncDisposable
 {
   [Inject] private IJSRuntime JS { get; set; } = default!;
-  [Inject] private ITransitTrackingService TransitTracking { get; set; } = default!;
-  [Inject] private ITransportStaticDataService StaticDataService { get; set; } = default!;
+  [Inject] private TransitMapSession Session { get; set; } = default!;
   [Inject] private IConfiguration Config { get; set; } = default!;
   [CascadingParameter] private ThemeService Theme { get; set; } = default!;
+  [CascadingParameter] private LanguageService Language { get; set; } = default!;
   [Inject] private ILocationService LocationService { get; set; } = default!;
   [Inject] private IPlaceResolutionService PlaceResolution { get; set; } = default!;
   [Inject] private ILogger<Map> Logger { get; set; } = NullLogger<Map>.Instance;
 
-  private double Latitude;
-  private double Longitude;
-
   private IJSObjectReference? mapModule;
   private DotNetObjectReference<Map>? objRef;
-  private CancellationTokenSource _cts = new();
+  private readonly CancellationTokenSource _cts = new();
   private string origin = "";
   private string destination = "";
   private string mode = "TRANSIT";
-  private bool _isDisposed = false;
-  private string locationStatus = "Initializing...";
-  private bool isCollapsed = false;
-  private IReadOnlyList<TransportProvider> _transportProviders = Array.Empty<TransportProvider>();
-  private int _selectedStaticProviderIndex = -1;
-  private string _selectedStaticRouteId = "";
-  private List<StaticRoute> _staticRoutes = [];
-  private List<StaticDeparture> _staticDepartures = [];
-  private string _selectedStaticStopId = "";
-  private string _staticStopName = "";
-  private string _staticStatus = "";
-  private TimeSpan _pollingInterval = TimeSpan.FromSeconds(15);
-  private readonly SemaphoreSlim _refreshGate = new(1, 1);
-  private List<EnrichedRoute> _routeOptions = new();
-  private int _activeRouteId = -1;
-  private bool _mapAuthFailed;
+  private string departureMode = "now";
+  private DateTime departureDateTime = MalaysiaTime.Now.DateTime;
+  private string activeTab = "tracker";
+  private bool _isDisposed;
+  private bool isCollapsed;
+  private bool isSearchPanelCollapsed;
   private Task _autocompleteTask = Task.CompletedTask;
   private Task _pollingTask = Task.CompletedTask;
 
+  private sealed record TravelModeOption(string Value, string Icon, string LabelKey);
+  private static readonly TravelModeOption[] TravelModeOptions =
+  [
+    new("TRANSIT", "🚌", "ModeTransit"),
+    new("DRIVING", "🚗", "ModeDriving"),
+    new("WALKING", "🚶", "ModeWalking"),
+    new("BICYCLING", "🚲", "ModeBicycling"),
+  ];
+
   private string MapContainerClass => Theme?.IsDarkMode == true ? "theme-dark" : "theme-light";
   private string MapOverlayClass => $"map-overlay {(isCollapsed ? "collapsed" : "")}".Trim();
-  private bool IsErrorStatus =>
-    !string.IsNullOrEmpty(locationStatus) &&
-    (locationStatus.Contains("fail", StringComparison.OrdinalIgnoreCase) ||
-     locationStatus.Contains("error", StringComparison.OrdinalIgnoreCase) ||
-     locationStatus.Contains("unavailable", StringComparison.OrdinalIgnoreCase));
 
   private void ToggleCollapse() => isCollapsed = !isCollapsed;
+  private void ExpandSearchPanel() => isSearchPanelCollapsed = false;
+  private void SelectTab(string tab) => activeTab = tab;
 
-  private TransportStaticData? SelectedStaticData =>
-    _selectedStaticProviderIndex >= 0 && _selectedStaticProviderIndex < _transportProviders.Count && _transportProviders[_selectedStaticProviderIndex].HasStaticData
-      ? _transportProviders[_selectedStaticProviderIndex].StaticData : null;
-
-  private async Task SelectStaticProvider(ChangeEventArgs args)
+  private string SearchSummaryText
   {
-    _selectedStaticProviderIndex = int.TryParse(args.Value?.ToString(), out var index) ? index : -1;
-    _selectedStaticRouteId = "";
-    _staticRoutes = [];
-    _staticDepartures = [];
-    _selectedStaticStopId = "";
-    _staticStopName = "";
-    if (mapModule != null) await mapModule.InvokeVoidAsync("clearStaticRoute");
-    var source = SelectedStaticData;
-    if (source == null) { _staticStatus = ""; return; }
-
-    _staticStatus = "Loading routes...";
-    try
+    get
     {
-      var routesTask = StaticDataService.GetRoutesAsync(source, _cts.Token);
-      var mapTask = StaticDataService.GetMapAsync(source, "", _cts.Token);
-      await Task.WhenAll(routesTask, mapTask);
-      if (_isDisposed || SelectedStaticData != source) return;
-      _staticRoutes = await routesTask;
-      if (mapModule != null && string.IsNullOrEmpty(_selectedStaticRouteId))
+      var from = origin.Trim();
+      var to = destination.Trim();
+      if (!string.IsNullOrEmpty(from) && !string.IsNullOrEmpty(to))
       {
-        await mapModule.InvokeVoidAsync("showStaticRoute", await mapTask, objRef);
+        return $"{from} → {to}";
       }
-      _staticStatus = _staticRoutes.Count == 0 ? "No routes available." : "Select a stop on the map for departures.";
-    }
-    catch (OperationCanceledException) { }
-    catch (Exception ex)
-    {
-      if (_isDisposed || SelectedStaticData != source) return;
-      _staticStatus = "Static routes unavailable.";
-      Logger.LogWarning("Static route list failed: {Message}", ex.Message);
+      return Language["ExpandSearchPanel"];
     }
   }
 
-  private async Task SelectStaticRoute(ChangeEventArgs args)
+  private async Task SelectTravelMode(string nextMode)
   {
-    _selectedStaticRouteId = args.Value?.ToString() ?? "";
-    _staticDepartures = [];
-    _selectedStaticStopId = "";
-    _staticStopName = "";
-    if (mapModule == null) return;
-    await mapModule.InvokeVoidAsync("clearStaticRoute");
-    var source = SelectedStaticData;
-    var routeId = _selectedStaticRouteId;
-    if (source == null) { _staticStatus = ""; return; }
+    if (string.Equals(mode, nextMode, StringComparison.Ordinal)) return;
+    mode = nextMode;
+    if (!string.IsNullOrWhiteSpace(origin) && !string.IsNullOrWhiteSpace(destination))
+    {
+      await ShowRoute();
+    }
+  }
 
-    _staticStatus = "Loading route map...";
+  private async Task SwapOriginAndDestination()
+  {
+    (origin, destination) = (destination, origin);
+    if (mapModule != null && !_isDisposed)
+    {
+      await mapModule.InvokeVoidAsync("swapAutocompleteLocations", "origin-input", "destination-input");
+    }
+    if (!string.IsNullOrWhiteSpace(origin) && !string.IsNullOrWhiteSpace(destination) && Session.RouteOptions.Count > 0)
+    {
+      await ShowRoute();
+    }
+  }
+
+  private Task SelectStaticProvider(ChangeEventArgs args)
+  {
+    var index = int.TryParse(args.Value?.ToString(), out var parsed) ? parsed : -1;
+    return UpdateStaticOverlayAsync(() => Session.SelectStaticProviderAsync(index, _cts.Token));
+  }
+
+  private Task SelectStaticRoute(ChangeEventArgs args)
+  {
+    var routeId = args.Value?.ToString() ?? string.Empty;
+    return UpdateStaticOverlayAsync(() => Session.SelectStaticRouteAsync(routeId, _cts.Token));
+  }
+
+  private async Task UpdateStaticOverlayAsync(Func<Task<string?>> loadGeoJsonAsync)
+  {
     try
     {
-      var geoJson = await StaticDataService.GetMapAsync(source, routeId, _cts.Token);
-      if (_isDisposed || SelectedStaticData != source || _selectedStaticRouteId != routeId) return;
-      await mapModule.InvokeVoidAsync("showStaticRoute", geoJson, objRef);
-      _staticStatus = "Select a stop on the map for departures.";
+      if (mapModule != null && !_isDisposed)
+      {
+        await mapModule.InvokeVoidAsync("clearStaticRoute");
+      }
+
+      var geoJson = await loadGeoJsonAsync();
+      if (!_isDisposed && geoJson != null && mapModule != null)
+      {
+        await mapModule.InvokeVoidAsync("showStaticRoute", geoJson, objRef);
+      }
     }
-    catch (OperationCanceledException) { }
-    catch (Exception ex)
+    catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or JSException)
     {
-      if (_isDisposed || SelectedStaticData != source || _selectedStaticRouteId != routeId) return;
-      _staticStatus = "Static route map unavailable.";
-      Logger.LogWarning("Static route map failed: {Message}", ex.Message);
+      if (!_isDisposed && ex is JSException)
+      {
+        Logger.LogDebug("Static route map update failed: {Message}", ex.Message);
+      }
     }
   }
 
   [JSInvokable]
   public async Task OnStaticStopSelected(string stopId, string stopName)
   {
-    var source = SelectedStaticData;
-    var routeId = _selectedStaticRouteId;
-    if (_isDisposed || source == null) return;
-    _selectedStaticStopId = stopId;
-    _staticStopName = string.IsNullOrWhiteSpace(stopName) ? stopId : stopName;
-    _staticDepartures = [];
-    _staticStatus = "Loading estimated departures...";
+    if (_isDisposed) return;
+    var loadTask = Session.LoadStaticDeparturesAsync(stopId, stopName, _cts.Token);
     StateHasChanged();
-    try
+    if (await loadTask && !_isDisposed)
     {
-      var departures = await StaticDataService.GetDeparturesAsync(source, routeId, stopId, _cts.Token);
-      if (_isDisposed || SelectedStaticData != source || _selectedStaticRouteId != routeId || _selectedStaticStopId != stopId) return;
-      _staticDepartures = departures;
-      _staticStatus = departures.Count == 0 ? "No upcoming departures for this route." : "Scheduled estimates, not live arrivals.";
-      StateHasChanged();
-    }
-    catch (OperationCanceledException) { }
-    catch (ObjectDisposedException) { }
-    catch (Exception ex)
-    {
-      if (_isDisposed || SelectedStaticData != source || _selectedStaticRouteId != routeId || _selectedStaticStopId != stopId) return;
-      _staticStatus = "Departures unavailable.";
-      Logger.LogWarning("Static departures failed: {Message}", ex.Message);
       StateHasChanged();
     }
   }
 
   protected override Task OnInitializedAsync()
   {
-    _mapAuthFailed = false;
-    Latitude = Config.GetValue<double?>("DefaultLocation:Latitude")
-        ?? throw new InvalidOperationException("Missing configuration: DefaultLocation:Latitude");
-    Longitude = Config.GetValue<double?>("DefaultLocation:Longitude")
-        ?? throw new InvalidOperationException("Missing configuration: DefaultLocation:Longitude");
-    _transportProviders = Config.GetSection("TransportProviders").Get<List<TransportProvider>>() ?? [];
-
-    var pollingSeconds = Math.Max(5, Config.GetValue("TransitPolling:IntervalSeconds", 15));
-    _pollingInterval = TimeSpan.FromSeconds(pollingSeconds);
+    Session.ResetAuthFailure();
 
     if (Theme != null)
     {
@@ -229,7 +200,7 @@ public partial class Map : IAsyncDisposable
   /// </summary>
   private async Task RunBusPollingLoopAsync(CancellationToken cancellationToken)
   {
-    using var timer = new PeriodicTimer(_pollingInterval);
+    using var timer = new PeriodicTimer(Session.PollingInterval);
 
     try
     {
@@ -250,7 +221,7 @@ public partial class Map : IAsyncDisposable
 
     try
     {
-      _mapAuthFailed = false;
+      Session.ResetAuthFailure();
       var apiKey = Config["GoogleMaps:ApiKey"];
 
       if (!locationTask.IsCompleted && LocationService.LastKnownLocation is null)
@@ -261,15 +232,15 @@ public partial class Map : IAsyncDisposable
 
       var resolvedEarly = locationTask.IsCompletedSuccessfully ? await locationTask : null;
       var initialLocation = resolvedEarly ?? LocationService.LastKnownLocation;
-      var initialLat = initialLocation?.Latitude ?? Latitude;
-      var initialLng = initialLocation?.Longitude ?? Longitude;
+      var initialLat = initialLocation?.Latitude ?? Session.DefaultLatitude;
+      var initialLng = initialLocation?.Longitude ?? Session.DefaultLongitude;
 
       var initMapTask = mapModule.InvokeVoidAsync("initGoogleMaps", "map", initialLat, initialLng, 14, apiKey, objRef,
         Theme.IsDarkMode ? "DARK" : "LIGHT", MalaysiaTime.IanaTimeZone).AsTask();
 
       if (resolvedEarly is null && !locationTask.IsCompleted)
       {
-        locationStatus = "Loading GPS...";
+        Session.ReportGpsLoading();
         StateHasChanged();
       }
 
@@ -288,7 +259,7 @@ public partial class Map : IAsyncDisposable
           await mapModule.InvokeVoidAsync("updateUserMarker", position.Latitude, position.Longitude);
         }
 
-        locationStatus = "Live";
+        Session.ReportLiveLocation();
         StateHasChanged();
         await Task.WhenAll(
           UpdateOriginFromLocation(position.Latitude, position.Longitude),
@@ -300,16 +271,7 @@ public partial class Map : IAsyncDisposable
         await initMapTask;
         if (_isDisposed) return;
 
-        if (LocationService.LastKnownLocation is null)
-        {
-          LocationService.UpdateLocation(initialLat, initialLng);
-          locationStatus = "Using default location";
-        }
-        else
-        {
-          locationStatus = "Using cached location";
-        }
-
+        Session.ApplyFallbackLocation(initialLat, initialLng);
         await RefreshBusPosition();
       }
 
@@ -317,8 +279,9 @@ public partial class Map : IAsyncDisposable
     }
     catch (JSException ex)
     {
-      locationStatus = "Map error";
+      Session.ReportMapError();
       Logger.LogWarning("initGoogleMaps failed: {Message}", ex.Message);
+      if (!_isDisposed) StateHasChanged();
     }
   }
 
@@ -332,7 +295,7 @@ public partial class Map : IAsyncDisposable
       origin = resolved;
       if (mapModule != null)
       {
-        await mapModule.InvokeVoidAsync("setAutocompleteValue", "origin-input", origin);
+        await mapModule.InvokeVoidAsync("setAutocompleteValue", "origin-input", origin, new { lat, lng });
       }
     }
     catch (Exception ex)
@@ -346,8 +309,7 @@ public partial class Map : IAsyncDisposable
   public void OnMapAuthError(string message)
   {
     if (_isDisposed) return;
-    _mapAuthFailed = true;
-    locationStatus = message;
+    Session.SetAuthError(message);
     StateHasChanged();
   }
 
@@ -363,10 +325,17 @@ public partial class Map : IAsyncDisposable
   public async Task UpdateUserPosition(double lat, double lng)
   {
     if (_isDisposed) return;
-    LocationService.UpdateLocation(lat, lng);
-    await RefreshBusPosition();
+    var result = await Session.UpdateUserPositionAsync(lat, lng, _cts.Token);
     if (_isDisposed) return;
-    StateHasChanged();
+    if (result != null && mapModule != null && !Session.MapAuthFailed)
+    {
+      try
+      {
+        await mapModule.InvokeVoidAsync("syncMarkers", result.Vehicles);
+      }
+      catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or JSException) { }
+    }
+    if (!_isDisposed) StateHasChanged();
   }
 
   [JSInvokable]
@@ -378,11 +347,14 @@ public partial class Map : IAsyncDisposable
   }
 
   [JSInvokable]
-  public void OnRouteSelected(int routeId)
+  public async Task OnRouteSelected(int routeId)
   {
-    if (_isDisposed || _activeRouteId == routeId) return;
-    _activeRouteId = routeId;
-    StateHasChanged();
+    if (_isDisposed) return;
+    if (Session.SetActiveRoute(routeId, announceRoute: true, filterVehicles: true))
+    {
+      await SyncMarkersFromCacheAsync();
+      if (!_isDisposed) StateHasChanged();
+    }
   }
 
   private async Task InitializeAutocompleteAsync()
@@ -415,7 +387,8 @@ public partial class Map : IAsyncDisposable
       if (!string.IsNullOrEmpty(resolved)) origin = resolved;
 
       if (_isDisposed || mapModule == null) return;
-      await mapModule.InvokeVoidAsync("setAutocompleteValue", "origin-input", origin);
+      await mapModule.InvokeVoidAsync("setAutocompleteValue", "origin-input", origin,
+        new { lat = position.Latitude, lng = position.Longitude });
       await RefreshBusPosition();
       StateHasChanged();
     }
@@ -430,115 +403,99 @@ public partial class Map : IAsyncDisposable
 
   private async Task RefreshBusPosition(bool force)
   {
-    var pos = LocationService.LastKnownLocation;
-    if (mapModule == null || _isDisposed || pos == null || _mapAuthFailed) return;
-    try
-    {
-      if (!await _refreshGate.WaitAsync(0)) return;
-    }
-    catch (ObjectDisposedException)
-    {
-      return;
-    }
+    if (mapModule == null || _isDisposed || Session.MapAuthFailed) return;
+    var result = await Session.RefreshVehiclesAsync(force, _cts.Token);
+    if (_isDisposed || result == null || mapModule == null || Session.MapAuthFailed) return;
 
     try
     {
-      var result = await TransitTracking.RefreshVehiclesAsync(pos.Latitude, pos.Longitude, force, _cts.Token);
-      if (_isDisposed || mapModule == null || _mapAuthFailed) return;
-
       await mapModule.InvokeVoidAsync("syncMarkers", result.Vehicles);
-
-      if (!_mapAuthFailed)
-      {
-        locationStatus = result.StatusMessage;
-      }
-      StateHasChanged();
+      if (!_isDisposed) StateHasChanged();
     }
-    catch (OperationCanceledException)
-    {
-      // Expected during disposal — suppress
-    }
-    catch (ObjectDisposedException)
-    {
-      // Expected during disposal — suppress
-    }
+    catch (OperationCanceledException) { }
+    catch (ObjectDisposedException) { }
     catch (Exception ex)
     {
-      if (_isDisposed) return;
-      Logger.LogWarning("RefreshBusPosition failed: {Message}", ex.Message);
+      if (!_isDisposed) Logger.LogWarning("syncMarkers failed: {Message}", ex.Message);
     }
-    finally
+  }
+
+  private async Task SyncMarkersFromCacheAsync()
+  {
+    if (mapModule == null || _isDisposed || Session.MapAuthFailed) return;
+    try
     {
-      try
-      {
-        _refreshGate.Release();
-      }
-      catch (ObjectDisposedException) { }
+      await mapModule.InvokeVoidAsync("syncMarkers", Session.GetDisplayedVehicles());
+    }
+    catch (OperationCanceledException) { }
+    catch (ObjectDisposedException) { }
+    catch (Exception ex)
+    {
+      if (!_isDisposed) Logger.LogWarning("syncMarkers failed: {Message}", ex.Message);
     }
   }
 
   private async Task ShowRoute()
   {
-    if (string.IsNullOrEmpty(origin) || string.IsNullOrEmpty(destination))
+    if (mapModule == null || _isDisposed) return;
+
+    var wasFiltered = Session.IsRouteVehicleFilterActive;
+    if (!Session.TryBeginRouteCalculation(origin, destination))
     {
-      locationStatus = "Please enter origin and destination.";
       StateHasChanged();
       return;
     }
 
-    if (mapModule == null || _isDisposed) return;
-
     try
     {
-      locationStatus = "Calculating live routes...";
-      _routeOptions.Clear();
       StateHasChanged();
+      if (wasFiltered)
+      {
+        await SyncMarkersFromCacheAsync();
+      }
 
       if (!string.Equals(mode, "TRANSIT", StringComparison.Ordinal))
       {
         var routeFound = await mapModule.InvokeAsync<bool>("showRouteByName", origin, destination, mode);
-        _activeRouteId = -1;
-        locationStatus = routeFound
-          ? $"{char.ToUpperInvariant(mode[0])}{mode[1..].ToLowerInvariant()} route ready."
-          : $"No {mode.ToLowerInvariant()} routes found.";
+        Session.ApplyNonTransitRouteResult(mode, routeFound);
         StateHasChanged();
         return;
       }
 
-      var googleRoutes = await mapModule.InvokeAsync<List<GoogleRoute>>("getTransitRoutes", origin, destination);
-      
-      if (googleRoutes == null || googleRoutes.Count == 0)
+      object? routeOptions = string.Equals(departureMode, "now", StringComparison.Ordinal)
+        ? null
+        : new
+        {
+          departureMode,
+          dateTimeIso = MalaysiaTime.At(departureDateTime).ToString("O")
+        };
+
+      var googleRoutes = await mapModule.InvokeAsync<List<GoogleRoute>>("getTransitRoutes", origin, destination, routeOptions);
+      var options = await Session.EnrichTransitRoutesAsync(googleRoutes, _cts.Token);
+      if (_isDisposed) return;
+
+      var topRoutes = options.Take(4).ToList();
+      if (topRoutes.Count > 0)
       {
-        locationStatus = "No transit routes found.";
-        StateHasChanged();
-        return;
+        var routeData = topRoutes.Select(r => new
+        {
+          id = r.OriginalRoute.RouteId,
+          path = r.OriginalRoute.EncodedPolyline,
+          hasLiveBus = r.HasLiveBus,
+          durationSeconds = r.OriginalRoute.DurationSeconds,
+          localizedDuration = r.OriginalRoute.LocalizedDuration,
+          headwayMinutes = r.OriginalRoute.HeadwayMinutes
+        }).ToList();
+
+        await mapModule.InvokeVoidAsync("drawMultipleRoutes", routeData, Session.ActiveRouteId, objRef);
       }
 
-      // For demonstration purposes, mark as auspicious if it's a lucky hour,
-      // or alternate to show the badge regardless.
-      _routeOptions = await TransitTracking.EnrichRoutesAsync(googleRoutes, _cts.Token);
-
-      var top3 = _routeOptions.Take(3).ToList();
-      if (top3.Any())
-      {
-          _activeRouteId = top3.First().OriginalRoute.RouteId;
-          
-          var routeData = top3.Select(r => new {
-              id = r.OriginalRoute.RouteId,
-              path = r.OriginalRoute.EncodedPolyline,
-              hasLiveBus = r.HasLiveBus
-          }).ToList();
-
-          await mapModule.InvokeVoidAsync("drawMultipleRoutes", routeData, _activeRouteId, objRef);
-      }
-
-      locationStatus = $"Found {_routeOptions.Count} routes.";
       StateHasChanged();
     }
     catch (Exception ex)
     {
       if (_isDisposed) return;
-      locationStatus = "Route calculation failed.";
+      Session.ReportRouteFailure();
       Logger.LogWarning("Route display failed: {Message}", ex.Message);
       StateHasChanged();
     }
@@ -546,17 +503,25 @@ public partial class Map : IAsyncDisposable
 
   private async Task SelectRoute(EnrichedRoute route)
   {
-    if (mapModule == null || _isDisposed) return;
-    _activeRouteId = route.OriginalRoute.RouteId;
+    if (_isDisposed) return;
+    Session.SetActiveRoute(route.OriginalRoute.RouteId, announceRoute: true, filterVehicles: true);
+    isSearchPanelCollapsed = true;
+    if (mapModule == null)
+    {
+      StateHasChanged();
+      return;
+    }
+
     try
     {
-      await mapModule.InvokeVoidAsync("setActiveRoute", _activeRouteId);
-      locationStatus = $"Showing Route {route.OriginalRoute.RouteId + 1}";
-      StateHasChanged();
+      await mapModule.InvokeVoidAsync("setActiveRoute", Session.ActiveRouteId);
+      await SyncMarkersFromCacheAsync();
+      if (!_isDisposed) StateHasChanged();
     }
     catch (Exception ex)
     {
       Logger.LogWarning("SelectRoute failed: {Message}", ex.Message);
+      if (!_isDisposed) StateHasChanged();
     }
   }
 
@@ -566,10 +531,10 @@ public partial class Map : IAsyncDisposable
     try
     {
       await mapModule.InvokeVoidAsync("clearRoute");
-      _routeOptions.Clear();
-      _activeRouteId = -1;
-      locationStatus = "Route cleared.";
-      StateHasChanged();
+      Session.ClearRoutes();
+      isSearchPanelCollapsed = false;
+      await SyncMarkersFromCacheAsync();
+      if (!_isDisposed) StateHasChanged();
     }
     catch (Exception ex)
     {
@@ -589,7 +554,6 @@ public partial class Map : IAsyncDisposable
       Theme.OnThemeChanged -= OnThemeChanged;
     }
 
-    // Cancel the polling loop and any in-flight HTTP calls
     await _cts.CancelAsync();
     try
     {
@@ -600,7 +564,7 @@ public partial class Map : IAsyncDisposable
       // Normal during disposal or cancellation
     }
     _cts.Dispose();
-    _refreshGate.Dispose();
+    Session.Dispose();
 
     if (mapModule != null)
     {

@@ -13,12 +13,9 @@ namespace MyTransportAppWASM.Features.Google.Services
   public sealed class PlaceResolutionService : IPlaceResolutionService, IAsyncDisposable
   {
     private readonly IWeatherStationCatalogService _stationCatalog;
-    private readonly IJSRuntime? _jsRuntime;
+    private readonly JsModuleLoader? _mapModule;
     private readonly ILogger<PlaceResolutionService> _logger;
     private readonly string _apiKey;
-    private readonly object _lock = new();
-    private Task<IJSObjectReference>? _moduleTask;
-    private bool _disposed;
 
     public PlaceResolutionService(
       IConfiguration configuration,
@@ -28,27 +25,8 @@ namespace MyTransportAppWASM.Features.Google.Services
     {
       _stationCatalog = stationCatalog;
       _apiKey = configuration["GoogleMaps:ApiKey"] ?? string.Empty;
-      _jsRuntime = jsRuntime;
+      _mapModule = jsRuntime is null ? null : new JsModuleLoader(jsRuntime, "./js/googleMap.js", passCancellationToken: true);
       _logger = logger ?? NullLogger<PlaceResolutionService>.Instance;
-    }
-
-    private async ValueTask<IJSObjectReference?> GetMapModuleAsync(CancellationToken cancellationToken = default)
-    {
-      if (_disposed || _jsRuntime == null)
-        return null;
-
-      Task<IJSObjectReference> moduleTask;
-      lock (_lock)
-      {
-        if (_disposed) return null;
-        if (_moduleTask == null || _moduleTask.IsFaulted || _moduleTask.IsCanceled)
-        {
-          _moduleTask = _jsRuntime.InvokeAsync<IJSObjectReference>("import", cancellationToken: CancellationToken.None, ["./js/googleMap.js"]).AsTask();
-        }
-        moduleTask = _moduleTask;
-      }
-
-      return await moduleTask.WaitAsync(cancellationToken);
     }
 
     public async Task<(double Lat, double Lng, string FormattedAddress)?> GeocodeAsync(string address, CancellationToken cancellationToken = default)
@@ -59,17 +37,15 @@ namespace MyTransportAppWASM.Features.Google.Services
         return null;
 
       // Geocode address via Google Maps JavaScript Geocoder to avoid browser CORS restrictions
-      if (_jsRuntime != null)
+      if (_mapModule != null)
       {
         try
         {
-          var module = await GetMapModuleAsync(cancellationToken);
+          var module = await _mapModule.TryGetAsync(cancellationToken);
           if (module != null)
           {
             var place = await module.InvokeAsync<GeocodeResult?>("geocodePlaceName", cancellationToken, address, _apiKey);
-            if (place != null &&
-                double.IsFinite(place.Lat) && double.IsFinite(place.Lng) &&
-                place.Lat is >= -90 and <= 90 && place.Lng is >= -180 and <= 180)
+            if (place != null && GeoMath.IsValidCoordinates(place.Lat, place.Lng))
             {
               return (place.Lat, place.Lng, place.FormattedAddress ?? string.Empty);
             }
@@ -88,7 +64,7 @@ namespace MyTransportAppWASM.Features.Google.Services
       return null;
     }
 
-    public async Task<List<(double Lat, double Lng, string FormattedAddress, string Name)>> GetSuggestionsAsync(string address, CancellationToken cancellationToken = default)
+    public async Task<List<PlaceSuggestion>> GetSuggestionsAsync(string address, CancellationToken cancellationToken = default)
     {
       if (string.IsNullOrWhiteSpace(address))
         return new();
@@ -101,11 +77,10 @@ namespace MyTransportAppWASM.Features.Google.Services
         && double.TryParse(coordinates[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var latitude)
         && double.TryParse(coordinates[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var longitude))
       {
-        if (!double.IsFinite(latitude) || !double.IsFinite(longitude)
-          || latitude is < -90 or > 90 || longitude is < -180 or > 180)
+        if (!GeoMath.IsValidCoordinates(latitude, longitude))
           return new();
 
-        return [(latitude, longitude, "Latitude, longitude", FormattableString.Invariant($"{latitude}, {longitude}"))];
+        return [new PlaceSuggestion(latitude, longitude, "Latitude, longitude", FormattableString.Invariant($"{latitude}, {longitude}"))];
       }
 
       try
@@ -114,7 +89,12 @@ namespace MyTransportAppWASM.Features.Google.Services
         if (stations.Count > 0)
         {
           return stations
-            .Select(l => (l.Latitude, l.Longitude, $"MET ID: {l.LocationId}", l.LocationName ?? l.LocationId!))
+            .Select(l => new PlaceSuggestion(
+              l.Latitude,
+              l.Longitude,
+              l.LocationName ?? l.LocationId ?? string.Empty,
+              l.LocationName ?? l.LocationId!,
+              l.LocationId))
             .ToList();
         }
       }
@@ -133,7 +113,7 @@ namespace MyTransportAppWASM.Features.Google.Services
         var place = await GeocodeAsync(address, cancellationToken);
         if (place != null)
         {
-          return [(place.Value.Lat, place.Value.Lng, place.Value.FormattedAddress, address)];
+          return [new PlaceSuggestion(place.Value.Lat, place.Value.Lng, place.Value.FormattedAddress, address)];
         }
       }
 
@@ -144,18 +124,16 @@ namespace MyTransportAppWASM.Features.Google.Services
     {
       cancellationToken.ThrowIfCancellationRequested();
 
-      if (string.IsNullOrWhiteSpace(_apiKey) ||
-          !double.IsFinite(lat) || !double.IsFinite(lng) ||
-          lat is < -90 or > 90 || lng is < -180 or > 180)
+      if (string.IsNullOrWhiteSpace(_apiKey) || !GeoMath.IsValidCoordinates(lat, lng))
       {
         return null;
       }
 
-      if (_jsRuntime != null)
+      if (_mapModule != null)
       {
         try
         {
-          var module = await GetMapModuleAsync(cancellationToken);
+          var module = await _mapModule.TryGetAsync(cancellationToken);
           if (module != null)
           {
             return await module.InvokeAsync<string?>("reverseGeocode", cancellationToken, lat, lng, _apiKey);
@@ -174,29 +152,7 @@ namespace MyTransportAppWASM.Features.Google.Services
       return null;
     }
 
-    public async ValueTask DisposeAsync()
-    {
-      Task<IJSObjectReference>? moduleTask;
-      lock (_lock)
-      {
-        if (_disposed) return;
-        _disposed = true;
-        moduleTask = _moduleTask;
-        _moduleTask = null;
-      }
-
-      if (moduleTask != null)
-      {
-        try
-        {
-          var module = await moduleTask;
-          await module.DisposeAsync();
-        }
-        catch (Exception)
-        {
-        }
-      }
-    }
+    public ValueTask DisposeAsync() => _mapModule?.DisposeAsync() ?? ValueTask.CompletedTask;
   }
 }
 

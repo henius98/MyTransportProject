@@ -121,8 +121,7 @@ public sealed class GoogleTasksWorkflowService : IGoogleTasksWorkflowService
             StartedAt = latestExtensions.GetValueOrDefault(key)?.StartedAt
         };
 
-        if (extension.EstimatedMinutes != null || extension.DependsOn.Count > 0 ||
-            extension.StartedAt != null || latestExtensions.ContainsKey(key))
+        if (!extension.IsEmpty || latestExtensions.ContainsKey(key))
         {
             try
             {

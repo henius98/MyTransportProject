@@ -1,15 +1,12 @@
 @inherits LayoutComponentBase
 @inject IUserSettingsService UserSettings
-@inject IConfiguration Configuration
-@inject IJSRuntime JS
+@inject FirebaseClientService Firebase
 @inject ThemeService Theme
 
-<div class="page" style="@SidebarStyle">
+<div class="@PageClass">
     <!-- Skip link for keyboard users — visually hidden until focused -->
-    <a href="#main-content"
-       style="position:absolute;top:-100%;left:1rem;z-index:9999;padding:0.5rem 1rem;background:var(--primary-blue);color:#fff;border-radius:0 0 8px 8px;font-weight:700;text-decoration:none;"
-       onfocus="this.style.top='0'" onblur="this.style.top='-100%'">
-        Skip to main content
+    <a href="#main-content" class="skip-link">
+        @Language["SkipToMainContent"]
     </a>
     <div class="@SidebarClass" @onclick="ExpandSidebar" @onmouseenter="HandleMouseEnter"
          @onmouseleave="HandleMouseLeave" @onclick:stopPropagation>
@@ -46,7 +43,7 @@
 
     private bool EffectiveIsCollapsed => isCollapsed && !isHovered;
 
-    private string SidebarStyle => $"--sidebar-width: {(EffectiveIsCollapsed ? "70px" : "250px")};";
+    private string PageClass => $"page {(EffectiveIsCollapsed ? "page--sidebar-collapsed" : "page--sidebar-expanded")}";
     private string SidebarClass => $"sidebar {(EffectiveIsCollapsed ? "collapsed" : "")}".Trim();
 
     protected override async Task OnParametersSetAsync()
@@ -54,11 +51,18 @@
         if (!ReferenceEquals(AuthState, _lastAuthState))
         {
             _lastAuthState = AuthState;
-            if (AuthState is not null)
-            {
-                await AuthState;
-            }
+            var authState = AuthState is not null ? await AuthState : null;
             await ApplyPreferencesAsync();
+            if (authState?.User.Identity?.IsAuthenticated == true)
+            {
+                try
+                {
+                    await Firebase.EnsurePushForegroundListenerAsync();
+                }
+                catch (JSException)
+                {
+                }
+            }
         }
     }
 
@@ -68,7 +72,7 @@
         {
             try
             {
-                await JS.InvokeVoidAsync("window.firebaseAuthInterop.initializeOneTap", Configuration["Firebase:googleClientId"]);
+                await Firebase.InitializeOneTapAsync();
             }
             catch (JSException ex)
             {

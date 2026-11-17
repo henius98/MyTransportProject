@@ -61,8 +61,12 @@ h1:focus-visible,
   padding-top: 1.1rem;
 }
 
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
 /* Code styling */
 code {
-  color: #c02d76;
+  color: var(--primary-purple);
 }
 

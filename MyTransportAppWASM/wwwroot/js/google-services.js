@@ -1,6 +1,6 @@
 import { getAuthContext } from "./firebase-auth.js";
 import { clearConnections, getConnection, setConnection } from "./google-token-store.js";
-import { authorizeConnection, restoreConnection, invalidateConnection, prepareAuthorization } from "./google-authorization.js";
+import { authorizeConnection, restoreConnection, invalidateConnection, prepareAuthorization, serviceScopes } from "./google-authorization.js";
 
 const services = {
     calendar: {
@@ -115,7 +115,15 @@ export async function connect(uid, service) {
 
         // The backend uses Google's actual token expiry and retains the refresh token in Firestore;
         // an earlier revocation or expiry is also handled by the API's 401 response.
-        setConnection(service, { uid, accessToken: connection.accessToken, expiresAt: connection.expiresAt });
+        const record = { uid, accessToken: connection.accessToken, expiresAt: connection.expiresAt };
+        setConnection(service, record);
+        if (Array.isArray(connection.scopes) && serviceScopes) {
+            for (const [candidate, requiredScopes] of Object.entries(serviceScopes)) {
+                if (candidate !== service && requiredScopes.every(scope => connection.scopes.includes(scope))) {
+                    setConnection(candidate, record);
+                }
+            }
+        }
     } finally {
         connecting = false;
     }

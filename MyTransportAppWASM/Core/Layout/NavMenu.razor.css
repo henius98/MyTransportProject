@@ -203,3 +203,12 @@
     margin-right: 0 !important;
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .navbar-brand,
+  .bi,
+  .nav-text,
+  .nav-item ::deep .nav-link {
+    transition: none;
+  }
+}

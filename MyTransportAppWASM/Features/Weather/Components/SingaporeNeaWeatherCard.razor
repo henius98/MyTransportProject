@@ -1,85 +1,53 @@
-<div class="card h-100">
-    <div class="d-flex align-items-center justify-content-between mb-3 border-bottom border-secondary border-opacity-10 pb-3">
-        <div>
-            <h3 class="m-0 fw-semibold" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(Options?.Name ?? Provider?.Provider ?? "Singapore NEA")</h3>
-            <a class="text-dim mt-1 d-inline-block" style="font-size: 0.75rem;" href="@($"https://{SourceDomain}")"
-               target="_blank" rel="noopener noreferrer">
-                <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>@SourceDomain
-            </a>
+<WeatherCardShell DefaultTitle="Singapore NEA"
+                  DefaultSource="data.gov.sg"
+                  Result="Result"
+                  IsRefreshing="IsRefreshing"
+                  OnRefresh="OnRefresh">
+  @if (Provider?.Periods != null)
+  {
+    @foreach (var slice in Provider.Periods)
+    {
+      <div class="d-flex align-items-center justify-content-between p-3 rounded mb-2 shadow-sm border border-secondary border-opacity-25" style="background: linear-gradient(135deg, var(--bs-secondary-bg) 0%, var(--bs-body-bg) 100%);">
+        <div class="d-flex align-items-center">
+          <div class="me-3 fs-2">
+            <i class="@slice.Icon"></i>
+          </div>
+          <div>
+            <strong class="d-block mb-1 text-primary" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(slice.Summary ?? "N/A")</strong>
+            <div class="text-dim" style="font-size: 0.85rem;"><i class="bi bi-calendar-event me-1"></i>@MalaysiaTime.Convert(slice.Time).ToString("ddd, dd MMM HH:mm")</div>
+          </div>
         </div>
-        <WeatherStatusBadge Status="@(Provider?.Status ?? "Loading")"
-                            ProviderName="@(Options?.Name ?? Provider?.Provider ?? "Singapore NEA")"
-                            IsCached="@(Provider?.IsCached == true)"
-                            IsRefreshing="isLoading"
-                            OnRefresh="RefreshAsync" />
-    </div>
 
-    @if (isLoading)
-    {
-        <div class="d-flex justify-content-center p-4">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
-            </div>
+        <div class="text-end ps-3 border-start border-secondary border-opacity-25">
+          @if (slice.TemperatureC.HasValue)
+          {
+            <div class="fs-2 fw-bold text-danger" style="letter-spacing: -0.05em; line-height: 1;">@($"{slice.TemperatureC:0.#}°")</div>
+          }
+          else
+          {
+            <div class="fs-3 fw-bold text-muted">-</div>
+          }
+
+          @if (!string.IsNullOrWhiteSpace(slice.Wind))
+          {
+            <div class="text-dim mt-2" style="font-size: 0.8rem;"><i class="bi bi-wind me-1"></i>@slice.Wind</div>
+          }
         </div>
+      </div>
     }
-    else if (Provider?.Periods != null)
-    {
-        @foreach (var slice in Provider.Periods)
-        {
-            <div class="d-flex align-items-center justify-content-between p-3 rounded mb-2 shadow-sm border border-secondary border-opacity-25" style="background: linear-gradient(135deg, var(--bs-secondary-bg) 0%, var(--bs-body-bg) 100%);">
-                <div class="d-flex align-items-center">
-                    <div class="me-3 fs-2">
-                        <i class="@slice.Icon"></i>
-                    </div>
-                    <div>
-                        <strong class="d-block mb-1 text-primary" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(slice.Summary ?? "N/A")</strong>
-                        <div class="text-dim" style="font-size: 0.85rem;"><i class="bi bi-calendar-event me-1"></i>@MalaysiaTime.Convert(slice.Time).ToString("ddd, dd MMM HH:mm")</div>
-                    </div>
-                </div>
-                
-                <div class="text-end ps-3 border-start border-secondary border-opacity-25">
-                    @if (slice.TemperatureC.HasValue)
-                    {
-                        <div class="fs-2 fw-bold text-danger" style="letter-spacing: -0.05em; line-height: 1;">@($"{slice.TemperatureC:0.#}°")</div>
-                    }
-                    else
-                    {
-                        <div class="fs-3 fw-bold text-muted">-</div>
-                    }
-                    
-                    @if (!string.IsNullOrWhiteSpace(slice.Wind))
-                    {
-                        <div class="text-dim mt-2" style="font-size: 0.8rem;"><i class="bi bi-wind me-1"></i>@slice.Wind</div>
-                    }
-                </div>
-            </div>
-        }
-    }
-</div>
+  }
+</WeatherCardShell>
 
 @code {
-    [Parameter]
-    public KeyedWeatherProviderOptions? Options { get; set; }
+  [Parameter]
+  public WeatherProviderResult? Result { get; set; }
 
-    [Parameter]
-    public WeatherProviderResult? Result { get; set; }
+  [Parameter]
+  public EventCallback OnRefresh { get; set; }
 
-    [Parameter]
-    public EventCallback OnRefresh { get; set; }
+  [Parameter]
+  public bool IsRefreshing { get; set; }
 
-    [Parameter]
-    public bool IsRefreshing { get; set; }
-
-    // Filter logic (now centralized in WeatherPlannerService)
-    private WeatherProviderResult? Provider => Result;
-    private bool isLoading => IsRefreshing;
-    private string SourceDomain => string.IsNullOrWhiteSpace(Options?.Source) ? (Provider?.Source ?? "data.gov.sg") : Options.Source;
-
-    private async Task RefreshAsync()
-    {
-        if (OnRefresh.HasDelegate)
-        {
-            await OnRefresh.InvokeAsync();
-        }
-    }
+  // Filter logic (now centralized in WeatherPlannerService)
+  private WeatherProviderResult? Provider => Result;
 }

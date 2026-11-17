@@ -1,0 +1,266 @@
+using Microsoft.Extensions.Options;
+using Moq;
+
+namespace MyTransportAppWASM.Tests;
+
+public class TransitMapSessionTests
+{
+  private static readonly TransportStaticData StaticSource =
+    new("https://worker.example/rapid", "/routes", "/map", "/departures");
+
+  private static TransitMapSession CreateSession(
+    Mock<ITransitTrackingService>? tracking = null,
+    Mock<ITransportStaticDataService>? staticData = null,
+    Mock<ILocationService>? location = null,
+    IReadOnlyList<TransportProvider>? providers = null)
+  {
+    tracking ??= new Mock<ITransitTrackingService>();
+    staticData ??= new Mock<ITransportStaticDataService>();
+    location ??= new Mock<ILocationService>();
+    providers ??= [new TransportProvider("Rapid KL", "https://feed.test/kl", 3.139, 101.6869, 30, "Bus", StaticSource)];
+
+    return new TransitMapSession(
+      tracking.Object,
+      staticData.Object,
+      location.Object,
+      Options.Create(new TransitOptions
+      {
+        Providers = providers,
+        Polling = new TransitPollingOptions { IntervalSeconds = 15 }
+      }),
+      Options.Create(new DefaultLocationOptions { Latitude = 3.1390, Longitude = 101.6869 }));
+  }
+
+  [Fact]
+  public async Task SelectStaticProviderAsync_LoadsRoutesAndMapAndIgnoresStaleSwitch()
+  {
+    var staticData = new Mock<ITransportStaticDataService>();
+    var firstGate = new TaskCompletionSource();
+    staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
+      .Returns(async () =>
+      {
+        await firstGate.Task;
+        return [new StaticRoute("R1", "Route 1")];
+      });
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "", It.IsAny<CancellationToken>()))
+      .ReturnsAsync("""{"type":"FeatureCollection","features":[]}""");
+
+    using var session = CreateSession(staticData: staticData);
+
+    var firstLoad = session.SelectStaticProviderAsync(0);
+    // Switch provider back to -1 before the slow async load completes
+    Assert.Null(await session.SelectStaticProviderAsync(-1));
+    firstGate.TrySetResult();
+
+    Assert.Null(await firstLoad);
+    Assert.Equal(-1, session.SelectedStaticProviderIndex);
+    Assert.Empty(session.StaticRoutes);
+  }
+
+  [Fact]
+  public async Task SelectStaticProviderAsync_IgnoresStaleCompletionAfterAtoBtoASwitch()
+  {
+    var staticData = new Mock<ITransportStaticDataService>();
+    var firstGate = new TaskCompletionSource();
+    var callCount = 0;
+    staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
+      .Returns(async () =>
+      {
+        if (Interlocked.Increment(ref callCount) == 1)
+        {
+          await firstGate.Task;
+          return [new StaticRoute("R1", "Stale Route 1")];
+        }
+        return [new StaticRoute("R2", "Fresh Route 2")];
+      });
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "", It.IsAny<CancellationToken>()))
+      .ReturnsAsync("""{"type":"FeatureCollection","features":[]}""");
+
+    using var session = CreateSession(staticData: staticData);
+
+    var firstLoad = session.SelectStaticProviderAsync(0);
+    Assert.Null(await session.SelectStaticProviderAsync(-1));
+    Assert.NotNull(await session.SelectStaticProviderAsync(0));
+    firstGate.TrySetResult();
+
+    Assert.Null(await firstLoad);
+    Assert.Equal(0, session.SelectedStaticProviderIndex);
+    var route = Assert.Single(session.StaticRoutes);
+    Assert.Equal("R2", route.Id);
+  }
+
+  [Fact]
+  public async Task SelectStaticProviderAndLoadDepartures_UpdatesSessionState()
+  {
+    var staticData = new Mock<ITransportStaticDataService>();
+    staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
+      .ReturnsAsync([new StaticRoute("R1", "Route 1")]);
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "", It.IsAny<CancellationToken>()))
+      .ReturnsAsync("""{"geojson":true}""");
+    staticData.Setup(s => s.GetDeparturesAsync(StaticSource, "", "STOP1", It.IsAny<CancellationToken>()))
+      .ReturnsAsync([new StaticDeparture("R1", "KL Sentral", null)]);
+
+    using var session = CreateSession(staticData: staticData);
+
+    var geoJson = await session.SelectStaticProviderAsync(0);
+    Assert.Equal("""{"geojson":true}""", geoJson);
+    Assert.Single(session.StaticRoutes);
+
+    Assert.True(await session.LoadStaticDeparturesAsync("STOP1", "", CancellationToken.None));
+    Assert.Equal("STOP1", session.StaticStopName);
+    Assert.Single(session.StaticDepartures);
+    Assert.Equal("Scheduled estimates, not live arrivals.", session.StaticStatus);
+  }
+
+  [Fact]
+  public async Task EnrichTransitRoutesAsync_SelectsFirstRouteAndUpdatesStatus()
+  {
+    var tracking = new Mock<ITransitTrackingService>();
+    var enriched = new List<EnrichedRoute>
+    {
+      new() { OriginalRoute = new GoogleRoute { RouteId = 2 }, HasLiveBus = true },
+      new() { OriginalRoute = new GoogleRoute { RouteId = 0 }, HasLiveBus = false }
+    };
+    tracking.Setup(t => t.EnrichRoutesAsync(It.IsAny<List<GoogleRoute>>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(enriched);
+
+    using var session = CreateSession(tracking: tracking);
+
+    var routes = await session.EnrichTransitRoutesAsync([new GoogleRoute { RouteId = 0 }, new GoogleRoute { RouteId = 2 }]);
+
+    Assert.Equal(2, routes.Count);
+    Assert.Equal(2, session.ActiveRouteId);
+    Assert.Equal("Found 2 routes.", session.LocationStatus);
+  }
+
+  [Fact]
+  public void LocationAndRouteStatusTransitions_AreOwnedBySession()
+  {
+    using var session = CreateSession();
+
+    Assert.False(session.TryBeginRouteCalculation(" ", "KL Sentral"));
+    Assert.Equal("Please enter origin and destination.", session.LocationStatus);
+
+    Assert.True(session.TryBeginRouteCalculation("KLCC", "KL Sentral"));
+    Assert.Equal("Calculating live routes...", session.LocationStatus);
+
+    session.ReportGpsLoading();
+    Assert.Equal("Loading GPS...", session.LocationStatus);
+
+    session.ReportLiveLocation();
+    Assert.Equal("Live", session.LocationStatus);
+
+    session.ReportMapError();
+    Assert.Equal("Map error", session.LocationStatus);
+    Assert.True(session.IsErrorStatus);
+
+    session.ReportRouteFailure();
+    Assert.Equal("Route calculation failed.", session.LocationStatus);
+    Assert.True(session.IsErrorStatus);
+  }
+
+  [Fact]
+  public async Task SetActiveRoute_WithFilterVehicles_FiltersDisplayedAndRefreshedVehiclesUntilCleared()
+  {
+    var allVehicles = new List<BusLocation>
+    {
+      new() { VehicleId = "bus-200", RouteId = "200", TransportType = "Bus" },
+      new() { VehicleId = "bus-400", RouteId = "400", TransportType = "Bus" },
+      new() { VehicleId = "ktmb-pk", RouteId = "Port Klang", TransportType = "KTMB" },
+      new() { VehicleId = "erl-37", RouteId = "KLIA Ekspres 37", TransportType = "Rail" }
+    };
+
+    var routeA = new EnrichedRoute
+    {
+      OriginalRoute = new GoogleRoute
+      {
+        RouteId = 3,
+        Segments =
+        [
+          new RouteSegment { TravelMode = "TRANSIT", LineShortName = "200" },
+          new RouteSegment { TravelMode = "TRANSIT", LineShortName = "Port Klang Line" },
+          new RouteSegment { TravelMode = "TRANSIT", LineShortName = "KLIA Ekspres 37" }
+        ]
+      }
+    };
+    var routeB = new EnrichedRoute
+    {
+      OriginalRoute = new GoogleRoute
+      {
+        RouteId = 1,
+        Segments = [new RouteSegment { TravelMode = "TRANSIT", LineShortName = "400" }]
+      }
+    };
+
+    var tracking = new Mock<ITransitTrackingService>();
+    tracking.Setup(t => t.CachedVehicles).Returns(allVehicles);
+    tracking.Setup(t => t.EnrichRoutesAsync(It.IsAny<List<GoogleRoute>>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync([routeA, routeB]);
+    tracking.Setup(t => t.RefreshVehiclesAsync(It.IsAny<double>(), It.IsAny<double>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(new TransitTrackingResult { Vehicles = allVehicles, StatusMessage = "Live" });
+
+    var location = new Mock<ILocationService>();
+    location.Setup(l => l.LastKnownLocation).Returns(new Location(3.139, 101.6869));
+
+    using var session = CreateSession(tracking: tracking, location: location);
+
+    await session.EnrichTransitRoutesAsync([routeA.OriginalRoute, routeB.OriginalRoute]);
+    Assert.Equal(3, session.ActiveRouteId);
+    Assert.False(session.IsRouteVehicleFilterActive);
+    Assert.Equal(4, session.GetDisplayedVehicles().Count);
+
+    // Selecting the already-highlighted first route still activates filtering.
+    Assert.True(session.SetActiveRoute(3, announceRoute: true, filterVehicles: true));
+    Assert.True(session.IsRouteVehicleFilterActive);
+    Assert.Equal("Showing Route 4", session.LocationStatus);
+    Assert.Equal(["bus-200", "ktmb-pk", "erl-37"], session.GetDisplayedVehicles().Select(v => v.VehicleId ?? "").ToArray());
+
+    // Periodic refresh preserves the active route filter.
+    var refreshed = await session.RefreshVehiclesAsync(force: false);
+    Assert.NotNull(refreshed);
+    Assert.Equal(["bus-200", "ktmb-pk", "erl-37"], refreshed.Vehicles.Select(v => v.VehicleId ?? "").ToArray());
+
+    // Switching to another route updates the filtered vehicles.
+    Assert.True(session.SetActiveRoute(1));
+    Assert.Equal(["bus-400"], session.GetDisplayedVehicles().Select(v => v.VehicleId ?? "").ToArray());
+
+    // Clearing routes disables filtering and restores all cached vehicles.
+    session.ClearRoutes();
+    Assert.False(session.IsRouteVehicleFilterActive);
+    Assert.Equal(4, session.GetDisplayedVehicles().Count);
+  }
+
+  [Fact]
+  public async Task TryBeginRouteCalculation_DeactivatesActiveVehicleFilter()
+  {
+    var allVehicles = new List<BusLocation>
+    {
+      new() { VehicleId = "bus-200", RouteId = "200" },
+      new() { VehicleId = "bus-400", RouteId = "400" }
+    };
+    var route = new EnrichedRoute
+    {
+      OriginalRoute = new GoogleRoute
+      {
+        RouteId = 0,
+        Segments = [new RouteSegment { TravelMode = "TRANSIT", LineShortName = "200" }]
+      }
+    };
+
+    var tracking = new Mock<ITransitTrackingService>();
+    tracking.Setup(t => t.CachedVehicles).Returns(allVehicles);
+    tracking.Setup(t => t.EnrichRoutesAsync(It.IsAny<List<GoogleRoute>>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync([route]);
+
+    using var session = CreateSession(tracking: tracking);
+    await session.EnrichTransitRoutesAsync([route.OriginalRoute]);
+    session.SetActiveRoute(0, announceRoute: true, filterVehicles: true);
+    Assert.True(session.IsRouteVehicleFilterActive);
+    Assert.Single(session.GetDisplayedVehicles());
+
+    Assert.True(session.TryBeginRouteCalculation("KLCC", "KLIA"));
+    Assert.False(session.IsRouteVehicleFilterActive);
+    Assert.Equal(-1, session.ActiveRouteId);
+    Assert.Equal(2, session.GetDisplayedVehicles().Count);
+  }
+}

@@ -17,13 +17,7 @@ public class LocationServiceTests
     [Fact]
     public async Task GetCurrentLocationAsync_ReturnsCachedLocation_WhenWithinMaxAge()
     {
-        var js = new Mock<IJSRuntime>();
-        var options = Options.Create(new CacheExpirationOptions
-        {
-            Map = new MapCacheExpirationOptions { GeolocationSeconds = 60 }
-        });
-
-        var service = new LocationService(js.Object, options);
+        var (service, js, _) = CreateService();
         service.UpdateLocation(3.139, 101.6869, 10.0);
 
         var loc = await service.GetCurrentLocationAsync(forceRefresh: false);
@@ -37,22 +31,8 @@ public class LocationServiceTests
     [Fact]
     public async Task GetCurrentLocationAsync_ReFetches_WhenCacheExpired()
     {
-        var js = new Mock<IJSRuntime>();
-        var geoModule = new Mock<IJSObjectReference>();
-        var freshLocation = new Location(3.150, 101.700, 5.0);
-
-        js.Setup(j => j.InvokeAsync<IJSObjectReference>("import", It.IsAny<object[]>()))
-            .ReturnsAsync(geoModule.Object);
-        geoModule.Setup(m => m.InvokeAsync<Location?>("getUserLocation", It.IsAny<object[]>()))
-            .ReturnsAsync(freshLocation);
-
         var timeProvider = new OffsetTimeProvider();
-        var options = Options.Create(new CacheExpirationOptions
-        {
-            Map = new MapCacheExpirationOptions { GeolocationSeconds = 60 }
-        });
-
-        var service = new LocationService(js.Object, options, timeProvider);
+        var (service, _, geoModule) = CreateService(timeProvider: timeProvider, fetchedLocation: new Location(3.150, 101.700, 5.0));
         service.UpdateLocation(3.139, 101.6869, 10.0);
 
         // Advance 61 seconds (exceeding 60-second cache max age)
@@ -69,21 +49,7 @@ public class LocationServiceTests
     [Fact]
     public async Task GetCurrentLocationAsync_WithForceRefresh_BypassesCacheEvenWhenFresh()
     {
-        var js = new Mock<IJSRuntime>();
-        var geoModule = new Mock<IJSObjectReference>();
-        var refreshedLocation = new Location(3.200, 101.750, 8.0);
-
-        js.Setup(j => j.InvokeAsync<IJSObjectReference>("import", It.IsAny<object[]>()))
-            .ReturnsAsync(geoModule.Object);
-        geoModule.Setup(m => m.InvokeAsync<Location?>("getUserLocation", It.IsAny<object[]>()))
-            .ReturnsAsync(refreshedLocation);
-
-        var options = Options.Create(new CacheExpirationOptions
-        {
-            Map = new MapCacheExpirationOptions { GeolocationSeconds = 60 }
-        });
-
-        var service = new LocationService(js.Object, options);
+        var (service, _, geoModule) = CreateService(fetchedLocation: new Location(3.200, 101.750, 8.0));
         service.UpdateLocation(3.139, 101.6869, 10.0);
 
         var loc = await service.GetCurrentLocationAsync(forceRefresh: true);
@@ -97,24 +63,13 @@ public class LocationServiceTests
     [Fact]
     public async Task GetCurrentLocationAsync_HydratesLastKnownLocationFromCachedStorage_BeforeLiveLookupCompletes()
     {
-        var js = new Mock<IJSRuntime>();
-        var geoModule = new Mock<IJSObjectReference>();
-        var cachedLocation = new Location(5.4141, 100.3288, 25.0);
         var liveTcs = new TaskCompletionSource<Location?>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        js.Setup(j => j.InvokeAsync<IJSObjectReference>("import", It.IsAny<object[]>()))
-            .ReturnsAsync(geoModule.Object);
+        var (service, _, geoModule) = CreateService(importModule: true);
         geoModule.Setup(m => m.InvokeAsync<Location?>("getCachedLocation", It.IsAny<object[]>()))
-            .ReturnsAsync(cachedLocation);
+            .ReturnsAsync(new Location(5.4141, 100.3288, 25.0));
         geoModule.Setup(m => m.InvokeAsync<Location?>("getUserLocation", It.IsAny<object[]>()))
             .Returns(() => new ValueTask<Location?>(liveTcs.Task));
 
-        var options = Options.Create(new CacheExpirationOptions
-        {
-            Map = new MapCacheExpirationOptions { GeolocationSeconds = 60 }
-        });
-
-        var service = new LocationService(js.Object, options);
         var pendingTask = service.GetCurrentLocationAsync(forceRefresh: false);
 
         // Even while live GPS is still pending, LastKnownLocation is already hydrated from localStorage cache
@@ -123,21 +78,37 @@ public class LocationServiceTests
         Assert.Equal(100.3288, service.LastKnownLocation.Longitude);
 
         liveTcs.SetResult(null);
-        var result = await pendingTask;
-
-        Assert.Null(result);
+        Assert.Null(await pendingTask);
         Assert.Equal(5.4141, service.LastKnownLocation.Latitude);
     }
 
     [Fact]
-    public void LocationService_Throws_WhenGeolocationSecondsIsZeroOrNegative()
+    public void LocationService_Throws_WhenGeolocationSecondsIsZeroOrNegative() =>
+        Assert.Throws<InvalidOperationException>(() => CreateService(geolocationSeconds: 0));
+
+    private static (LocationService Service, Mock<IJSRuntime> Js, Mock<IJSObjectReference> Module) CreateService(
+        int geolocationSeconds = 60,
+        TimeProvider? timeProvider = null,
+        bool importModule = false,
+        Location? fetchedLocation = null)
     {
         var js = new Mock<IJSRuntime>();
+        var module = new Mock<IJSObjectReference>();
+        if (importModule || fetchedLocation is not null)
+        {
+            js.Setup(j => j.InvokeAsync<IJSObjectReference>("import", It.IsAny<object[]>()))
+                .ReturnsAsync(module.Object);
+        }
+        if (fetchedLocation is not null)
+        {
+            module.Setup(m => m.InvokeAsync<Location?>("getUserLocation", It.IsAny<object[]>()))
+                .ReturnsAsync(fetchedLocation);
+        }
+
         var options = Options.Create(new CacheExpirationOptions
         {
-            Map = new MapCacheExpirationOptions { GeolocationSeconds = 0 }
+            Map = new MapCacheExpirationOptions { GeolocationSeconds = geolocationSeconds }
         });
-
-        Assert.Throws<InvalidOperationException>(() => new LocationService(js.Object, options));
+        return (new LocationService(js.Object, options, timeProvider), js, module);
     }
 }

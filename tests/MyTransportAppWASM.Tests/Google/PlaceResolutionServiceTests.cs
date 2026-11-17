@@ -16,9 +16,7 @@ public class PlaceResolutionServiceTests
   [InlineData("90,-180", 90, -180)]
   public async Task CoordinateQuery_ReturnsCoordinateSuggestionDirectlyWithoutNetwork(string input, double lat, double lng)
   {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
-    var config = new ConfigurationBuilder().Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object);
+    var (service, mockCatalog, _, _) = CreateService(apiKey: null, withJs: false);
     var previousCulture = System.Globalization.CultureInfo.CurrentCulture;
     try
     {
@@ -48,11 +46,9 @@ public class PlaceResolutionServiceTests
   [InlineData("unknown-id")]
   public async Task Suggestions_RejectInvalidCoordinatesAndUnknownLocations(string input)
   {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
+    var (service, mockCatalog, _, _) = CreateService(apiKey: null, withJs: false);
     mockCatalog.Setup(c => c.SearchStationsAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
         .ReturnsAsync([]);
-    var config = new ConfigurationBuilder().Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object);
 
     Assert.Empty(await service.GetSuggestionsAsync(input));
   }
@@ -60,20 +56,18 @@ public class PlaceResolutionServiceTests
   [Fact]
   public async Task StationMatch_ReturnsFormattedStationSuggestions()
   {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
+    var (service, mockCatalog, _, _) = CreateService(apiKey: null, withJs: false);
     mockCatalog.Setup(c => c.SearchStationsAsync("Langkawi", 15, It.IsAny<CancellationToken>()))
         .ReturnsAsync([
             new MetLocation { LocationId = "Ds001", LocationName = "Langkawi", Latitude = 6.35, Longitude = 99.8 }
         ]);
 
-    var config = new ConfigurationBuilder().Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object);
-
     var suggestions = await service.GetSuggestionsAsync("Langkawi");
 
     Assert.Single(suggestions);
     Assert.Equal("Langkawi", suggestions[0].Name);
-    Assert.Equal("MET ID: Ds001", suggestions[0].FormattedAddress);
+    Assert.Equal("Ds001", suggestions[0].LocationId);
+    Assert.Equal("Langkawi", suggestions[0].FormattedAddress);
     Assert.Equal(6.35, suggestions[0].Lat);
     Assert.Equal(99.8, suggestions[0].Lng);
   }
@@ -81,30 +75,10 @@ public class PlaceResolutionServiceTests
   [Fact]
   public async Task StationMissWithApiKey_FallsBackToGooglePlacesViaJs()
   {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
+    var (service, mockCatalog, _, mockModule) = CreateService(withImport: true);
     mockCatalog.Setup(c => c.SearchStationsAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
         .ReturnsAsync([]);
-
-    var mockJs = new Mock<IJSRuntime>();
-    var mockModule = new Mock<IJSObjectReference>();
-    mockJs.Setup(j => j.InvokeAsync<IJSObjectReference>("import", It.IsAny<CancellationToken>(), It.Is<object[]>(args => args.Length == 1 && (string)args[0] == "./js/googleMap.js")))
-        .ReturnsAsync(mockModule.Object);
-
-    mockModule.Setup(m => m.InvokeAsync<GeocodeResult?>("geocodePlaceName", It.IsAny<CancellationToken>(), It.Is<object[]>(args =>
-            args.Length == 2 &&
-            (string)args[0] == "KL Sentral" &&
-            (string)args[1] == "fake-key")))
-        .ReturnsAsync(new GeocodeResult
-        {
-          Lat = 3.134,
-          Lng = 101.686,
-          FormattedAddress = "Jalan Stesen Sentral, 50470 Kuala Lumpur"
-        });
-
-    var config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["GoogleMaps:ApiKey"] = "fake-key" })
-        .Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object, mockJs.Object);
+    SetupGeocode(mockModule, "KL Sentral", 3.134, 101.686, "Jalan Stesen Sentral, 50470 Kuala Lumpur");
 
     var suggestions = await service.GetSuggestionsAsync("KL Sentral");
 
@@ -117,28 +91,8 @@ public class PlaceResolutionServiceTests
   [Fact]
   public async Task GeocodeAsync_WithJSRuntime_DelegatesToGoogleMapJsModule()
   {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
-    var mockJs = new Mock<IJSRuntime>();
-    var mockModule = new Mock<IJSObjectReference>();
-
-    mockJs.Setup(j => j.InvokeAsync<IJSObjectReference>("import", It.IsAny<CancellationToken>(), It.Is<object[]>(args => args.Length == 1 && (string)args[0] == "./js/googleMap.js")))
-        .ReturnsAsync(mockModule.Object);
-
-    mockModule.Setup(m => m.InvokeAsync<GeocodeResult?>("geocodePlaceName", It.IsAny<CancellationToken>(), It.Is<object[]>(args =>
-            args.Length == 2 &&
-            (string)args[0] == "Petronas Twin Towers" &&
-            (string)args[1] == "fake-key")))
-        .ReturnsAsync(new GeocodeResult
-        {
-          Lat = 3.1578,
-          Lng = 101.7119,
-          FormattedAddress = "Petronas Twin Towers, Kuala Lumpur"
-        });
-
-    var config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["GoogleMaps:ApiKey"] = "fake-key" })
-        .Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object, mockJs.Object);
+    var (service, _, _, mockModule) = CreateService(withImport: true);
+    SetupGeocode(mockModule, "Petronas Twin Towers", 3.1578, 101.7119, "Petronas Twin Towers, Kuala Lumpur");
 
     var place = await service.GeocodeAsync("Petronas Twin Towers");
 
@@ -149,60 +103,40 @@ public class PlaceResolutionServiceTests
     mockModule.Verify(m => m.InvokeAsync<GeocodeResult?>("geocodePlaceName", It.IsAny<CancellationToken>(), It.IsAny<object[]>()), Times.Once);
   }
 
-  [Fact]
-  public async Task GeocodeAsync_WithoutJsRuntime_ReturnsNull()
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task WithoutJsRuntime_ReturnsNull(bool reverse)
   {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
-    var config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["GoogleMaps:ApiKey"] = "fake-key" })
-        .Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object);
+    var (service, _, _, _) = CreateService(withJs: false);
 
-    var place = await service.GeocodeAsync("Petronas Twin Towers");
-
-    Assert.Null(place);
+    if (reverse)
+      Assert.Null(await service.ReverseGeocodeAsync(3.1578, 101.7119));
+    else
+      Assert.Null(await service.GeocodeAsync("Petronas Twin Towers"));
   }
 
-  [Fact]
-  public async Task ReverseGeocodeAsync_WithoutJsRuntime_ReturnsNull()
+  [Theory]
+  [InlineData(false, true)]
+  [InlineData(true, true)]
+  [InlineData(true, false)]
+  public async Task CancelledToken_ThrowsOperationCanceledException(bool withJs, bool reverse)
   {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
-    var config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["GoogleMaps:ApiKey"] = "fake-key" })
-        .Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object);
-
-    var address = await service.ReverseGeocodeAsync(3.1578, 101.7119);
-
-    Assert.Null(address);
-  }
-
-  [Fact]
-  public async Task ReverseGeocodeAsync_CancelledToken_ThrowsOperationCanceledException()
-  {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
-    var config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["GoogleMaps:ApiKey"] = "fake-key" })
-        .Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object);
-
+    var (service, _, _, _) = CreateService(withJs: withJs);
     using var cts = new CancellationTokenSource();
     cts.Cancel();
 
-    await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-        service.ReverseGeocodeAsync(3.1578, 101.7119, cts.Token));
+    await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reverse
+        ? service.ReverseGeocodeAsync(3.1578, 101.7119, cts.Token)
+        : service.GeocodeAsync("KL Sentral", cts.Token));
   }
 
   [Fact]
   public async Task ReverseGeocodeAsync_WithoutApiKey_ReturnsNull()
   {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
-    var config = new ConfigurationBuilder().Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object);
+    var (service, _, _, _) = CreateService(apiKey: null, withJs: false);
 
-    var address = await service.ReverseGeocodeAsync(3.1578, 101.7119);
-
-    Assert.Null(address);
+    Assert.Null(await service.ReverseGeocodeAsync(3.1578, 101.7119));
   }
 
   [Theory]
@@ -214,38 +148,21 @@ public class PlaceResolutionServiceTests
   [InlineData(3.1, -181.0)]
   public async Task ReverseGeocodeAsync_WithInvalidCoordinates_ReturnsNullWithoutRequest(double lat, double lng)
   {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
-    var config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["GoogleMaps:ApiKey"] = "fake-key" })
-        .Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object);
+    var (service, _, _, _) = CreateService(withJs: false);
 
-    var address = await service.ReverseGeocodeAsync(lat, lng);
-
-    Assert.Null(address);
+    Assert.Null(await service.ReverseGeocodeAsync(lat, lng));
   }
 
   [Fact]
   public async Task ReverseGeocodeAsync_WithJSRuntime_DelegatesToGoogleMapJsModule()
   {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
-    var mockJs = new Mock<IJSRuntime>();
-    var mockModule = new Mock<IJSObjectReference>();
-
-    mockJs.Setup(j => j.InvokeAsync<IJSObjectReference>("import", It.IsAny<CancellationToken>(), It.Is<object[]>(args => args.Length == 1 && (string)args[0] == "./js/googleMap.js")))
-        .ReturnsAsync(mockModule.Object);
-
+    var (service, _, mockJs, mockModule) = CreateService(withImport: true);
     mockModule.Setup(m => m.InvokeAsync<string?>("reverseGeocode", It.IsAny<CancellationToken>(), It.Is<object[]>(args =>
             args.Length == 3 &&
             (double)args[0] == 3.1578 &&
             (double)args[1] == 101.7119 &&
             (string)args[2] == "fake-key")))
         .ReturnsAsync("Petronas Twin Towers, Kuala Lumpur");
-
-    var config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["GoogleMaps:ApiKey"] = "fake-key" })
-        .Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object, mockJs.Object);
 
     var address = await service.ReverseGeocodeAsync(3.1578, 101.7119);
 
@@ -272,8 +189,7 @@ public class PlaceResolutionServiceTests
     services.AddScoped<IPlaceResolutionService, PlaceResolutionService>();
 
     var provider = services.BuildServiceProvider();
-    var instance = ActivatorUtilities.CreateInstance<PlaceResolutionService>(provider);
-    Assert.NotNull(instance);
+    Assert.NotNull(ActivatorUtilities.CreateInstance<PlaceResolutionService>(provider));
 
     var scopedService = provider.GetRequiredService<IPlaceResolutionService>();
     Assert.NotNull(scopedService);
@@ -283,54 +199,9 @@ public class PlaceResolutionServiceTests
   [Fact]
   public async Task ReverseGeocodeAsync_WithJSRuntime_WhenJsThrows_ReturnsNull()
   {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
-    var mockJs = new Mock<IJSRuntime>();
+    var (service, _, _, _) = CreateService(importError: new JSException("Script load failed"));
 
-    mockJs.Setup(j => j.InvokeAsync<IJSObjectReference>("import", It.IsAny<CancellationToken>(), It.IsAny<object[]>()))
-        .ThrowsAsync(new JSException("Script load failed"));
-
-    var config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["GoogleMaps:ApiKey"] = "fake-key" })
-        .Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object, mockJs.Object);
-
-    var address = await service.ReverseGeocodeAsync(3.1578, 101.7119);
-
-    Assert.Null(address);
-  }
-
-  [Fact]
-  public async Task ReverseGeocodeAsync_WithJSRuntime_Cancellation_ThrowsOperationCanceledException()
-  {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
-    var mockJs = new Mock<IJSRuntime>();
-    var config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["GoogleMaps:ApiKey"] = "fake-key" })
-        .Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object, mockJs.Object);
-
-    using var cts = new CancellationTokenSource();
-    cts.Cancel();
-
-    await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-        service.ReverseGeocodeAsync(3.1578, 101.7119, cts.Token));
-  }
-
-  [Fact]
-  public async Task GeocodeAsync_WithJSRuntime_Cancellation_ThrowsOperationCanceledException()
-  {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
-    var mockJs = new Mock<IJSRuntime>();
-    var config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["GoogleMaps:ApiKey"] = "fake-key" })
-        .Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object, mockJs.Object);
-
-    using var cts = new CancellationTokenSource();
-    cts.Cancel();
-
-    await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-        service.GeocodeAsync("KL Sentral", cts.Token));
+    Assert.Null(await service.ReverseGeocodeAsync(3.1578, 101.7119));
   }
 
   [Theory]
@@ -342,43 +213,19 @@ public class PlaceResolutionServiceTests
   [InlineData(3.1, -181.0)]
   public async Task GeocodeAsync_InvalidOrOutOfBoundsCoordinates_ReturnsNull(double lat, double lng)
   {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
-    var mockJs = new Mock<IJSRuntime>();
-    var mockModule = new Mock<IJSObjectReference>();
-
-    mockJs.Setup(j => j.InvokeAsync<IJSObjectReference>("import", It.IsAny<CancellationToken>(), It.IsAny<object[]>()))
-        .ReturnsAsync(mockModule.Object);
-
+    var (service, _, _, mockModule) = CreateService(withImport: true);
     mockModule.Setup(m => m.InvokeAsync<GeocodeResult?>("geocodePlaceName", It.IsAny<CancellationToken>(), It.IsAny<object[]>()))
         .ReturnsAsync(new GeocodeResult { Lat = lat, Lng = lng, FormattedAddress = "Invalid Location" });
 
-    var config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["GoogleMaps:ApiKey"] = "fake-key" })
-        .Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object, mockJs.Object);
-
-    var place = await service.GeocodeAsync("Invalid Location");
-
-    Assert.Null(place);
+    Assert.Null(await service.GeocodeAsync("Invalid Location"));
   }
 
   [Fact]
   public async Task DisposeAsync_IsIdempotent_DisposesModuleOnlyOnce()
   {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
-    var mockJs = new Mock<IJSRuntime>();
-    var mockModule = new Mock<IJSObjectReference>();
-
-    mockJs.Setup(j => j.InvokeAsync<IJSObjectReference>("import", It.IsAny<CancellationToken>(), It.IsAny<object[]>()))
-        .ReturnsAsync(mockModule.Object);
-
+    var (service, _, mockJs, mockModule) = CreateService(withImport: true);
     mockModule.Setup(m => m.InvokeAsync<string?>("reverseGeocode", It.IsAny<CancellationToken>(), It.IsAny<object[]>()))
         .ReturnsAsync("Some address");
-
-    var config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["GoogleMaps:ApiKey"] = "fake-key" })
-        .Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object, mockJs.Object);
 
     // Warm up the module cache
     await service.ReverseGeocodeAsync(3.1, 101.6);
@@ -390,32 +237,67 @@ public class PlaceResolutionServiceTests
     mockModule.Verify(m => m.DisposeAsync(), Times.Once);
 
     // Subsequent calls return null and do not re-import
-    var postDisposeAddress = await service.ReverseGeocodeAsync(3.1, 101.6);
-    Assert.Null(postDisposeAddress);
-    var postDisposeGeocode = await service.GeocodeAsync("Test");
-    Assert.Null(postDisposeGeocode);
+    Assert.Null(await service.ReverseGeocodeAsync(3.1, 101.6));
+    Assert.Null(await service.GeocodeAsync("Test"));
     mockJs.Verify(j => j.InvokeAsync<IJSObjectReference>("import", It.IsAny<CancellationToken>(), It.IsAny<object[]>()), Times.Once);
   }
 
   [Fact]
   public async Task DisposeAsync_WhenModuleTaskFaulted_DoesNotThrow()
   {
-    var mockCatalog = new Mock<IWeatherStationCatalogService>();
-    var mockJs = new Mock<IJSRuntime>();
-
-    mockJs.Setup(j => j.InvokeAsync<IJSObjectReference>("import", It.IsAny<CancellationToken>(), It.IsAny<object[]>()))
-        .ThrowsAsync(new JSException("Module failed to load"));
-
-    var config = new ConfigurationBuilder()
-        .AddInMemoryCollection(new Dictionary<string, string?> { ["GoogleMaps:ApiKey"] = "fake-key" })
-        .Build();
-    var service = new PlaceResolutionService(config, mockCatalog.Object, mockJs.Object);
+    var (service, _, _, _) = CreateService(importError: new JSException("Module failed to load"));
 
     // Trigger faulted task
     await service.ReverseGeocodeAsync(3.1, 101.6);
 
     // DisposeAsync should handle faulted task gracefully without throwing
-    var exception = await Record.ExceptionAsync(() => service.DisposeAsync().AsTask());
-    Assert.Null(exception);
+    Assert.Null(await Record.ExceptionAsync(() => service.DisposeAsync().AsTask()));
   }
+
+  private static (
+      PlaceResolutionService Service,
+      Mock<IWeatherStationCatalogService> Catalog,
+      Mock<IJSRuntime> Js,
+      Mock<IJSObjectReference> Module) CreateService(
+      string? apiKey = "fake-key",
+      bool withJs = true,
+      bool withImport = false,
+      Exception? importError = null)
+  {
+    var catalog = new Mock<IWeatherStationCatalogService>();
+    var js = new Mock<IJSRuntime>();
+    var module = new Mock<IJSObjectReference>();
+    if (importError != null)
+    {
+      js.Setup(j => j.InvokeAsync<IJSObjectReference>("import", It.IsAny<CancellationToken>(), It.IsAny<object[]>()))
+          .ThrowsAsync(importError);
+    }
+    else if (withImport)
+    {
+      js.Setup(j => j.InvokeAsync<IJSObjectReference>(
+              "import",
+              It.IsAny<CancellationToken>(),
+              It.Is<object[]>(args => args.Length == 1 && (string)args[0] == "./js/googleMap.js")))
+          .ReturnsAsync(module.Object);
+    }
+
+    var configData = apiKey is null
+        ? new Dictionary<string, string?>()
+        : new Dictionary<string, string?> { ["GoogleMaps:ApiKey"] = apiKey };
+    var config = new ConfigurationBuilder().AddInMemoryCollection(configData).Build();
+    var service = new PlaceResolutionService(config, catalog.Object, withJs ? js.Object : null);
+    return (service, catalog, js, module);
+  }
+
+  private static void SetupGeocode(
+      Mock<IJSObjectReference> module,
+      string query,
+      double lat,
+      double lng,
+      string formattedAddress) =>
+      module.Setup(m => m.InvokeAsync<GeocodeResult?>("geocodePlaceName", It.IsAny<CancellationToken>(), It.Is<object[]>(args =>
+              args.Length == 2 &&
+              (string)args[0] == query &&
+              (string)args[1] == "fake-key")))
+          .ReturnsAsync(new GeocodeResult { Lat = lat, Lng = lng, FormattedAddress = formattedAddress });
 }

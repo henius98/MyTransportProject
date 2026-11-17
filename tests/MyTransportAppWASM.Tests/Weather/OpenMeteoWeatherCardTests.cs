@@ -281,7 +281,6 @@ public class OpenMeteoWeatherCardTests
     private static async Task WithCardAsync(Func<OpenMeteoWeatherCard, HtmlRenderer, HtmlRootComponent,
         Mock<IWeatherPlannerService>, Mock<IJSRuntime>, Task> test, WeatherTimeSlice? day = null)
     {
-        var options = LoadOpenMeteoOptions();
         var planner = new Mock<IWeatherPlannerService>();
         var js = new Mock<IJSRuntime>();
         var activator = new CapturingActivator();
@@ -293,7 +292,6 @@ public class OpenMeteoWeatherCardTests
         var html = await renderer.Dispatcher.InvokeAsync(() => renderer.RenderComponentAsync<OpenMeteoWeatherCard>(
             ParameterView.FromDictionary(new Dictionary<string, object?>
             {
-                [nameof(OpenMeteoWeatherCard.Options)] = options,
                 [nameof(OpenMeteoWeatherCard.Query)] = new WeatherQuery { Latitude = 3.139, Longitude = 101.6869 },
                 [nameof(OpenMeteoWeatherCard.Result)] = new WeatherProviderResult { Periods = [day ?? Day] },
                 [nameof(OpenMeteoWeatherCard.FetchOutlook)] = true

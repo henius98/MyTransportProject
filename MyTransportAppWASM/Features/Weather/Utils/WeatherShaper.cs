@@ -160,20 +160,9 @@ namespace MyTransportAppWASM.Features.Weather.Utils
 
       if (fields.MorningForecast != null || fields.AfternoonForecast != null || fields.NightForecast != null)
       {
-        if (fields.MorningForecast != null)
-        {
-          AddFieldSlice(destination, "Pagi", time, temperature, probability, in fields, fields.MorningForecast, GetIconForSummaryString(fields.MorningForecast, time));
-        }
-        if (fields.AfternoonForecast != null)
-        {
-          var petangTime = time.AddHours(6);
-          AddFieldSlice(destination, "Petang", petangTime, temperature, probability, in fields, fields.AfternoonForecast, GetIconForSummaryString(fields.AfternoonForecast, petangTime));
-        }
-        if (fields.NightForecast != null)
-        {
-          var malamTime = time.AddHours(12);
-          AddFieldSlice(destination, "Malam", malamTime, temperature, probability, in fields, fields.NightForecast, GetIconForSummaryString(fields.NightForecast, malamTime));
-        }
+        AddPeriodForecast(destination, "Pagi", time, fields.MorningForecast, temperature, probability, in fields);
+        AddPeriodForecast(destination, "Petang", time.AddHours(6), fields.AfternoonForecast, temperature, probability, in fields);
+        AddPeriodForecast(destination, "Malam", time.AddHours(12), fields.NightForecast, temperature, probability, in fields);
         return true;
       }
 
@@ -198,6 +187,21 @@ namespace MyTransportAppWASM.Features.Weather.Utils
 
       AddFieldSlice(destination, label, time, temperature, probability, in fields, summary, icon);
       return true;
+    }
+
+    private static void AddPeriodForecast(
+      List<WeatherTimeSlice> destination,
+      string label,
+      DateTimeOffset sliceTime,
+      string? forecast,
+      double? temperature,
+      double? probability,
+      in WeatherFields fields)
+    {
+      if (forecast is not null)
+      {
+        AddFieldSlice(destination, label, sliceTime, temperature, probability, in fields, forecast, GetIconForSummaryString(forecast, sliceTime));
+      }
     }
 
     private static void AddFieldSlice(
@@ -269,48 +273,37 @@ namespace MyTransportAppWASM.Features.Weather.Utils
         switch (ClassifyProperty(property))
         {
           case WeatherFieldKind.Temperature:
-            if (fields.Temperature is null && TryGetFirstDouble(value, out var temperature))
-              fields.Temperature = temperature;
+            AssignFirstNumber(ref fields.Temperature, value);
             break;
           case WeatherFieldKind.MaximumTemperature:
-            if (fields.MaximumTemperature is null && TryGetFirstDouble(value, out var maximumTemperature))
-              fields.MaximumTemperature = maximumTemperature;
+            AssignFirstNumber(ref fields.MaximumTemperature, value);
             break;
           case WeatherFieldKind.MinimumTemperature:
-            if (fields.MinimumTemperature is null && TryGetFirstDouble(value, out var minimumTemperature))
-              fields.MinimumTemperature = minimumTemperature;
+            AssignFirstNumber(ref fields.MinimumTemperature, value);
             break;
           case WeatherFieldKind.Precipitation:
-            if (fields.Precipitation is null && TryGetFirstDouble(value, out var precipitation))
-              fields.Precipitation = precipitation;
+            AssignFirstNumber(ref fields.Precipitation, value);
             break;
           case WeatherFieldKind.Probability:
-            if (fields.Probability is null && TryGetFirstDouble(value, out var probability))
-              fields.Probability = probability;
+            AssignFirstNumber(ref fields.Probability, value);
             break;
           case WeatherFieldKind.WeatherCode:
-            if (fields.WeatherCode is null && TryGetFirstDouble(value, out var weatherCode))
-              fields.WeatherCode = weatherCode;
+            AssignFirstNumber(ref fields.WeatherCode, value);
             break;
           case WeatherFieldKind.Wind:
-            if (fields.Wind is null && value.ValueKind == JsonValueKind.String)
-              fields.Wind = value.GetString();
+            AssignFirstString(ref fields.Wind, value);
             break;
           case WeatherFieldKind.MorningForecast:
-            if (fields.MorningForecast is null && value.ValueKind == JsonValueKind.String)
-              fields.MorningForecast = value.GetString();
+            AssignFirstString(ref fields.MorningForecast, value);
             break;
           case WeatherFieldKind.AfternoonForecast:
-            if (fields.AfternoonForecast is null && value.ValueKind == JsonValueKind.String)
-              fields.AfternoonForecast = value.GetString();
+            AssignFirstString(ref fields.AfternoonForecast, value);
             break;
           case WeatherFieldKind.NightForecast:
-            if (fields.NightForecast is null && value.ValueKind == JsonValueKind.String)
-              fields.NightForecast = value.GetString();
+            AssignFirstString(ref fields.NightForecast, value);
             break;
           case WeatherFieldKind.Summary:
-            if (fields.Summary is null && value.ValueKind == JsonValueKind.String)
-              fields.Summary = value.GetString();
+            AssignFirstString(ref fields.Summary, value);
             break;
           case WeatherFieldKind.Time:
             if (fields.Time is null && TryGetDate(value, out var time))
@@ -323,6 +316,18 @@ namespace MyTransportAppWASM.Features.Weather.Utils
           CollectFields(value, depth + 1, ref fields);
         }
       }
+    }
+
+    private static void AssignFirstNumber(ref double? target, JsonElement value)
+    {
+      if (target is null && TryGetFirstDouble(value, out var parsed))
+        target = parsed;
+    }
+
+    private static void AssignFirstString(ref string? target, JsonElement value)
+    {
+      if (target is null && value.ValueKind == JsonValueKind.String)
+        target = value.GetString();
     }
 
     private static bool TryGetFirstDouble(JsonElement element, out double value)

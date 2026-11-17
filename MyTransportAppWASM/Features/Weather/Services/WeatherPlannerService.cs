@@ -9,12 +9,13 @@ namespace MyTransportAppWASM.Features.Weather.Services
   {
     private readonly HttpClient _httpClient;
     private readonly IMemoryCache _cache;
-    private readonly WeatherOptions _options;
     private readonly IPlaceResolutionService? _placeResolutionService;
     private readonly IWeatherStationCatalogService? _stationCatalog;
     private readonly TimeSpan _liveCacheExpiration;
     private readonly TimeSpan _outlookCacheExpiration;
     private readonly TimeSpan _fallbackCacheExpiration;
+    private readonly OpenMeteoWeatherAdapter _openMeteo;
+    private readonly IReadOnlyList<IWeatherProviderAdapter> _adapters;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public WeatherPlannerService(
@@ -27,7 +28,7 @@ namespace MyTransportAppWASM.Features.Weather.Services
     {
       _httpClient = httpClient;
       _cache = cache;
-      _options = weatherOptions.Value ?? new();
+      var options = weatherOptions.Value ?? new();
       _placeResolutionService = placeResolutionService;
       _stationCatalog = stationCatalog;
       _liveCacheExpiration = GetPositiveDuration(
@@ -39,6 +40,11 @@ namespace MyTransportAppWASM.Features.Weather.Services
       _fallbackCacheExpiration = GetPositiveDuration(
         cacheExpiration.Value.Weather.FallbackSeconds,
         $"{nameof(CacheExpirationOptions.Weather)}:{nameof(WeatherCacheExpirationOptions.FallbackSeconds)}");
+
+      var metMalaysia = new MetMalaysiaWeatherAdapter(options.MetMalaysia);
+      _openMeteo = new OpenMeteoWeatherAdapter(options.OpenMeteo);
+      var singaporeNea = new SingaporeNeaWeatherAdapter(options.SingaporeNEA);
+      _adapters = [metMalaysia, _openMeteo, singaporeNea];
     }
 
     public WeatherPlannerService(
@@ -56,42 +62,43 @@ namespace MyTransportAppWASM.Features.Weather.Services
     {
       ArgumentNullException.ThrowIfNull(query);
 
-      var hasPendingSearch = !string.IsNullOrWhiteSpace(query.PendingSearchText);
-      if (!hasPendingSearch && (!double.IsFinite(query.Latitude) || !double.IsFinite(query.Longitude)
-        || query.Latitude is < -90 or > 90 || query.Longitude is < -180 or > 180))
+      var resolvedQuery = query with { };
+      var hasPendingSearch = !string.IsNullOrWhiteSpace(resolvedQuery.PendingSearchText);
+      if (!hasPendingSearch && !GeoMath.IsValidCoordinates(resolvedQuery.Latitude, resolvedQuery.Longitude))
       {
-        return InvalidPlan(query, "Enter a valid latitude (-90 to 90) and longitude (-180 to 180).");
+        return InvalidPlan(resolvedQuery, "Enter a valid latitude (-90 to 90) and longitude (-180 to 180).");
       }
 
       var minDate = MalaysiaTime.Today;
       var maxDate = minDate.AddDays(WeatherForecastLimits.OpenMeteoForecastDays - 1);
-      var departDate = query.Departure.HasValue ? MalaysiaTime.Convert(query.Departure.Value).Date : (DateTime?)null;
-      var returnDate = query.Return.HasValue ? MalaysiaTime.Convert(query.Return.Value).Date : (DateTime?)null;
+      var departDate = resolvedQuery.Departure.HasValue ? MalaysiaTime.Convert(resolvedQuery.Departure.Value).Date : (DateTime?)null;
+      var returnDate = resolvedQuery.Return.HasValue ? MalaysiaTime.Convert(resolvedQuery.Return.Value).Date : (DateTime?)null;
 
       if ((departDate.HasValue && (departDate.Value < minDate || departDate.Value > maxDate))
         || (returnDate.HasValue && (returnDate.Value < minDate || returnDate.Value > maxDate)))
       {
         return InvalidPlan(
-          query,
+          resolvedQuery,
           $"Select dates within the {WeatherForecastLimits.OpenMeteoForecastDays}-day forecast window ending {maxDate:dd MMM yyyy}.");
       }
 
       if (departDate.HasValue && returnDate.HasValue && returnDate.Value < departDate.Value)
       {
-        return InvalidPlan(query, "Return date must be on or after the departure date.");
+        return InvalidPlan(resolvedQuery, "Return date must be on or after the departure date.");
       }
 
       if (hasPendingSearch)
       {
-        var searchText = query.PendingSearchText!.Trim();
+        var searchText = resolvedQuery.PendingSearchText!.Trim();
         var suggestions = _placeResolutionService != null
-          ? await _placeResolutionService.GetSuggestionsAsync(query.PendingSearchText!, cancellationToken)
+          ? await _placeResolutionService.GetSuggestionsAsync(resolvedQuery.PendingSearchText!, cancellationToken)
           : [];
         var exactMatches = suggestions.Where(suggestion =>
           string.Equals(suggestion.Name, searchText, StringComparison.OrdinalIgnoreCase)
-          || string.Equals(suggestion.FormattedAddress, $"MET ID: {searchText}", StringComparison.OrdinalIgnoreCase)).ToList();
+          || (!string.IsNullOrWhiteSpace(suggestion.LocationId)
+              && string.Equals(suggestion.LocationId, searchText, StringComparison.OrdinalIgnoreCase))).ToList();
 
-        (double Lat, double Lng, string FormattedAddress, string Name) chosen;
+        PlaceSuggestion chosen;
         if (exactMatches.Count == 1)
         {
           chosen = exactMatches[0];
@@ -105,53 +112,42 @@ namespace MyTransportAppWASM.Features.Weather.Services
           var error = suggestions.Count == 0
             ? "Enter a known forecast name or ID, or valid latitude (-90 to 90), longitude (-180 to 180)."
             : "Several forecast locations match. Select a result from the location search.";
-          return InvalidPlan(query, error);
+          return InvalidPlan(resolvedQuery, error);
         }
 
-        query.PlaceName = chosen.Name;
-        query.Latitude = chosen.Lat;
-        query.Longitude = chosen.Lng;
-        query.PendingSearchText = null;
-        query.LocationId = chosen.FormattedAddress != null && chosen.FormattedAddress.StartsWith("MET ID: ", StringComparison.Ordinal)
-          ? chosen.FormattedAddress.AsSpan(8).Trim().ToString()
-          : null;
+        resolvedQuery.PlaceName = chosen.Name;
+        resolvedQuery.Latitude = chosen.Lat;
+        resolvedQuery.Longitude = chosen.Lng;
+        resolvedQuery.PendingSearchText = null;
+        resolvedQuery.LocationId = string.IsNullOrWhiteSpace(chosen.LocationId) ? null : chosen.LocationId.Trim();
       }
 
-      if (string.IsNullOrWhiteSpace(query.LocationId))
+      if (string.IsNullOrWhiteSpace(resolvedQuery.LocationId))
       {
-        await ResolveNearestLocationAsync(query, updatePlaceName: false, cancellationToken);
+        await ResolveNearestLocationAsync(resolvedQuery, updatePlaceName: false, cancellationToken);
       }
 
       var realtimeTasks = new List<Task<WeatherProviderResult>>();
       var outlookTasks = new List<Task<WeatherProviderResult>>();
 
-      // 1. MetMalaysia
-      if (_options.MetMalaysia.Enabled && !string.IsNullOrWhiteSpace(query.LocationId))
+      foreach (var adapter in _adapters)
       {
-        realtimeTasks.Add(FetchMetMalaysiaRealtimeAsync(query, forceRefresh, cancellationToken));
-        if (query.Return.HasValue)
-        {
-          outlookTasks.Add(FetchMetMalaysiaOutlookAsync(query, forceRefresh, cancellationToken));
-        }
-      }
+        if (!adapter.IsEligible(resolvedQuery)) continue;
 
-      // 2. Open-Meteo
-      if (_options.OpenMeteo.Enabled)
-      {
-        realtimeTasks.Add(FetchOpenMeteoRealtimeAsync(query, forceRefresh, cancellationToken));
-        if (query.Return.HasValue)
-        {
-          outlookTasks.Add(FetchOpenMeteoOutlookAsync(query, forceRefresh, cancellationToken));
-        }
-      }
+        realtimeTasks.Add(FetchRealtimeSliceAsync(
+          adapter,
+          adapter.BuildEndpoint(resolvedQuery, isOutlook: false),
+          forceRefresh,
+          cancellationToken));
 
-      // 3. Singapore NEA
-      if (_options.SingaporeNEA.Enabled && IsNearSingapore(query.Latitude, query.Longitude))
-      {
-        realtimeTasks.Add(FetchSingaporeNeaRealtimeAsync(query, forceRefresh, cancellationToken));
-        if (query.Return.HasValue)
+        if (resolvedQuery.Return.HasValue)
         {
-          outlookTasks.Add(FetchSingaporeNeaOutlookAsync(query, forceRefresh, cancellationToken));
+          outlookTasks.Add(FetchOutlookSlicesAsync(
+            adapter,
+            adapter.BuildEndpoint(resolvedQuery, isOutlook: true),
+            adapter.OutlookMaxDays,
+            forceRefresh,
+            cancellationToken));
         }
       }
 
@@ -161,7 +157,7 @@ namespace MyTransportAppWASM.Features.Weather.Services
 
       return new WeatherPlanResult
       {
-        Query = query with { },
+        Query = resolvedQuery,
         Realtime = (await realtimeAllTask).Where(r => r != null).ToList(),
         Outlooks = (await outlookAllTask).Where(r => r != null).ToList()
       };
@@ -204,28 +200,17 @@ namespace MyTransportAppWASM.Features.Weather.Services
     {
       ArgumentNullException.ThrowIfNull(query);
 
-      if (string.Equals(providerName, "MetMalaysia", StringComparison.OrdinalIgnoreCase))
+      var adapter = _adapters.FirstOrDefault(a =>
+        string.Equals(a.Name, providerName, StringComparison.OrdinalIgnoreCase));
+      if (adapter is null)
       {
-        return isOutlook
-          ? await FetchMetMalaysiaOutlookAsync(query, forceRefresh: true, cancellationToken)
-          : await FetchMetMalaysiaRealtimeAsync(query, forceRefresh: true, cancellationToken);
+        throw new ArgumentException($"Unknown weather provider '{providerName}'", nameof(providerName));
       }
 
-      if (string.Equals(providerName, "Open-Meteo", StringComparison.OrdinalIgnoreCase))
-      {
-        return isOutlook
-          ? await FetchOpenMeteoOutlookAsync(query, forceRefresh: true, cancellationToken)
-          : await FetchOpenMeteoRealtimeAsync(query, forceRefresh: true, cancellationToken);
-      }
-
-      if (string.Equals(providerName, "Singapore NEA", StringComparison.OrdinalIgnoreCase))
-      {
-        return isOutlook
-          ? await FetchSingaporeNeaOutlookAsync(query, forceRefresh: true, cancellationToken)
-          : await FetchSingaporeNeaRealtimeAsync(query, forceRefresh: true, cancellationToken);
-      }
-
-      throw new ArgumentException($"Unknown weather provider '{providerName}'", nameof(providerName));
+      var endpoint = adapter.BuildEndpoint(query, isOutlook);
+      return isOutlook
+        ? await FetchOutlookSlicesAsync(adapter, endpoint, adapter.OutlookMaxDays, forceRefresh: true, cancellationToken)
+        : await FetchRealtimeSliceAsync(adapter, endpoint, forceRefresh: true, cancellationToken);
     }
 
     public async Task<WeatherProviderResult> GetHourlyForecastAsync(
@@ -236,17 +221,12 @@ namespace MyTransportAppWASM.Features.Weather.Services
     {
       ArgumentNullException.ThrowIfNull(query);
 
-      if (!_options.OpenMeteo.Endpoints.TryGetValue("Hourly", out var hourlyPath))
+      if (!_openMeteo.TryBuildHourlyEndpoint(query, date, out var uri) || uri is null)
       {
-        return BuildSample(_options.OpenMeteo, "Unavailable", Array.Empty<WeatherTimeSlice>());
+        return BuildSample(_openMeteo, "Unavailable", Array.Empty<WeatherTimeSlice>());
       }
 
-      var template = (_options.OpenMeteo.BaseUrl + hourlyPath)
-        .Replace("{date}", date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
-        .Replace("{timezone}", Uri.EscapeDataString(MalaysiaTime.IanaTimeZone), StringComparison.OrdinalIgnoreCase);
-
-      var uri = BuildOpenMeteoUri(template, _options.OpenMeteo, query);
-      var result = await FetchProviderDataAsync(_options.OpenMeteo, uri, "Outlook", cancellationToken, forceRefresh);
+      var result = await FetchProviderDataAsync(_openMeteo, uri, "Outlook", cancellationToken, forceRefresh);
 
       var periods = result.Periods
         .Where(p => !p.IsPlaceholder && MalaysiaTime.Convert(p.Time).Date == date.Date)
@@ -256,79 +236,13 @@ namespace MyTransportAppWASM.Features.Weather.Services
       return result with { Periods = periods };
     }
 
-    private Task<WeatherProviderResult> FetchMetMalaysiaRealtimeAsync(
-      WeatherQuery query,
-      bool forceRefresh,
-      CancellationToken cancellationToken) =>
-      FetchRealtimeSliceAsync(
-        _options.MetMalaysia,
-        BuildMetMalaysiaUri(_options.MetMalaysia, query, isOutlook: false),
-        forceRefresh,
-        cancellationToken);
-
-    private Task<WeatherProviderResult> FetchMetMalaysiaOutlookAsync(
-      WeatherQuery query,
-      bool forceRefresh,
-      CancellationToken cancellationToken) =>
-      FetchOutlookSlicesAsync(
-        _options.MetMalaysia,
-        BuildMetMalaysiaUri(_options.MetMalaysia, query, isOutlook: true),
-        maxDays: 14,
-        forceRefresh,
-        cancellationToken);
-
-    private Task<WeatherProviderResult> FetchOpenMeteoRealtimeAsync(
-      WeatherQuery query,
-      bool forceRefresh,
-      CancellationToken cancellationToken)
-    {
-      string endpointPath = _options.OpenMeteo.Endpoints.TryGetValue("Realtime", out var path) ? path : string.Empty;
-      var uri = BuildOpenMeteoUri(_options.OpenMeteo.BaseUrl + endpointPath, _options.OpenMeteo, query);
-      return FetchRealtimeSliceAsync(_options.OpenMeteo, uri, forceRefresh, cancellationToken);
-    }
-
-    private Task<WeatherProviderResult> FetchOpenMeteoOutlookAsync(
-      WeatherQuery query,
-      bool forceRefresh,
-      CancellationToken cancellationToken)
-    {
-      string endpointPath = _options.OpenMeteo.Endpoints.TryGetValue("Outlook", out var path) ? path : string.Empty;
-      var uri = BuildOpenMeteoUri(_options.OpenMeteo.BaseUrl + endpointPath, _options.OpenMeteo, query);
-      return FetchOutlookSlicesAsync(
-        _options.OpenMeteo,
-        uri,
-        WeatherForecastLimits.OpenMeteoForecastDays,
-        forceRefresh,
-        cancellationToken);
-    }
-
-    private Task<WeatherProviderResult> FetchSingaporeNeaRealtimeAsync(
-      WeatherQuery query,
-      bool forceRefresh,
-      CancellationToken cancellationToken)
-    {
-      string endpointPath = _options.SingaporeNEA.Endpoints.TryGetValue("Realtime", out var path) ? path : string.Empty;
-      var uri = BuildSingaporeNeaUri(_options.SingaporeNEA.BaseUrl + endpointPath, _options.SingaporeNEA, query);
-      return FetchRealtimeSliceAsync(_options.SingaporeNEA, uri, forceRefresh, cancellationToken);
-    }
-
-    private Task<WeatherProviderResult> FetchSingaporeNeaOutlookAsync(
-      WeatherQuery query,
-      bool forceRefresh,
-      CancellationToken cancellationToken)
-    {
-      string endpointPath = _options.SingaporeNEA.Endpoints.TryGetValue("Outlook", out var path) ? path : string.Empty;
-      var uri = BuildSingaporeNeaUri(_options.SingaporeNEA.BaseUrl + endpointPath, _options.SingaporeNEA, query);
-      return FetchOutlookSlicesAsync(_options.SingaporeNEA, uri, maxDays: 4, forceRefresh, cancellationToken);
-    }
-
     private async Task<WeatherProviderResult> FetchRealtimeSliceAsync(
-      WeatherProviderOptions provider,
+      IWeatherProviderAdapter adapter,
       Uri uri,
       bool forceRefresh,
       CancellationToken cancellationToken)
     {
-      var result = await FetchProviderDataAsync(provider, uri, "Realtime", cancellationToken, forceRefresh);
+      var result = await FetchProviderDataAsync(adapter, uri, "Realtime", cancellationToken, forceRefresh);
 
       if (result.Periods.Count > 1)
       {
@@ -344,21 +258,28 @@ namespace MyTransportAppWASM.Features.Weather.Services
     }
 
     private async Task<WeatherProviderResult> FetchOutlookSlicesAsync(
-      WeatherProviderOptions provider,
+      IWeatherProviderAdapter adapter,
       Uri uri,
       int maxDays,
       bool forceRefresh,
       CancellationToken cancellationToken)
     {
-      var result = await FetchProviderDataAsync(provider, uri, "Outlook", cancellationToken, forceRefresh);
+      var result = await FetchProviderDataAsync(adapter, uri, "Outlook", cancellationToken, forceRefresh);
 
       if (result.Periods.Count > 0)
       {
-        var now = MalaysiaTime.Now;
-        var sorted = result.Periods
-          .Where(p => MalaysiaTime.Convert(p.Time).Date >= now.Date)
-          .OrderBy(p => p.Time)
+        var today = MalaysiaTime.Today;
+        var allowedDates = result.Periods
+          .Select(p => MalaysiaTime.Convert(p.Time).Date)
+          .Where(date => date >= today)
+          .Distinct()
+          .OrderBy(date => date)
           .Take(maxDays)
+          .ToHashSet();
+
+        var sorted = result.Periods
+          .Where(p => allowedDates.Contains(MalaysiaTime.Convert(p.Time).Date))
+          .OrderBy(p => p.Time)
           .ToList();
         result = result with { Periods = sorted };
       }
@@ -366,89 +287,18 @@ namespace MyTransportAppWASM.Features.Weather.Services
       return result;
     }
 
-    private static string ApplyCommonPlaceholders(
-      string template,
-      WeatherProviderOptions options,
-      WeatherQuery? query = null)
-    {
-      if (query is not null)
-      {
-        template = template
-          .Replace("{lat}", query.Latitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
-          .Replace("{lon}", query.Longitude.ToString("F4", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
-      }
-
-      if (!string.IsNullOrWhiteSpace(options.ApiKey))
-      {
-        template = template
-          .Replace("{key}", options.ApiKey, StringComparison.OrdinalIgnoreCase)
-          .Replace("{apiKey}", options.ApiKey, StringComparison.OrdinalIgnoreCase);
-      }
-
-      return template;
-    }
-
-    private static Uri BuildSingaporeNeaUri(string template, KeyedWeatherProviderOptions options, WeatherQuery query) =>
-      new(ApplyCommonPlaceholders(template, options, query), UriKind.Absolute);
-
-    private static Uri BuildMetMalaysiaUri(MetMalaysiaWeatherProviderOptions options, WeatherQuery query, bool isOutlook)
-    {
-      var template = options.BaseUrl + options.Endpoints;
-
-      if (template.Contains("{location_id}", StringComparison.OrdinalIgnoreCase))
-      {
-        string locId = !string.IsNullOrWhiteSpace(query.LocationId) ? query.LocationId : "Ds058";
-        template = template.Replace("{location_id}", Uri.EscapeDataString(locId), StringComparison.OrdinalIgnoreCase);
-      }
-
-      if (template.Contains("{date_start}", StringComparison.OrdinalIgnoreCase) ||
-          template.Contains("{date_end}", StringComparison.OrdinalIgnoreCase))
-      {
-        var currentMalaysiaTime = MalaysiaTime.Now;
-        var start = isOutlook ? query.Departure ?? currentMalaysiaTime : currentMalaysiaTime;
-        var end = isOutlook ? query.Return ?? start.AddDays(7) : currentMalaysiaTime;
-        template = template.Replace("{date_start}", start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
-        template = template.Replace("{date_end}", end.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase);
-      }
-
-      return new Uri(ApplyCommonPlaceholders(template, options), UriKind.Absolute);
-    }
-
-    private static Uri BuildOpenMeteoUri(string template, KeyedWeatherProviderOptions options, WeatherQuery query)
-    {
-      var formatted = ApplyCommonPlaceholders(template, options, query);
-
-      if (formatted.Contains("{forecast_hours}", StringComparison.OrdinalIgnoreCase))
-      {
-        formatted = formatted.Replace("{forecast_hours}", "1", StringComparison.OrdinalIgnoreCase);
-      }
-
-      if (formatted.Contains("{forecast_days}", StringComparison.OrdinalIgnoreCase))
-      {
-        int days = 7;
-        if (query.Return.HasValue)
-        {
-          var timeSpan = MalaysiaTime.Convert(query.Return.Value).Date - MalaysiaTime.Today;
-          days = Math.Max(1, Math.Min(WeatherForecastLimits.OpenMeteoForecastDays, timeSpan.Days + 2));
-        }
-        formatted = formatted.Replace("{forecast_days}", days.ToString(), StringComparison.OrdinalIgnoreCase);
-      }
-
-      return new Uri(formatted, UriKind.Absolute);
-    }
-
     public static bool IsNearSingapore(double lat, double lon) =>
-      lat >= 1.15 && lat <= 1.50 && lon >= 103.55 && lon <= 104.15;
+      SingaporeNeaWeatherAdapter.IsNearSingapore(lat, lon);
 
     private async Task<WeatherProviderResult> FetchProviderDataAsync(
-      WeatherProviderOptions provider,
+      IWeatherProviderAdapter adapter,
       Uri endpoint,
       string label,
       CancellationToken cancellationToken = default,
       bool forceRefresh = false)
     {
       var fallback = CreatePlaceholder();
-      if (!provider.Enabled) return BuildSample(provider, "Disabled", fallback, endpoint);
+      if (!adapter.Options.Enabled) return BuildSample(adapter, "Disabled", fallback, endpoint);
 
       var isOutlook = IsOutlook(label);
       string cacheKey = $"weather_api_{(isOutlook ? "outlook" : "current")}_{endpoint.AbsoluteUri}";
@@ -468,7 +318,7 @@ namespace MyTransportAppWASM.Features.Weather.Services
             ? _outlookCacheExpiration
             : _liveCacheExpiration;
           return new Lazy<Task<WeatherProviderResult>>(
-            () => FetchProviderDataCoreAsync(provider, endpoint, label, fallback),
+            () => FetchProviderDataCoreAsync(adapter, endpoint, label, fallback),
             LazyThreadSafetyMode.ExecutionAndPublication);
         })!;
 
@@ -502,7 +352,7 @@ namespace MyTransportAppWASM.Features.Weather.Services
       catch (Exception)
       {
         _cache.Remove(cacheKey);
-        return BuildSample(provider, "Unavailable", fallback, endpoint);
+        return BuildSample(adapter, "Unavailable", fallback, endpoint);
       }
     }
 
@@ -515,11 +365,12 @@ namespace MyTransportAppWASM.Features.Weather.Services
       string.Equals(label, "Outlook", StringComparison.OrdinalIgnoreCase);
 
     private async Task<WeatherProviderResult> FetchProviderDataCoreAsync(
-      WeatherProviderOptions provider,
+      IWeatherProviderAdapter adapter,
       Uri endpoint,
       string label,
       IReadOnlyList<WeatherTimeSlice> fallback)
     {
+      var provider = adapter.Options;
       var requestTimeout = _httpClient.Timeout == Timeout.InfiniteTimeSpan
         ? TimeSpan.FromSeconds(15)
         : _httpClient.Timeout;
@@ -540,7 +391,7 @@ namespace MyTransportAppWASM.Features.Weather.Services
 
       if (!response.IsSuccessStatusCode)
       {
-        return BuildSample(provider, $"HTTP {(int)response.StatusCode}", fallback, endpoint);
+        return BuildSample(adapter, $"HTTP {(int)response.StatusCode}", fallback, endpoint);
       }
 
       await using var payload = await response.Content.ReadAsStreamAsync(requestToken);
@@ -548,7 +399,7 @@ namespace MyTransportAppWASM.Features.Weather.Services
 
       return new WeatherProviderResult
       {
-        Provider = provider.Name,
+        Provider = adapter.Name,
         Source = provider.Source,
         Status = "LIVE",
         RetrievedAt = DateTimeOffset.UtcNow,
@@ -603,10 +454,10 @@ namespace MyTransportAppWASM.Features.Weather.Services
         }
     ];
 
-    private static WeatherProviderResult BuildSample(WeatherProviderOptions provider, string status, IReadOnlyList<WeatherTimeSlice> slices, Uri? endpoint = null) => new()
+    private static WeatherProviderResult BuildSample(IWeatherProviderAdapter adapter, string status, IReadOnlyList<WeatherTimeSlice> slices, Uri? endpoint = null) => new()
     {
-      Provider = provider.Name ?? "Unknown",
-      Source = provider.Source ?? "Unknown",
+      Provider = adapter.Name,
+      Source = adapter.Options.Source ?? "Unknown",
       Status = status,
       RetrievedAt = DateTimeOffset.UtcNow,
       Periods = slices,

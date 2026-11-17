@@ -2,10 +2,10 @@
 @if (TransportProviders.Any(provider => provider.HasStaticData))
 {
     <div class="static-routes mt-3">
-        <h3 class="fs-6 mb-2">Routes and estimated departures</h3>
-        <label class="form-label" for="static-provider-select">Provider</label>
+        <h3 class="fs-6 mb-2">@(Language?["StaticRoutesHeading"] ?? "Routes and estimated departures")</h3>
+        <label class="form-label" for="static-provider-select">@(Language?["ProviderLabel"] ?? "Provider")</label>
         <select id="static-provider-select" name="staticProvider" class="form-input" value="@SelectedProviderIndex" @onchange="OnProviderChanged">
-            <option value="-1">Choose a provider</option>
+            <option value="-1">@(Language?["ChooseProviderOption"] ?? "Choose a provider")</option>
             @for (var index = 0; index < TransportProviders.Count; index++)
             {
                 if (TransportProviders[index].HasStaticData)
@@ -16,21 +16,21 @@
         </select>
         @if (HasSelectedStaticData)
         {
-            <label class="form-label mt-2" for="static-route-select">Route</label>
+            <label class="form-label mt-2" for="static-route-select">@(Language?["RouteLabel"] ?? "Route")</label>
             <select id="static-route-select" name="staticRoute" class="form-input" value="@SelectedRouteId" @onchange="OnRouteChanged" disabled="@(Routes.Count == 0)">
-                <option value="">All routes</option>
+                <option value="">@(Language?["AllRoutesOption"] ?? "All routes")</option>
                 @foreach (var route in Routes)
                 {
                     <option value="@route.Id">@route.Name (@route.Id)</option>
                 }
             </select>
-            <div class="small mt-2" role="status">@Status</div>
+            <div class="small mt-2" role="status" aria-live="polite">@Status</div>
             @if (!string.IsNullOrEmpty(StopName))
             {
                 <h4 class="fs-6 mt-3">@StopName</h4>
                 @foreach (var departure in Departures)
                 {
-                    <div class="small">@MalaysiaTime.Convert(departure.DepartureAt).ToString("HH:mm") · @(departure.Headsign ?? departure.RouteId)</div>
+                    <div class="small tabular-nums">@(departure.DepartureAt.HasValue ? MalaysiaTime.Convert(departure.DepartureAt.Value).ToString("HH:mm") : (Language?["TimeUnavailable"] ?? "Time unavailable")) · @(departure.Headsign ?? departure.RouteId)</div>
                 }
             }
         }
@@ -38,6 +38,9 @@
 }
 
 @code {
+    [CascadingParameter]
+    private LanguageService? Language { get; set; }
+
     [Parameter, EditorRequired]
     public IReadOnlyList<TransportProvider> TransportProviders { get; set; } = [];
 

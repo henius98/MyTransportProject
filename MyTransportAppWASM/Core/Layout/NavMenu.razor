@@ -1,5 +1,6 @@
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject FirebaseClientService Firebase
 @inject AppStateService AppState
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IUserSettingsService UserSettings
@@ -10,13 +11,13 @@
   <div class="top-row ps-3 navbar" data-bs-theme="dark">
     <div class="container-fluid d-flex justify-content-start align-items-center flex-nowrap">
       <div class="profile me-3 position-relative" @onclick="() => { }" @onclick:stopPropagation="true">
-        <button class="btn btn-link p-0 text-white shadow-none" @onclick="ToggleUserMenu" aria-label="User Profile"
-                title="User Profile">
+        <button type="button" class="btn profile__trigger shadow-none" @onclick="ToggleUserMenu"
+                aria-label="@Language["UserProfile"]" title="@Language["UserProfile"]">
           <AuthorizeView>
             <Authorized>
               @if (!string.IsNullOrEmpty(context.User?.FindFirst("picture")?.Value))
               {
-                <img src="@context.User?.FindFirst("picture")?.Value" class="avatar avatar--sm" alt="Profile" />
+                <img src="@context.User?.FindFirst("picture")?.Value" class="avatar avatar--sm" alt="@Language["UserProfile"]" />
               }
               else
               {
@@ -32,39 +33,38 @@
         @if (showUserMenu)
         {
           <div class="dropdown__overlay" @onclick="ToggleUserMenu"></div>
-          <div class="user-menu-dropdown p-3 shadow-lg" style="min-width: 250px;">
+          <div class="user-menu-dropdown p-3 shadow-lg">
             <AuthorizeView>
               <Authorized>
                 <div class="d-flex align-items-center mb-3">
                   @if (!string.IsNullOrEmpty(context.User?.FindFirst("picture")?.Value))
                   {
-                    <img src="@context.User?.FindFirst("picture")?.Value" class="avatar avatar--lg me-3" alt="Profile" />
+                    <img src="@context.User?.FindFirst("picture")?.Value" class="avatar avatar--lg me-3" alt="@Language["UserProfile"]" />
                   }
                   <div class="text-truncate">
                     <div class="profile__name fw-bold">@(context.User?.Identity?.Name ?? "User")</div>
-                    <div class="text-muted text--xs text-truncate" style="font-size: 0.75rem;">
+                    <div class="text-muted text--xs text-truncate">
                       @(context.User?.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? "")</div>
                     </div>
                   </div>
-                  <small class="text-muted d-block mb-2">Signed in with Google</small>
+                  <small class="text-muted d-block mb-2">@Language["SignedInWithGoogle"]</small>
                 </Authorized>
               </AuthorizeView>
 
               <hr class="my-2 border-secondary" />
 
               <div class="mb-3 mt-3">
-                <small class="text-muted d-block mb-2 text-uppercase"
-                       style="font-size: 0.65rem; font-weight: 700; letter-spacing: 0.5px;">@Language["Preferences"]</small>
+                <small class="menu-section-label">@Language["Preferences"]</small>
 
                 <div class="switch-group d-flex align-items-center justify-content-between p-2 rounded mb-2">
                   <div class="d-flex align-items-center">
                     <span class="bi bi-moon-stars-fill-nav-menu me-2" aria-hidden="true"></span>
-                    <span style="font-size: 0.85rem;">@(Theme.IsDarkMode? Language["DarkMode"] :
+                    <span class="switch-group__label">@(Theme.IsDarkMode ? Language["DarkMode"] :
                   Language["LightMode"])</span>
                     </div>
                     <div class="form-check form-switch m-0">
                       <input class="form-check-input switch shadow-none" type="checkbox" role="switch"
-                             aria-label="Toggle Dark Mode" checked="@Theme.IsDarkMode" @onchange="Theme.ToggleThemeAsync" />
+                             aria-label="@Language["ToggleDarkMode"]" checked="@Theme.IsDarkMode" @onchange="Theme.ToggleThemeAsync" />
                     </div>
                   </div>
 
@@ -77,7 +77,7 @@
 
                 @if (!string.IsNullOrEmpty(UserSettings.SyncError))
                 {
-                  <p class="text-warning small" role="status">@UserSettings.SyncError</p>
+                  <p class="text-warning small" role="status" aria-live="polite">@UserSettings.SyncError</p>
                 }
                 @if (!string.IsNullOrEmpty(logoutError))
                 {
@@ -86,7 +86,7 @@
 
                 <AuthorizeView>
                   <Authorized>
-                    <button class="nav-link btn btn-link text-start w-100" disabled="@pushBusy"
+                    <button type="button" class="nav-link btn btn--secondary menu-action-btn w-100 mb-1" disabled="@pushBusy"
                             @onclick="TogglePushNotifications">
                       <span class="bi bi-bell me-2" aria-hidden="true"></span>
                       @(pushStatus == "enabled" ? Language["DisableNotifications"] : Language["EnableNotifications"])
@@ -100,12 +100,12 @@
 
                 <AuthorizeView>
                   <Authorized>
-                    <button class="nav-link btn btn-link text-start w-100" disabled="@isLoggingOut" @onclick="BeginLogOut">
+                    <button type="button" class="nav-link btn btn--secondary menu-action-btn w-100" disabled="@isLoggingOut" @onclick="BeginLogOut">
                       <span class="bi bi-box-arrow-right-nav-menu me-2" aria-hidden="true"></span> @Language["LogOut"]
                     </button>
                   </Authorized>
                   <NotAuthorized>
-                    <button class="nav-link btn btn-link text-start w-100" @onclick="BeginLogin">
+                    <button type="button" class="nav-link btn btn--secondary menu-action-btn w-100" @onclick="BeginLogin">
                       <span class="bi bi-box-arrow-in-right-nav-menu me-2" aria-hidden="true"></span> @Language["LogIn"]
                     </button>
                   </NotAuthorized>
@@ -117,8 +117,8 @@
         </div>
       </div>
 
-      <label for="nav-toggler" class="visually-hidden">Toggle Navigation Menu</label>
-      <input id="nav-toggler" type="checkbox" aria-label="Toggle Navigation Menu" title="Navigation menu"
+      <label for="nav-toggler" class="visually-hidden">@Language["ToggleNavigationMenu"]</label>
+      <input id="nav-toggler" type="checkbox" aria-label="@Language["ToggleNavigationMenu"]" title="@Language["ToggleNavigationMenu"]"
              class="navbar-toggler" />
 
       <div class="nav-scrollable">
@@ -202,7 +202,7 @@
     {
       var state = await AuthStateProvider.GetAuthenticationStateAsync();
       var uid = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-      pushStatus = await JS.InvokeAsync<string>("window.pushNotifications.status", uid);
+      pushStatus = await Firebase.GetPushStatusAsync(uid);
     }
     catch (JSException)
     {
@@ -224,8 +224,10 @@
       var state = await AuthStateProvider.GetAuthenticationStateAsync();
       var uid = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
       if (uid is null) return;
-      await JS.InvokeVoidAsync(pushStatus == "enabled"
-        ? "window.pushNotifications.disable" : "window.pushNotifications.enable", uid);
+      if (pushStatus == "enabled")
+        await Firebase.DisablePushAsync(uid);
+      else
+        await Firebase.EnablePushAsync(uid);
       pushStatus = pushStatus == "enabled" ? "disabled" : "enabled";
     }
     catch (JSException ex)
@@ -255,7 +257,7 @@
     }
     catch (JSException)
     {
-      logoutError = "Could not sign out. Please try again.";
+      logoutError = Language["SignOutFailed"];
     }
     finally
     {
@@ -270,12 +272,6 @@
     UserSettings.SyncStatusChanged -= HandleSyncStatusChanged;
   }
 
-  private async Task CollapseNav()
-  {
-    try
-    {
-      await JS.InvokeVoidAsync("navigationHelper.collapseMobileMenu");
-    }
-    catch { }
-  }
+  private Task CollapseNav() =>
+    JS.TryInvokeVoidSafeAsync("navigationHelper.collapseMobileMenu");
 }

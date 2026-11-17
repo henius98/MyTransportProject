@@ -1,8 +1,15 @@
 using System.Net;
+using System.Reflection;
 using System.Text;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.JSInterop;
 using Moq;
+using MyTransportAppWASM.Features.Weather.Components;
 
 namespace MyTransportAppWASM.Tests;
 
@@ -12,8 +19,8 @@ public class WeatherLocationInputTests
     public async Task TypedIdPreservesSelectedLocationEvenWhenAnotherLocationHasTheSameCoordinates()
     {
         var (placeResolution, stationCatalog) = CreateMocks();
-        placeResolution.Setup(service => service.GetSuggestionsAsync("Ds002"))
-            .ReturnsAsync([(3.139, 101.6869, "MET ID: Ds002", "Selected location")]);
+        placeResolution.Setup(service => service.GetSuggestionsAsync("Ds002", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new PlaceSuggestion(3.139, 101.6869, "Selected location", "Selected location", "Ds002")]);
 
         var planner = CreatePlanner(placeResolution.Object, stationCatalog.Object);
         var query = await CreateInitializedQueryAsync(planner);
@@ -22,8 +29,12 @@ public class WeatherLocationInputTests
         var plan = await planner.GetPlanAsync(query);
 
         Assert.True(plan.IsValid);
-        Assert.Equal("Ds002", query.LocationId);
-        Assert.Equal("Selected location", query.PlaceName);
+        Assert.Equal("Ds002", plan.Query.LocationId);
+        Assert.Equal("Selected location", plan.Query.PlaceName);
+        Assert.Null(plan.Query.PendingSearchText);
+        // Caller's input WeatherQuery must remain untouched by GetPlanAsync
+        Assert.Equal("Ds001", query.LocationId);
+        Assert.Equal("Ds002", query.PendingSearchText);
         stationCatalog.Verify(
             service => service.FindNearestStationAsync(It.IsAny<double>(), It.IsAny<double>(), It.IsAny<CancellationToken>()),
             Times.Once);
@@ -33,8 +44,8 @@ public class WeatherLocationInputTests
     public async Task CoordinatesKeepExactPositionWhileResolvingNearestForecastId()
     {
         var (placeResolution, stationCatalog) = CreateMocks();
-        placeResolution.Setup(service => service.GetSuggestionsAsync("3.14, 101.69"))
-            .ReturnsAsync([(3.14, 101.69, "Latitude, longitude", "3.14, 101.69")]);
+        placeResolution.Setup(service => service.GetSuggestionsAsync("3.14, 101.69", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new PlaceSuggestion(3.14, 101.69, "Latitude, longitude", "3.14, 101.69")]);
 
         var planner = CreatePlanner(placeResolution.Object, stationCatalog.Object);
         var query = await CreateInitializedQueryAsync(planner);
@@ -43,10 +54,11 @@ public class WeatherLocationInputTests
         var plan = await planner.GetPlanAsync(query);
 
         Assert.True(plan.IsValid);
-        Assert.Equal(3.14, query.Latitude);
-        Assert.Equal(101.69, query.Longitude);
-        Assert.Equal("Ds001", query.LocationId);
-        Assert.Equal("3.14, 101.69", query.PlaceName);
+        Assert.Equal(3.14, plan.Query.Latitude);
+        Assert.Equal(101.69, plan.Query.Longitude);
+        Assert.Equal("Ds001", plan.Query.LocationId);
+        Assert.Equal("3.14, 101.69", plan.Query.PlaceName);
+        Assert.Equal(3.1390, query.Latitude);
     }
 
     [Theory]
@@ -55,9 +67,9 @@ public class WeatherLocationInputTests
     public async Task InvalidOrAmbiguousSearchDoesNotFetchThePreviousLocation(bool ambiguous)
     {
         var (placeResolution, stationCatalog) = CreateMocks();
-        placeResolution.Setup(service => service.GetSuggestionsAsync("input"))
+        placeResolution.Setup(service => service.GetSuggestionsAsync("input", It.IsAny<CancellationToken>()))
             .ReturnsAsync(ambiguous
-                ? [(1, 100, "MET ID: Ds003", "First"), (2, 101, "MET ID: Ds004", "Second")]
+                ? [new PlaceSuggestion(1, 100, "First", "First", "Ds003"), new PlaceSuggestion(2, 101, "Second", "Second", "Ds004")]
                 : []);
 
         var planner = CreatePlanner(placeResolution.Object, stationCatalog.Object);
@@ -123,7 +135,7 @@ public class WeatherLocationInputTests
         var (placeResolution, stationCatalog) = CreateMocks();
         using var cts = new CancellationTokenSource();
         placeResolution.Setup(service => service.GetSuggestionsAsync("Kuala Lumpur", cts.Token))
-            .ReturnsAsync([(3.139, 101.6869, "MET ID: Ds002", "Kuala Lumpur")]);
+            .ReturnsAsync([new PlaceSuggestion(3.139, 101.6869, "Kuala Lumpur", "Kuala Lumpur", "Ds002")]);
 
         var planner = CreatePlanner(placeResolution.Object, stationCatalog.Object);
         var query = await CreateInitializedQueryAsync(planner);
@@ -150,6 +162,74 @@ public class WeatherLocationInputTests
         query.PendingSearchText = "Kuala Lumpur";
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => planner.GetPlanAsync(query, cts.Token));
+    }
+
+    [Fact]
+    public async Task LocationSearchAutocomplete_RapidTypingSelectionAndDisposal_DoesNotThrow()
+    {
+        var (placeResolution, stationCatalog) = CreateMocks();
+        placeResolution
+            .Setup(s => s.GetSuggestionsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new PlaceSuggestion(3.139, 101.6869, "Kuala Lumpur", "Kuala Lumpur", "Ds002")]);
+
+        var activator = new AutocompleteActivator();
+        await using var services = new ServiceCollection()
+            .AddLogging()
+            .AddSingleton(placeResolution.Object)
+            .AddSingleton(stationCatalog.Object)
+            .AddSingleton(Mock.Of<IJSRuntime>())
+            .AddSingleton<IComponentActivator>(activator)
+            .BuildServiceProvider();
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+
+        LocationSearchAutocomplete? component = null;
+        var disposeDuringCallback = false;
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            await renderer.RenderComponentAsync<LocationSearchAutocomplete>(ParameterView.FromDictionary(new Dictionary<string, object?>
+            {
+                [nameof(LocationSearchAutocomplete.Value)] = "",
+                [nameof(LocationSearchAutocomplete.ValueChanged)] = EventCallback.Factory.Create<string>(this, async _ =>
+                {
+                    if (disposeDuringCallback && component is not null)
+                    {
+                        await component.DisposeAsync();
+                    }
+                })
+            }));
+            component = activator.Component!;
+
+            var searchField = typeof(LocationSearchAutocomplete).GetField("_searchText", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var triggerSearch = typeof(LocationSearchAutocomplete).GetMethod("TriggerSearch", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var selectSuggestion = typeof(LocationSearchAutocomplete).GetMethod("SelectSuggestion", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            searchField.SetValue(component, "Ku");
+            await (Task)triggerSearch.Invoke(component, null)!;
+
+            searchField.SetValue(component, "Kuala");
+            await (Task)triggerSearch.Invoke(component, null)!;
+
+            await (Task)selectSuggestion.Invoke(component, [new PlaceSuggestion(3.139, 101.6869, "Kuala Lumpur", "Kuala Lumpur", "Ds002")])!;
+
+            searchField.SetValue(component, " ");
+            await (Task)triggerSearch.Invoke(component, null)!;
+
+            disposeDuringCallback = true;
+            searchField.SetValue(component, "Penang");
+            await (Task)triggerSearch.Invoke(component, null)!;
+        });
+    }
+
+    private sealed class AutocompleteActivator : IComponentActivator
+    {
+        public LocationSearchAutocomplete? Component { get; private set; }
+
+        public IComponent CreateInstance(Type componentType)
+        {
+            var component = (IComponent)Activator.CreateInstance(componentType)!;
+            if (component is LocationSearchAutocomplete autocomplete) Component = autocomplete;
+            return component;
+        }
     }
 
     private static (Mock<IPlaceResolutionService> PlaceResolution, Mock<IWeatherStationCatalogService> StationCatalog) CreateMocks()

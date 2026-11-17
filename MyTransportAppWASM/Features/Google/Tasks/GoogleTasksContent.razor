@@ -158,33 +158,54 @@
                                     <p>All tasks complete</p>
                                 </div>
                             }
-                            <ul class="tasks-items">
-                                @foreach (var task in activeTasks)
+                            @{
+                                RenderFragment<(GoogleTask Task, bool Completed)> renderTaskItem = item =>
                                 {
-                                    <li class="tasks-item @(task.Parent != null ? "tasks-item--subtask" : "")" @key="task.Id">
-                                        <button type="button" class="tasks-check" aria-label="Complete @(string.IsNullOrWhiteSpace(task.Title) ? "untitled task" : task.Title)" @onclick="() => ToggleCompleteAsync(list.Id, task)" disabled="@(busy || task.AssignmentInfo != null)"></button>
-                                        <button type="button" class="tasks-item-content" @onclick="() => SelectTask(list.Id, task)" disabled="@busy" aria-pressed="@(selectedTask?.Id == task.Id && editingListId == list.Id)">
-                                            <span class="tasks-item-title">@(string.IsNullOrWhiteSpace(task.Title) ? "Untitled task" : task.Title)</span>
-                                            @if (!string.IsNullOrWhiteSpace(task.Notes))
+                                    var task = item.Task;
+                                    var completed = item.Completed;
+                                    var titleLabel = string.IsNullOrWhiteSpace(task.Title) ? "untitled task" : task.Title;
+                                    var displayTitle = string.IsNullOrWhiteSpace(task.Title) ? "Untitled task" : task.Title;
+                                    return @<li class="tasks-item @(task.Parent != null ? "tasks-item--subtask" : "")" @key="task.Id">
+                                        <button type="button"
+                                                class="tasks-check @(completed ? "is-complete bi bi-check" : "")"
+                                                aria-label="@(completed ? $"Mark {titleLabel} incomplete" : $"Complete {titleLabel}")"
+                                                @onclick="() => ToggleCompleteAsync(list.Id, task)"
+                                                disabled="@(busy || task.AssignmentInfo != null)"></button>
+                                        <button type="button"
+                                                class="tasks-item-content"
+                                                @onclick="() => SelectTask(list.Id, task)"
+                                                disabled="@busy"
+                                                aria-pressed="@(completed ? (bool?)null : selectedTask?.Id == task.Id && editingListId == list.Id)">
+                                            <span class="tasks-item-title">@displayTitle</span>
+                                            @if (!completed)
                                             {
-                                                <span class="tasks-item-notes">@task.Notes</span>
+                                                @if (!string.IsNullOrWhiteSpace(task.Notes))
+                                                {
+                                                    <span class="tasks-item-notes">@task.Notes</span>
+                                                }
+                                                @if (task.DueDate is DateTime date)
+                                                {
+                                                    <span class="tasks-item-date"><span class="bi bi-calendar3" aria-hidden="true"></span> @date.ToString("ddd, MMM d", CultureInfo.CurrentCulture)</span>
+                                                }
+                                                @if (task.AssignmentInfo != null)
+                                                {
+                                                    <span class="tasks-item-notes">Assigned task</span>
+                                                }
                                             }
-                                            @if (task.DueDate is DateTime date)
-                                            {
-                                                <span class="tasks-item-date"><span class="bi bi-calendar3" aria-hidden="true"></span> @date.ToString("ddd, MMM d", CultureInfo.CurrentCulture)</span>
-                                            }
-                                            @if (task.AssignmentInfo != null)
-                                            {
-                                                <span class="tasks-item-notes">Assigned task</span>
-                                            }
-                                            <span class="tasks-item-meta"><span class="tasks-state">@WorkflowState(list.Id, task)</span>
+                                            <span class="tasks-item-meta"><span class="tasks-state">@(completed ? "Completed" : WorkflowState(list.Id, task))</span>
                                                 @if (ExtensionFor(list.Id, task.Id)?.EstimatedMinutes is int minutes)
                                                 {
                                                     <span>@GoogleTaskWorkflow.FormatDuration(minutes)</span>
                                                 }
                                             </span>
                                         </button>
-                                    </li>
+                                    </li>;
+                                };
+                            }
+                            <ul class="tasks-items">
+                                @foreach (var task in activeTasks)
+                                {
+                                    @renderTaskItem((task, false))
                                 }
                             </ul>
                             @if (completedTasks.Length > 0)
@@ -198,18 +219,7 @@
                                     <ul class="tasks-items tasks-items--completed">
                                         @foreach (var task in completedTasks)
                                         {
-                                            <li class="tasks-item @(task.Parent != null ? "tasks-item--subtask" : "")" @key="task.Id">
-                                                <button type="button" class="tasks-check is-complete bi bi-check" aria-label="Mark @(string.IsNullOrWhiteSpace(task.Title) ? "untitled task" : task.Title) incomplete" @onclick="() => ToggleCompleteAsync(list.Id, task)" disabled="@(busy || task.AssignmentInfo != null)"></button>
-                                                <button type="button" class="tasks-item-content" @onclick="() => SelectTask(list.Id, task)" disabled="@busy">
-                                                    <span class="tasks-item-title">@(string.IsNullOrWhiteSpace(task.Title) ? "Untitled task" : task.Title)</span>
-                                                    <span class="tasks-item-meta"><span class="tasks-state">Completed</span>
-                                                        @if (ExtensionFor(list.Id, task.Id)?.EstimatedMinutes is int minutes)
-                                                        {
-                                                            <span>@GoogleTaskWorkflow.FormatDuration(minutes)</span>
-                                                        }
-                                                    </span>
-                                                </button>
-                                            </li>
+                                            @renderTaskItem((task, true))
                                         }
                                     </ul>
                                 }
@@ -400,7 +410,7 @@
                     DependsOn = dependencies,
                     StartedAt = extensions.GetValueOrDefault(key)?.StartedAt
                 };
-                if (extension.EstimatedMinutes == null && extension.DependsOn.Count == 0 && extension.StartedAt == null)
+                if (extension.IsEmpty)
                     extensions.Remove(key);
                 else
                     extensions[key] = extension;

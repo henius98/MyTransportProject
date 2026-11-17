@@ -1,11 +1,12 @@
 /* Buttons */
-.btn {
+body .btn {
   height: 3rem;
+  min-height: 44px;
   padding: 0 1.5rem;
   border-radius: 12px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
   border: none;
   display: inline-flex;
   align-items: center;
@@ -13,55 +14,66 @@
   gap: 8px;
 }
 
-.btn.btn--icon {
+body .btn:focus-visible,
+button:focus-visible,
+a:focus-visible {
+  outline: 3px solid var(--focus-ring, var(--primary-blue));
+  outline-offset: 2px;
+}
+
+body .btn.btn--icon {
   padding: 0;
   width: 3rem;
   height: 3rem;
+  min-width: 44px;
+  min-height: 44px;
   font-size: 1.25rem;
   flex-shrink: 0;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  border: 1px solid var(--border-color);
 }
 
-.btn--primary {
-  background: linear-gradient(
-    135deg,
-    var(--primary-blue) 0%,
-    var(--primary-purple) 100%
-  );
-  color: #ffffff;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+body .btn.btn--primary {
+  background: var(--btn-primary-bg, var(--primary-gradient));
+  color: var(--btn-primary-color, #ffffff);
+  box-shadow: var(--btn-primary-shadow);
+  border: 0;
 }
 
-.btn--primary:hover:not(:disabled) {
+body .btn.btn--primary:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(99, 102, 241, 0.3);
-  filter: brightness(1.1);
+  box-shadow: var(--btn-primary-shadow-hover);
+  filter: brightness(1.08);
+  color: var(--btn-primary-color, #ffffff);
 }
 
-.btn:disabled {
+body .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
-.btn--secondary {
-  background: rgba(128, 128, 128, 0.1);
+body .btn.btn--secondary {
+  background-color: var(--surface-subtle);
   color: var(--text-color);
   border: 1px solid var(--border-color);
 }
 
-.btn--secondary:hover:not(:disabled) {
-  background: rgba(128, 128, 128, 0.2);
+body .btn.btn--secondary:hover:not(:disabled) {
+  background-color: var(--surface-hover);
+  border-color: var(--primary-blue);
+  color: var(--text-color);
 }
 
-.btn--sm {
+body .btn.btn--sm {
   font-size: 0.85rem;
-  padding: 0.5rem 1rem;
+  height: auto;
+  min-height: 44px;
+  padding: 0.5rem 0.85rem;
 }
 
 /* Links and button defaults */
 a,
 .btn-link {
-  color: #0071c1;
+  color: var(--primary-blue);
 }
 
 
@@ -69,5 +81,15 @@ a,
 /* Hide focus ring only for mouse/pointer users — keyboard users still get :focus-visible */
 h1:focus:not(:focus-visible) {
   outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn {
+    transition: none;
+  }
+
+  .btn--primary:hover:not(:disabled) {
+    transform: none;
+  }
 }
 

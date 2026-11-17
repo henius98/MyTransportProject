@@ -6,17 +6,15 @@ namespace MyTransportAppWASM.Core.Services
 {
   public sealed class LocationService : ILocationService, IAsyncDisposable
   {
-    private readonly IJSRuntime _js;
+    private readonly JsModuleLoader _geoModule;
     private readonly long _cacheMaxAgeMilliseconds;
-    private readonly SemaphoreSlim _moduleLock = new(1, 1);
     private readonly TimeProvider _timeProvider;
-    private IJSObjectReference? _geoModule;
     private long _lastLocationTimestamp;
     public Location? LastKnownLocation { get; private set; }
 
     public LocationService(IJSRuntime js, IOptions<CacheExpirationOptions> cacheExpiration, TimeProvider? timeProvider = null)
     {
-      _js = js;
+      _geoModule = new JsModuleLoader(js, "./js/geolocation.js");
       _timeProvider = timeProvider ?? TimeProvider.System;
       var cacheSeconds = cacheExpiration.Value.Map.GeolocationSeconds;
       _cacheMaxAgeMilliseconds = cacheSeconds > 0
@@ -25,25 +23,9 @@ namespace MyTransportAppWASM.Core.Services
           $"Cache expiration setting '{nameof(CacheExpirationOptions.Map)}:{nameof(MapCacheExpirationOptions.GeolocationSeconds)}' must be greater than zero.");
     }
 
-    private async ValueTask<IJSObjectReference?> GetGeoModuleAsync()
-    {
-      if (_isDisposed) return null;
-      if (_geoModule != null) return _geoModule;
-      await _moduleLock.WaitAsync();
-      try
-      {
-        if (_isDisposed) return null;
-        return _geoModule ??= await _js.InvokeAsync<IJSObjectReference>("import", "./js/geolocation.js");
-      }
-      finally
-      {
-        _moduleLock.Release();
-      }
-    }
-
     public async Task<Location?> GetCurrentLocationAsync(bool forceRefresh = false)
     {
-      if (_isDisposed) return null;
+      if (_geoModule.IsDisposed) return null;
       if (!forceRefresh && LastKnownLocation != null && _lastLocationTimestamp != 0
           && _timeProvider.GetElapsedTime(_lastLocationTimestamp).TotalMilliseconds < _cacheMaxAgeMilliseconds)
       {
@@ -52,13 +34,13 @@ namespace MyTransportAppWASM.Core.Services
 
       try
       {
-        var geoModule = await GetGeoModuleAsync();
-        if (geoModule == null || _isDisposed) return null;
+        var geoModule = await _geoModule.TryGetAsync();
+        if (geoModule == null || _geoModule.IsDisposed) return null;
 
         if (LastKnownLocation == null)
         {
           var cached = await geoModule.InvokeAsync<Location?>("getCachedLocation");
-          if (_isDisposed) return null;
+          if (_geoModule.IsDisposed) return null;
           if (cached != null && LastKnownLocation == null)
           {
             LastKnownLocation = cached;
@@ -71,7 +53,7 @@ namespace MyTransportAppWASM.Core.Services
           useCache = !forceRefresh,
           enableHighAccuracy = forceRefresh
         });
-        if (_isDisposed) return null;
+        if (_geoModule.IsDisposed) return null;
         if (location != null)
         {
           UpdateLocation(location.Latitude, location.Longitude, location.Accuracy);
@@ -91,18 +73,6 @@ namespace MyTransportAppWASM.Core.Services
       _lastLocationTimestamp = _timeProvider.GetTimestamp();
     }
 
-    private bool _isDisposed;
-
-    public async ValueTask DisposeAsync()
-    {
-      if (_isDisposed) return;
-      _isDisposed = true;
-
-      if (_geoModule != null)
-      {
-        await _geoModule.DisposeAsync();
-      }
-      _moduleLock.Dispose();
-    }
+    public ValueTask DisposeAsync() => _geoModule.DisposeAsync();
   }
 }

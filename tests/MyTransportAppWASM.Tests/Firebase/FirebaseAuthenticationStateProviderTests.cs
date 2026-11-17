@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
 
 namespace MyTransportAppWASM.Tests;
@@ -7,7 +8,8 @@ public class FirebaseAuthenticationStateProviderTests
     [Fact]
     public async Task GetAuthenticationStateAsync_ContinuesAnonymously_WhenInteropInitializationFails()
     {
-        var provider = new FirebaseAuthenticationStateProvider(new StubJsRuntime(shouldFail: true));
+        var firebase = new FirebaseClientService(new StubJsRuntime(shouldFail: true));
+        var provider = new FirebaseAuthenticationStateProvider(firebase);
 
         var state = await provider.GetAuthenticationStateAsync();
 
@@ -17,7 +19,8 @@ public class FirebaseAuthenticationStateProviderTests
     [Fact]
     public async Task OnAuthStateChanged_CreatesExpectedClaims()
     {
-        var provider = new FirebaseAuthenticationStateProvider(new StubJsRuntime(shouldFail: false));
+        var firebase = new FirebaseClientService(new StubJsRuntime(shouldFail: false));
+        var provider = new FirebaseAuthenticationStateProvider(firebase);
 
         provider.OnAuthStateChanged(new FirebaseUser
         {
@@ -38,7 +41,8 @@ public class FirebaseAuthenticationStateProviderTests
     [Fact]
     public async Task ReadsFollowLoginAccountSwitchAndLogout_AfterAnonymousStartup()
     {
-        await using var provider = new FirebaseAuthenticationStateProvider(new StubJsRuntime(false));
+        await using var firebase = new FirebaseClientService(new StubJsRuntime(false));
+        await using var provider = new FirebaseAuthenticationStateProvider(firebase);
         provider.OnAuthStateChanged(null);
         Assert.False((await provider.GetAuthenticationStateAsync()).User.Identity!.IsAuthenticated);
 
@@ -55,7 +59,8 @@ public class FirebaseAuthenticationStateProviderTests
     [Fact]
     public async Task LogoutDoesNotReturnRestoredSession_AndDuplicateCallbacksDoNotNotify()
     {
-        await using var provider = new FirebaseAuthenticationStateProvider(new StubJsRuntime(false));
+        await using var firebase = new FirebaseClientService(new StubJsRuntime(false));
+        await using var provider = new FirebaseAuthenticationStateProvider(firebase);
         provider.OnAuthStateChanged(new FirebaseUser { Uid = "alice" });
         Assert.True((await provider.GetAuthenticationStateAsync()).User.Identity!.IsAuthenticated);
 
@@ -70,14 +75,17 @@ public class FirebaseAuthenticationStateProviderTests
     }
 
     [Fact]
-    public async Task SignInWithGoogleAsync_PassesClientId_WhenProvided()
+    public async Task SignInWithGoogleAsync_PushesConfigFirst_AndPassesClientId_WhenProvided()
     {
         var stub = new StubJsRuntime(false);
-        await using var provider = new FirebaseAuthenticationStateProvider(stub);
+        var options = Options.Create(new FirebaseOptions { ApiKey = "k", GoogleClientId = "default-client" });
+        await using var firebase = new FirebaseClientService(stub, options);
+        await using var provider = new FirebaseAuthenticationStateProvider(firebase);
 
         await provider.SignInWithGoogleAsync("client-123.apps.googleusercontent.com");
 
-        var signInCall = stub.Invocations.FirstOrDefault(i => i.Identifier == "window.firebaseAuthInterop.signInWithGoogle");
+        Assert.Contains(stub.Invocations, i => i.Module == "./js/firebase-config.js" && i.Identifier == "configureFirebase");
+        var signInCall = stub.Invocations.FirstOrDefault(i => i.Module == "./js/firebase-auth.js" && i.Identifier == "signInWithGoogle");
         Assert.NotNull(signInCall.Identifier);
         Assert.NotNull(signInCall.Args);
         Assert.Single(signInCall.Args!);
@@ -85,36 +93,56 @@ public class FirebaseAuthenticationStateProviderTests
     }
 
     [Fact]
-    public async Task SignInWithGoogleAsync_OmitsArgs_WhenClientIdIsNullOrWhitespace()
+    public async Task SignInWithGoogleAsync_UsesConfiguredClientIdOrOmitsArgs_WhenClientIdIsNullOrWhitespace()
     {
         var stub = new StubJsRuntime(false);
-        await using var provider = new FirebaseAuthenticationStateProvider(stub);
+        await using var unconfiguredFirebase = new FirebaseClientService(stub);
+        await using var provider = new FirebaseAuthenticationStateProvider(unconfiguredFirebase);
 
         await provider.SignInWithGoogleAsync(null);
 
-        var signInCall = stub.Invocations.FirstOrDefault(i => i.Identifier == "window.firebaseAuthInterop.signInWithGoogle");
+        var signInCall = stub.Invocations.FirstOrDefault(i => i.Module == "./js/firebase-auth.js" && i.Identifier == "signInWithGoogle");
         Assert.NotNull(signInCall.Identifier);
         Assert.Empty(signInCall.Args!);
     }
 
     private sealed class StubJsRuntime(bool shouldFail) : IJSRuntime
     {
-        public List<(string Identifier, object?[]? Args)> Invocations { get; } = [];
+        public List<(string Module, string Identifier, object?[]? Args)> Invocations { get; } = [];
 
-        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
-        {
-            return InvokeAsync<TValue>(identifier, CancellationToken.None, args);
-        }
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+            InvokeAsync<TValue>(identifier, CancellationToken.None, args);
 
         public ValueTask<TValue> InvokeAsync<TValue>(
             string identifier,
             CancellationToken cancellationToken,
             object?[]? args)
         {
-            Invocations.Add((identifier, args));
-            return shouldFail
-                ? ValueTask.FromException<TValue>(new JSException("Interop unavailable"))
-                : ValueTask.FromResult(default(TValue)!);
+            if (shouldFail)
+                return ValueTask.FromException<TValue>(new JSException("Interop unavailable"));
+
+            if (identifier == "import")
+            {
+                var path = Assert.IsType<string>(args![0]);
+                return ValueTask.FromResult((TValue)(object)new StubJsModule(path, Invocations));
+            }
+
+            Invocations.Add(("", identifier, args));
+            return ValueTask.FromResult(default(TValue)!);
+        }
+
+        private sealed class StubJsModule(string path, List<(string Module, string Identifier, object?[]? Args)> invocations) : IJSObjectReference
+        {
+            public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+                InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+
+            public ValueTask<TValue> InvokeAsync<TValue>(string identifier, CancellationToken cancellationToken, object?[]? args)
+            {
+                invocations.Add((path, identifier, args));
+                return ValueTask.FromResult(default(TValue)!);
+            }
+
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }
     }
 }

@@ -6,16 +6,16 @@ namespace MyTransportAppWASM.Core.Auth
 {
     public sealed class FirebaseAuthenticationStateProvider : AuthenticationStateProvider, IAsyncDisposable
     {
-        private readonly IJSRuntime _jsRuntime;
+        private readonly FirebaseClientService _firebase;
         private DotNetObjectReference<FirebaseAuthenticationStateProvider>? _dotNetRef;
         private ClaimsPrincipal _currentUser = new ClaimsPrincipal(new ClaimsIdentity());
         private readonly TaskCompletionSource _initialAuthStateTcs =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private Task? _initializationTask;
 
-        public FirebaseAuthenticationStateProvider(IJSRuntime jsRuntime)
+        public FirebaseAuthenticationStateProvider(FirebaseClientService firebase)
         {
-            _jsRuntime = jsRuntime;
+            _firebase = firebase;
         }
 
         public async Task InitializeAsync()
@@ -37,7 +37,7 @@ namespace MyTransportAppWASM.Core.Auth
         {
             _dotNetRef?.Dispose();
             _dotNetRef = DotNetObjectReference.Create(this);
-            await _jsRuntime.InvokeVoidAsync("window.firebaseAuthInterop.onAuthStateChanged", _dotNetRef);
+            await _firebase.OnAuthStateChangedAsync(_dotNetRef);
         }
 
         [JSInvokable]
@@ -106,9 +106,7 @@ namespace MyTransportAppWASM.Core.Auth
 
         public async Task SignInWithGoogleAsync(string? clientId = null)
         {
-            var user = string.IsNullOrWhiteSpace(clientId)
-                ? await _jsRuntime.InvokeAsync<FirebaseUser>("window.firebaseAuthInterop.signInWithGoogle")
-                : await _jsRuntime.InvokeAsync<FirebaseUser>("window.firebaseAuthInterop.signInWithGoogle", clientId);
+            var user = await _firebase.SignInWithGoogleAsync(clientId);
             SetAuthenticationState(user);
             if (_initializationTask?.IsFaulted == true) _initializationTask = null;
             await InitializeAsync();
@@ -116,7 +114,7 @@ namespace MyTransportAppWASM.Core.Auth
 
         public async Task SignOutAsync()
         {
-            await _jsRuntime.InvokeVoidAsync("window.firebaseAuthInterop.signOut");
+            await _firebase.SignOutAsync();
             SetAuthenticationState(user: null);
         }
 
@@ -124,7 +122,7 @@ namespace MyTransportAppWASM.Core.Auth
         {
             try
             {
-                await _jsRuntime.InvokeVoidAsync("window.firebaseAuthInterop.disposeAuthStateChanged");
+                await _firebase.DisposeAuthStateChangedAsync();
             }
             catch (JSException)
             {

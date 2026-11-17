@@ -29,6 +29,19 @@ script:post-response {
 
       res.setBody(decoded);
 
+      const fs = require('fs');
+      const path = require('path');
+      const outDir = path.join(bru.cwd(), '01 Transit - GTFS Realtime', 'output');
+      fs.mkdirSync(outDir, { recursive: true });
+      let fallbackName = 'gtfs-realtime';
+      try {
+        const u = new URL(req.getUrl());
+        fallbackName = u.searchParams.get('category') || path.basename(u.pathname) || fallbackName;
+      } catch {}
+      const rawName = (typeof req.getName === 'function' ? req.getName() : req.name) || fallbackName;
+      const slug = rawName.replace(/\.bru$/i, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'gtfs-realtime';
+      fs.writeFileSync(path.join(outDir, `${slug}.json`), JSON.stringify(decoded, null, 2));
+
       if (typeof bru.visualize === 'function') {
         const esc = (v) =>
           String(v ?? '')

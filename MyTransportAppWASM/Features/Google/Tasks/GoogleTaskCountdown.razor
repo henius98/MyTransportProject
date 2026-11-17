@@ -67,6 +67,8 @@
   private bool loading = true;
   private bool connected;
   private string? error;
+  private string? loadedUserId;
+  private int loadedRefreshVersion = -1;
   private readonly CancellationTokenSource lifetime = new();
 
   private GoogleTask? NextTask => tasks.Where(task => task.Status != "completed" && task.DueDate >= now.Date)
@@ -74,6 +76,14 @@
 
   protected override async Task OnParametersSetAsync()
   {
+    if (string.Equals(loadedUserId, UserId, StringComparison.Ordinal) &&
+        loadedRefreshVersion == RefreshVersion)
+    {
+      return;
+    }
+
+    loadedUserId = UserId;
+    loadedRefreshVersion = RefreshVersion;
     loading = true;
     error = null;
     tasks = [];
@@ -87,12 +97,18 @@
     }
     catch (Exception)
     {
-      error = "Could not load tasks. Refresh the calendar or reconnect Google Tasks to try again.";
+      if (!lifetime.IsCancellationRequested)
+      {
+        error = "Could not load tasks. Refresh the calendar or reconnect Google Tasks to try again.";
+      }
     }
     finally
     {
-      now = MalaysiaTime.Now.DateTime;
-      loading = false;
+      if (!lifetime.IsCancellationRequested)
+      {
+        now = MalaysiaTime.Now.DateTime;
+        loading = false;
+      }
     }
   }
 

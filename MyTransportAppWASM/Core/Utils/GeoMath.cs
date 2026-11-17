@@ -16,4 +16,9 @@ public static class GeoMath
 
   public static double DistanceMeters(double lat1, double lon1, double lat2, double lon2) =>
     DistanceKilometers(lat1, lon1, lat2, lon2) * 1000.0;
+
+  public static bool IsValidCoordinates(double latitude, double longitude) =>
+    double.IsFinite(latitude) && double.IsFinite(longitude)
+    && latitude is >= -90 and <= 90
+    && longitude is >= -180 and <= 180;
 }

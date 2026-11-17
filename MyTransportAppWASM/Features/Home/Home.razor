@@ -2,75 +2,110 @@
 @page "/index.html"
 @inject IUserSettingsService UserSettings
 
-<PageTitle>Home - MyTransportApp</PageTitle>
+<PageTitle>@Language["HomePageTitle"]</PageTitle>
 
 <div class="hero">
     <div class="hero__content">
-        <h1 class="section-title">Ready for your next journey?</h1>
-        <p class="section-subtitle">Track real-time bus locations and plan your trips with live weather insights across
-            Malaysia.</p>
+        <h1 class="section-title">@Language["HomeHeroTitle"]</h1>
+        <p class="section-subtitle">@Language["HomeHeroSubtitle"]</p>
 
-            <div class="dashboard">
-                <a class="card card-map dashboard__link" href="map">
-                    <div class="dashboard__icon">📍</div>
-                    <h2 class="h3">Live Bus Map</h2>
-                    <p>Track rapid bus positions in real-time on our interactive map.</p>
-                    <div class="dashboard__footer">
-                        <span class="dash-link">Open Map</span>
-                        <span class="arrow">&rarr;</span>
-                    </div>
-                </a>
+        <div class="dashboard" aria-label="@Language["PrimaryToolsLabel"]">
+            <a class="card card-animated card-map dashboard__link" href="map">
+                <div class="dashboard__icon" aria-hidden="true">📍</div>
+                <h2 class="dashboard__title">@Language["HomeMapCardTitle"]</h2>
+                <p class="dashboard__desc">@Language["HomeMapCardDesc"]</p>
+                <div class="dashboard__footer">
+                    <span class="dash-link">@Language["HomeMapCardCta"]</span>
+                    <span class="arrow" aria-hidden="true">&rarr;</span>
+                </div>
+            </a>
 
-                <a class="card card-weather dashboard__link" href="weather">
-                    <div class="dashboard__icon">🌦️</div>
-                    <h2 class="h3">Weather Planner</h2>
-                    <p>Get precise weather forecasts for your departure and return.</p>
-                    <div class="dashboard__footer">
-                        <span class="dash-link">Plan Trip</span>
-                        <span class="arrow">&rarr;</span>
-                    </div>
-                </a>
-            </div>
-
-            <footer class="mt-4 text-center">
-                <a href="privacy" class="text-muted small text-decoration-none" style="opacity: 0.7;">Privacy Policy</a>
-            </footer>
+            <a class="card card-animated card-weather dashboard__link" href="weather">
+                <div class="dashboard__icon" aria-hidden="true">🌦️</div>
+                <h2 class="dashboard__title">@Language["HomeWeatherCardTitle"]</h2>
+                <p class="dashboard__desc">@Language["HomeWeatherCardDesc"]</p>
+                <div class="dashboard__footer">
+                    <span class="dash-link">@Language["HomeWeatherCardCta"]</span>
+                    <span class="arrow" aria-hidden="true">&rarr;</span>
+                </div>
+            </a>
         </div>
+
+        <div class="dashboard-secondary" aria-label="@Language["CompanionToolsLabel"]">
+            <a class="card card-animated dashboard__pill" href="fortune">
+                <span class="dashboard__pill-icon" aria-hidden="true">✨</span>
+                <div class="dashboard__pill-body">
+                    <h2 class="dashboard__pill-title">@Language["HomeFortuneCardTitle"]</h2>
+                    <p class="dashboard__pill-desc">@Language["HomeFortuneCardDesc"]</p>
+                </div>
+                <span class="dashboard__pill-cta">@Language["HomeFortuneCardCta"] <span class="arrow" aria-hidden="true">&rarr;</span></span>
+            </a>
+
+            <a class="card card-animated dashboard__pill" href="google/calendar">
+                <span class="dashboard__pill-icon" aria-hidden="true">📅</span>
+                <div class="dashboard__pill-body">
+                    <h2 class="dashboard__pill-title">@Language["HomeCalendarCardTitle"]</h2>
+                    <p class="dashboard__pill-desc">@Language["HomeCalendarCardDesc"]</p>
+                </div>
+                <span class="dashboard__pill-cta">@Language["HomeCalendarCardCta"] <span class="arrow" aria-hidden="true">&rarr;</span></span>
+            </a>
+
+            <a class="card card-animated dashboard__pill" href="google/tasks">
+                <span class="dashboard__pill-icon" aria-hidden="true">☑️</span>
+                <div class="dashboard__pill-body">
+                    <h2 class="dashboard__pill-title">@Language["HomeTasksCardTitle"]</h2>
+                    <p class="dashboard__pill-desc">@Language["HomeTasksCardDesc"]</p>
+                </div>
+                <span class="dashboard__pill-cta">@Language["HomeTasksCardCta"] <span class="arrow" aria-hidden="true">&rarr;</span></span>
+            </a>
+        </div>
+
+        <footer class="home-footer mt-4 text-center">
+            <a href="privacy" class="home-footer__link small text-decoration-none">@Language["PrivacyPolicy"]</a>
+        </footer>
     </div>
+</div>
 
-    @if (showWelcome)
-    {
-        <div class="modal__backdrop" @onclick="CloseWelcome" @onclick:stopPropagation="true">
-            <div class="modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title" @onclick:stopPropagation="true">
-                <button type="button" class="modal__close" aria-label="Close welcome" @onclick="CloseWelcome">&times;</button>
-                <div class="modal__icon">👋</div>
-                <h2 id="welcome-title" class="fw-bold">Welcome to MyTransportApp!</h2>
-                <p>Your ultimate companion for navigating public transport in Malaysia, Singapore. We've combined real-time GTFS
-                    data with precise weather modeling.</p>
+@if (showWelcome)
+{
+    <div class="modal__backdrop" @onclick="CloseWelcome" @onclick:stopPropagation="true">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title" @onclick:stopPropagation="true">
+            <button type="button" class="modal__close" aria-label="@Language["CloseWelcome"]" @onclick="CloseWelcome">&times;</button>
+            <div class="modal__icon" aria-hidden="true">👋</div>
+            <h2 id="welcome-title" class="fw-bold">@Language["WelcomeModalTitle"]</h2>
+            <p>@Language["WelcomeModalSubtitle"]</p>
 
-                    <div class="stats mb-3">
-                        <div class="stats__item">
-                            <span class="stats__value">@factor</span>
-                            <span class="stats__label">Form Factor</span>
-                        </div>
-                        <div class="stats__divider"></div>
-                        <div class="stats__item">
-                            <span class="stats__value">@platform</span>
-                            <span class="stats__label">Platform</span>
-                        </div>
+            <div class="onboarding-highlights mb-4 text-start">
+                <div class="onboarding-highlight">
+                    <span class="onboarding-highlight__icon" aria-hidden="true">🚌</span>
+                    <div>
+                        <strong class="onboarding-highlight__title">@Language["OnboardingGtfsTitle"]</strong>
+                        <span class="onboarding-highlight__desc">@Language["OnboardingGtfsDesc"]</span>
                     </div>
-
-                    <button class="btn btn--primary w-100" @onclick="CloseWelcome">Let's Get Started!</button>
+                </div>
+                <div class="onboarding-highlight">
+                    <span class="onboarding-highlight__icon" aria-hidden="true">🌦️</span>
+                    <div>
+                        <strong class="onboarding-highlight__title">@Language["OnboardingWeatherTitle"]</strong>
+                        <span class="onboarding-highlight__desc">@Language["OnboardingWeatherDesc"]</span>
+                    </div>
+                </div>
+                <div class="onboarding-highlight">
+                    <span class="onboarding-highlight__icon" aria-hidden="true">🗓️</span>
+                    <div>
+                        <strong class="onboarding-highlight__title">@Language["OnboardingWorkspaceTitle"]</strong>
+                        <span class="onboarding-highlight__desc">@Language["OnboardingWorkspaceDesc"]</span>
+                    </div>
                 </div>
             </div>
-        }
 
-
+            <button type="button" class="btn btn--primary w-100" @onclick="CloseWelcome">@Language["WelcomeModalCta"]</button>
+        </div>
+    </div>
+}
 
 @code {
-    private const string factor = "WebAssembly";
-    private const string platform = "Blazor WebAssembly";
-
+    [CascadingParameter] private LanguageService Language { get; set; } = default!;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private bool showWelcome;

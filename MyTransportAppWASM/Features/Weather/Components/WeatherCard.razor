@@ -1,0 +1,20 @@
+@if (string.Equals(Result.Provider, "MetMalaysia", StringComparison.OrdinalIgnoreCase))
+{
+  <MetMalaysiaWeatherCard Result="Result" IsRefreshing="IsRefreshing" OnRefresh="OnRefresh" />
+}
+else if (string.Equals(Result.Provider, "Open-Meteo", StringComparison.OrdinalIgnoreCase))
+{
+  <OpenMeteoWeatherCard Query="Query" Result="Result" IsRefreshing="IsRefreshing" OnRefresh="OnRefresh" FetchOutlook="IsOutlook" />
+}
+else
+{
+  <SingaporeNeaWeatherCard Result="Result" IsRefreshing="IsRefreshing" OnRefresh="OnRefresh" />
+}
+
+@code {
+  [Parameter, EditorRequired] public WeatherProviderResult Result { get; set; } = default!;
+  [Parameter] public WeatherQuery? Query { get; set; }
+  [Parameter] public bool IsOutlook { get; set; }
+  [Parameter] public bool IsRefreshing { get; set; }
+  [Parameter] public EventCallback OnRefresh { get; set; }
+}

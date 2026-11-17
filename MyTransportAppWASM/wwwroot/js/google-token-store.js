@@ -3,8 +3,8 @@ let memoryConnections = {};
 let storageAvailable = true;
 
 function getStorage() {
-    if (typeof sessionStorage !== "undefined") return sessionStorage;
     if (typeof localStorage !== "undefined") return localStorage;
+    if (typeof sessionStorage !== "undefined") return sessionStorage;
     return null;
 }
 

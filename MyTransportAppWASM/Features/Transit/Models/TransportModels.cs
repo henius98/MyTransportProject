@@ -12,7 +12,7 @@ namespace MyTransportAppWASM.Features.Transit.Models
 
   public record StaticRoute(string Id, string Name);
 
-  public record StaticDeparture(string RouteId, string? Headsign, DateTimeOffset DepartureAt);
+  public record StaticDeparture(string RouteId, string? Headsign, DateTimeOffset? DepartureAt);
 
   // Models for Live Routing Service
   public record GoogleRoute
@@ -21,7 +21,33 @@ namespace MyTransportAppWASM.Features.Transit.Models
     public string EncodedPolyline { get; set; } = "";
     public int DurationSeconds { get; set; }
     public int DistanceMeters { get; set; }
+    public string LocalizedDuration { get; set; } = "";
+    public string LocalizedDistance { get; set; } = "";
+    public string DepartureTimeText { get; set; } = "";
+    public string ArrivalTimeText { get; set; } = "";
+    public int? HeadwayMinutes { get; set; }
     public List<TransitStep> TransitSteps { get; set; } = new();
+    public List<RouteSegment> Segments { get; set; } = new();
+  }
+
+  public record RouteSegment
+  {
+    public string TravelMode { get; set; } = "";
+    public string VehicleType { get; set; } = "";
+    public string LineShortName { get; set; } = "";
+    public string LineName { get; set; } = "";
+    public string LineColor { get; set; } = "";
+    public string LineTextColor { get; set; } = "";
+    public string Headsign { get; set; } = "";
+    public string DepartureStopName { get; set; } = "";
+    public string ArrivalStopName { get; set; } = "";
+    public string DepartureTimeText { get; set; } = "";
+    public string ArrivalTimeText { get; set; } = "";
+    public int DurationSeconds { get; set; }
+    public int DistanceMeters { get; set; }
+    public int StopCount { get; set; }
+    public int? HeadwayMinutes { get; set; }
+    public string Instructions { get; set; } = "";
   }
 
   public record TransitStep
@@ -41,6 +67,8 @@ namespace MyTransportAppWASM.Features.Transit.Models
     public string? TransportType { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("routeId")]
     public string? RouteId { get; set; }
+    [System.Text.Json.Serialization.JsonPropertyName("routeShortName")]
+    public string? RouteShortName { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("vehicleId")]
     public string? VehicleId { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("lat")]

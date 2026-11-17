@@ -8,8 +8,8 @@ const user = (uid = "user-a") => ({ uid, email: `${uid}@example.com`, providerDa
 const response = (payload = {}, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => payload });
 const plain = value => JSON.parse(JSON.stringify(value));
 
-async function setup({ storage = new Map(), cloud = new Map(), currentUser = user(), now = 1000 } = {}) {
-    const state = { auth: { currentUser, authStateReady: async () => { await state.restoration; } }, requests: [], popups: [], now, storage, cloud, refreshes: 0 };
+async function setup({ storage = new Map(), session = new Map(), cloud = new Map(), currentUser = user(), now = 1000 } = {}) {
+    const state = { auth: { currentUser, authStateReady: async () => { await state.restoration; } }, requests: [], popups: [], now, storage, session, cloud, refreshes: 0 };
     const sdk = {
         onAuthStateChanged(_auth, callback) { state.authChanged = callback; return () => {}; }
     };
@@ -21,6 +21,11 @@ async function setup({ storage = new Map(), cloud = new Map(), currentUser = use
             setItem: (key, value) => storage.set(key, value),
             removeItem: key => storage.delete(key)
         },
+        sessionStorage: {
+            getItem: key => session.get(key) ?? null,
+            setItem: (key, value) => session.set(key, value),
+            removeItem: key => session.delete(key)
+        },
         Date: class extends Date { static now() { return state.now; } },
         fetch: async (url, options) => {
             state.requests.push({ url, ...options });
@@ -31,7 +36,11 @@ async function setup({ storage = new Map(), cloud = new Map(), currentUser = use
     const firebase = new SyntheticModule(["getAuthContext"], function () {
         this.setExport("getAuthContext", async () => ({ auth: state.auth, sdk }));
     }, { context });
-    const authorization = new SyntheticModule(["authorizeConnection", "restoreConnection", "invalidateConnection", "prepareAuthorization"], function () {
+    const authorization = new SyntheticModule(["authorizeConnection", "restoreConnection", "invalidateConnection", "prepareAuthorization", "serviceScopes"], function () {
+        this.setExport("serviceScopes", {
+            calendar: ["https://www.googleapis.com/auth/calendar.calendarlist.readonly", "https://www.googleapis.com/auth/calendar.events"],
+            tasks: ["https://www.googleapis.com/auth/tasks"]
+        });
         this.setExport("prepareAuthorization", async () => {});
         this.setExport("authorizeConnection", async (uid, service, email, requireSession) => {
             state.popups.push({ user: state.auth.currentUser, parameters: { login_hint: email }, scopes: service === "calendar"
@@ -40,7 +49,11 @@ async function setup({ storage = new Map(), cloud = new Map(), currentUser = use
             const result = state.reauthenticate ? await state.reauthenticate() : { user: state.auth.currentUser, credential: { accessToken: `google-token-${state.popups.length}` } };
             if (result.user.uid !== uid) throw new Error("Choose the same Google account you used to sign in to this app.");
             requireSession();
-            const connection = { accessToken: result.credential.accessToken, expiresAt: state.now + 3600000 };
+            const connection = {
+                accessToken: result.credential.accessToken,
+                expiresAt: state.now + 3600000,
+                ...(result.scopes ? { scopes: result.scopes } : {})
+            };
             cloud.set(`${uid}/${service}`, connection);
             return connection;
         });
@@ -498,4 +511,24 @@ test("consent failures can be retried and never grant a connection", async () =>
         await state.api.connect("user-a", "tasks");
         assert.equal(await state.api.isConnected("user-a", "tasks"), true);
     }
+});
+
+test("incremental authorization scopes connect all covered services and persist in localStorage across tabs", async () => {
+    const state = await setup();
+    state.reauthenticate = () => ({
+        user: user("user-a"),
+        credential: { accessToken: "shared-token" },
+        scopes: [
+            "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+            "https://www.googleapis.com/auth/calendar.events",
+            "https://www.googleapis.com/auth/tasks"
+        ]
+    });
+    await state.api.connect("user-a", "calendar");
+    assert.equal(state.session.size, 0);
+    assert.equal(state.storage.size, 1);
+    const reopenedTab = await setup({ storage: state.storage });
+    assert.equal(await reopenedTab.api.isConnected("user-a", "calendar"), true);
+    assert.equal(await reopenedTab.api.isConnected("user-a", "tasks"), true);
+    assert.equal(reopenedTab.popups.length, 0);
 });

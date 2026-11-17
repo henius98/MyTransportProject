@@ -6,11 +6,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>partial</TrimMode>
-    <BlazorEnableCompression>true</BlazorEnableCompression>
+    <CompressionEnabled>true</CompressionEnabled>
     <WasmEnableSIMD>true</WasmEnableSIMD>
     <WasmEnableExceptionHandling>true</WasmEnableExceptionHandling>
     <BlazorWebAssemblyPreserveCollationData>false</BlazorWebAssemblyPreserveCollationData>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <InvariantTimezone>true</InvariantTimezone>
     <DebuggerSupport>true</DebuggerSupport>
     <EventSourceSupport>true</EventSourceSupport>
     <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
@@ -21,13 +22,18 @@
          The measured publish payload was 7.37 MB interpreted versus 29.17 MB full AOT,
          and the smaller build also reached the rendered Home page sooner. -->
     <RunAOTCompilation>false</RunAOTCompilation>
-    <WasmOptimizationPreference>Speed</WasmOptimizationPreference>
+    <EmccLinkOptimizationFlag>-Oz</EmccLinkOptimizationFlag>
     <DebuggerSupport>false</DebuggerSupport>
+    <DynamicCodeSupport>false</DynamicCodeSupport>
     <EventSourceSupport>false</EventSourceSupport>
     <HttpActivityPropagationSupport>false</HttpActivityPropagationSupport>
     <MetadataUpdaterSupport>false</MetadataUpdaterSupport>
     <UseSystemResourceKeys>true</UseSystemResourceKeys>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MyTransportAppWASM.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.7" />
@@ -47,6 +53,13 @@
 
   <ItemGroup>
     <ServiceWorker Include="wwwroot\service-worker.js" PublishedContent="wwwroot\service-worker.published.js" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Remove="wwwroot\js\README.md" />
+    <None Include="wwwroot\js\README.md" />
+    <Content Remove="wwwroot\appsettings.Development.example.json" />
+    <None Include="wwwroot\appsettings.Development.example.json" />
   </ItemGroup>
 
 </Project>

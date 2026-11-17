@@ -9,7 +9,7 @@ const storeSource = await readFile(new URL("../../MyTransportAppWASM/wwwroot/js/
 async function setup({ restoredUid = null, restoration = Promise.resolve(), scriptFailure = false, deferScript = false, credentialFailure = false } = {}) {
     const storage = new Map();
     const callbacks = [];
-    const state = { scripts: [], prompts: 0, cancellations: 0, autoSelectDisabled: 0, credentials: [], popups: 0, warnings: [] };
+    const state = { scripts: [], prompts: 0, cancellations: 0, autoSelectDisabled: 0, credentials: [], popups: 0, warnings: [], pushDisabled: [] };
     const auth = { currentUser: null, authStateReady: async () => {
         await restoration;
         state.notifyUser(restoredUid);
@@ -85,10 +85,19 @@ async function setup({ restoredUid = null, restoration = Promise.resolve(), scri
         this.setExport("getFirebaseApp", async () => ({ options: state.appOptions || {} }));
         this.setExport("firebaseSdkBase", "https://firebase.test");
     }, { context });
+    const pushModule = new SyntheticModule(["disable"], function () {
+        this.setExport("disable", async uid => {
+            state.pushDisabled.push(uid);
+            return true;
+        });
+    }, { context });
+    await pushModule.link(() => assert.fail("Unexpected push dependency"));
+    await pushModule.evaluate();
     const store = new SourceTextModule(storeSource, { context });
     const module = new SourceTextModule(authSource, {
         context,
         importModuleDynamically(specifier) {
+            if (specifier === "./push-notifications.js") return pushModule;
             assert.equal(specifier, "https://firebase.test/firebase-auth.js");
             return sdk;
         }
@@ -132,8 +141,19 @@ test("signing out from any page clears saved access before returning", async () 
     const state = await setup();
     await state.api.getAuthContext();
     state.notifyUser("user-a");
-    assert.equal(await state.window.firebaseAuthInterop.signOut(), true);
+    assert.equal(state.window.firebaseAuthInterop, undefined);
+    assert.equal(await state.api.signOut(), true);
     assert.equal(state.storage.size, 0);
+    assert.deepEqual(state.pushDisabled, []);
+});
+
+test("signing out unregisters push notifications via module import when a push token exists", async () => {
+    const state = await setup();
+    await state.api.getAuthContext();
+    state.notifyUser("user-a");
+    state.storage.set("push-token", "fcm-123");
+    assert.equal(await state.api.signOut(), true);
+    assert.deepEqual(state.pushDisabled, ["user-a"]);
 });
 
 test("account changes and sign-out notifications clear saved access without loading Google services", async () => {
@@ -153,12 +173,12 @@ const nextTurn = () => new Promise(resolve => setImmediate(resolve));
 test("One Tap waits for session restoration and prompts only once for a signed-out visitor", async () => {
     let restore;
     const state = await setup({ restoration: new Promise(resolve => { restore = resolve; }) });
-    const starting = state.window.firebaseAuthInterop.initializeOneTap(clientId);
+    const starting = state.api.initializeOneTap(clientId);
     await nextTurn();
     assert.equal(state.scripts.length, 0);
     restore();
     await starting;
-    await state.window.firebaseAuthInterop.initializeOneTap(clientId);
+    await state.api.initializeOneTap(clientId);
     assert.equal(state.scripts.length, 1);
     assert.equal(state.scripts[0].src, "https://accounts.google.com/gsi/client");
     assert.equal(state.prompts, 1);
@@ -169,11 +189,11 @@ test("One Tap waits for session restoration and prompts only once for a signed-o
 test("One Tap skips unconfigured apps and restored signed-in sessions", async () => {
     for (const id of [null, "", "   "]) {
         const state = await setup();
-        await state.window.firebaseAuthInterop.initializeOneTap(id);
+        await state.api.initializeOneTap(id);
         assert.equal(state.scripts.length, 0);
     }
     const state = await setup({ restoredUid: "user-a" });
-    await state.window.firebaseAuthInterop.initializeOneTap(clientId);
+    await state.api.initializeOneTap(clientId);
     assert.equal(state.scripts.length, 0);
     assert.equal(state.prompts, 0);
     assert.equal(state.storage.size, 1);
@@ -182,11 +202,11 @@ test("One Tap skips unconfigured apps and restored signed-in sessions", async ()
 test("One Tap exchanges the Google credential through Firebase and notifies Blazor", async () => {
     const state = await setup();
     const profiles = [];
-    await state.window.firebaseAuthInterop.onAuthStateChanged({ invokeMethodAsync: async (method, profile) => {
+    await state.api.onAuthStateChanged({ invokeMethodAsync: async (method, profile) => {
         assert.equal(method, "OnAuthStateChanged");
         profiles.push(profile);
     } });
-    await state.window.firebaseAuthInterop.initializeOneTap(clientId);
+    await state.api.initializeOneTap(clientId);
     await state.oneTapOptions.callback({ credential: "google-id-token" });
     assert.deepEqual(state.credentials, ["google-id-token"]);
     assert.equal(profiles.at(-1).uid, "one-tap-user");
@@ -197,10 +217,10 @@ test("One Tap exchanges the Google credential through Firebase and notifies Blaz
 
 test("manual login cancels One Tap and ignores a delayed credential", async () => {
     const state = await setup();
-    await state.window.firebaseAuthInterop.initializeOneTap(clientId);
-    state.window.firebaseAuthInterop.cancelOneTap();
+    await state.api.initializeOneTap(clientId);
+    state.api.cancelOneTap();
     await state.oneTapOptions.callback({ credential: "stale-token" });
-    const user = await state.window.firebaseAuthInterop.signInWithGoogle();
+    const user = await state.api.signInWithGoogle();
     assert.equal(user.uid, "popup-user");
     assert.deepEqual(state.credentials, []);
     assert.equal(state.popups, 1);
@@ -208,19 +228,19 @@ test("manual login cancels One Tap and ignores a delayed credential", async () =
 
 test("sign-out disables automatic selection and prevents One Tap reopening", async () => {
     const state = await setup();
-    await state.window.firebaseAuthInterop.initializeOneTap(clientId);
-    await state.window.firebaseAuthInterop.signOut();
+    await state.api.initializeOneTap(clientId);
+    await state.api.signOut();
     await state.oneTapOptions.callback({ credential: "stale-token" });
-    await state.window.firebaseAuthInterop.initializeOneTap(clientId);
+    await state.api.initializeOneTap(clientId);
     assert.equal(state.autoSelectDisabled, 1);
     assert.equal(state.prompts, 1);
     assert.deepEqual(state.credentials, []);
 });
 
 test("cancellation or signing in while Google's script loads prevents a late prompt", async () => {
-    for (const cancel of [state => state.window.firebaseAuthInterop.cancelOneTap(), state => state.notifyUser("user-a")]) {
+    for (const cancel of [state => state.api.cancelOneTap(), state => state.notifyUser("user-a")]) {
         const state = await setup({ deferScript: true });
-        const starting = state.window.firebaseAuthInterop.initializeOneTap(clientId);
+        const starting = state.api.initializeOneTap(clientId);
         await nextTurn();
         assert.equal(state.scripts.length, 1);
         cancel(state);
@@ -232,16 +252,16 @@ test("cancellation or signing in while Google's script loads prevents a late pro
 
 test("a blocked One Tap script does not break manual sign-in", async () => {
     const state = await setup({ scriptFailure: true });
-    await state.window.firebaseAuthInterop.initializeOneTap(clientId);
+    await state.api.initializeOneTap(clientId);
     assert.equal(state.warnings.length, 1);
     assert.equal(state.prompts, 0);
-    assert.equal((await state.window.firebaseAuthInterop.signInWithGoogle()).uid, "popup-user");
+    assert.equal((await state.api.signInWithGoogle()).uid, "popup-user");
 });
 
 test("One Tap and Google authorization share one pending identity script", async () => {
     const state = await setup({ deferScript: true });
     const loading = state.api.loadGoogleIdentity();
-    const oneTap = state.window.firebaseAuthInterop.initializeOneTap(clientId);
+    const oneTap = state.api.initializeOneTap(clientId);
     await nextTurn();
     assert.equal(state.scripts.length, 1);
     state.loadScript();
@@ -253,17 +273,17 @@ test("One Tap and Google authorization share one pending identity script", async
 
 test("a rejected One Tap credential leaves manual sign-in available", async () => {
     const state = await setup({ credentialFailure: true });
-    await state.window.firebaseAuthInterop.initializeOneTap(clientId);
+    await state.api.initializeOneTap(clientId);
     await state.oneTapOptions.callback({ credential: "rejected-token" });
     assert.equal(state.warnings.length, 1);
     assert.equal(state.warnings[0][1], "auth/invalid-credential");
-    assert.equal((await state.window.firebaseAuthInterop.signInWithGoogle()).uid, "popup-user");
+    assert.equal((await state.api.signInWithGoogle()).uid, "popup-user");
 });
 
 test("manual sign-in reuses resolved auth context synchronously and opens popup", async () => {
     const state = await setup();
     await state.api.getAuthContext();
-    const user = await state.window.firebaseAuthInterop.signInWithGoogle();
+    const user = await state.api.signInWithGoogle();
     assert.equal(user.uid, "popup-user");
     assert.equal(state.popups, 1);
 });
@@ -271,7 +291,7 @@ test("manual sign-in reuses resolved auth context synchronously and opens popup"
 test("GIS token client authenticates with signInWithCredential when client ID is provided", async () => {
     const state = await setup();
     state.tokenResponse = { access_token: "gis-access-token" };
-    const user = await state.window.firebaseAuthInterop.signInWithGoogle(clientId);
+    const user = await state.api.signInWithGoogle(clientId);
     assert.equal(user.uid, "gis-user");
     assert.deepEqual(state.credentials, ["gis-access-token"]);
     assert.equal(state.popups, 0);
@@ -284,7 +304,7 @@ test("GIS token client authenticates using app.options.googleClientId", async ()
     const state = await setup();
     state.appOptions = { googleClientId: clientId };
     state.tokenResponse = { access_token: "app-access-token" };
-    const user = await state.window.firebaseAuthInterop.signInWithGoogle();
+    const user = await state.api.signInWithGoogle();
     assert.equal(user.uid, "gis-user");
     assert.deepEqual(state.credentials, ["app-access-token"]);
     assert.equal(state.popups, 0);
@@ -294,7 +314,7 @@ test("GIS cancellation maps popup_closed to auth/popup-closed-by-user and suppre
     const state = await setup();
     state.tokenError = { type: "popup_closed" };
     await assert.rejects(
-        async () => state.window.firebaseAuthInterop.signInWithGoogle(clientId),
+        async () => state.api.signInWithGoogle(clientId),
         err => err.code === "auth/popup-closed-by-user"
     );
 });
@@ -303,7 +323,7 @@ test("GIS popup blocking maps popup_failed_to_open to auth/popup-blocked", async
     const state = await setup();
     state.tokenError = { type: "popup_failed_to_open" };
     await assert.rejects(
-        async () => state.window.firebaseAuthInterop.signInWithGoogle(clientId),
+        async () => state.api.signInWithGoogle(clientId),
         err => err.code === "auth/popup-blocked"
     );
 });

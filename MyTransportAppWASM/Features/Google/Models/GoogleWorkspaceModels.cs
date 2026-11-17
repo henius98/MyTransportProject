@@ -119,4 +119,7 @@ public sealed class GoogleTaskExtension
     public int? EstimatedMinutes { get; set; }
     public List<GoogleTaskReference> DependsOn { get; set; } = [];
     public string? StartedAt { get; set; }
+
+    [JsonIgnore]
+    public bool IsEmpty => EstimatedMinutes == null && DependsOn.Count == 0 && StartedAt == null;
 }

@@ -69,4 +69,29 @@ public class GoogleTaskWorkflowTests
     [InlineData(120, "2 hr")]
     public void FormatsDuration(int minutes, string expected) =>
         Assert.Equal(expected, GoogleTaskWorkflow.FormatDuration(minutes));
+
+    [Fact]
+    public void IsEmpty_AndRemoveReferences_PruneEmptyExtensions()
+    {
+        var empty = new GoogleTaskExtension { TaskListId = "list", TaskId = "empty" };
+        var dependentOnly = Extension("dep", Ref("gone"));
+        var withEstimate = Extension("est", Ref("gone"));
+        withEstimate.EstimatedMinutes = 25;
+
+        Assert.True(empty.IsEmpty);
+        Assert.False(dependentOnly.IsEmpty);
+        Assert.False(withEstimate.IsEmpty);
+
+        var extensions = new Dictionary<string, GoogleTaskExtension>
+        {
+            [Key("dep")] = dependentOnly,
+            [Key("est")] = withEstimate
+        };
+
+        GoogleTaskWorkflow.RemoveReferences(extensions, [Ref("gone")]);
+
+        Assert.False(extensions.ContainsKey(Key("dep")));
+        Assert.True(extensions.ContainsKey(Key("est")));
+        Assert.Empty(withEstimate.DependsOn);
+    }
 }

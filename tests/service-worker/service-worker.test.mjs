@@ -121,29 +121,35 @@ function setupProdWorker(mockFetch, manifestAssets = [], registrationScope = nul
   return { handlers, caches: mockCaches };
 }
 
+function dispatchFetch(handlers, url, mode) {
+  let promise = null;
+  handlers.fetch({
+    request: mode ? { mode, method: "GET", url } : { method: "GET", url },
+    respondWith: (p) => { promise = p; }
+  });
+  return promise;
+}
+
+function dispatchInstall(handlers) {
+  let promise = null;
+  handlers.install({ waitUntil: (p) => { promise = p; } });
+  return promise;
+}
+
 test("dev worker intercepts and caches GTFS static routes via stale-while-revalidate", async () => {
   let fetchCount = 0;
   const mockResponse = {
     status: 200,
     clone() { return { ...this }; }
   };
-  const mockFetch = async (req) => {
+  const mockFetch = async () => {
     fetchCount++;
     return mockResponse;
   };
 
-  const { handlers, caches } = setupDevWorker(mockFetch);
+  const { handlers } = setupDevWorker(mockFetch);
 
-  let respondedWithPromise = null;
-  const event = {
-    request: {
-      method: "GET",
-      url: "https://api.data.gov.my/gtfs-static/rapid-bus-kl/routes"
-    },
-    respondWith: (p) => { respondedWithPromise = p; }
-  };
-
-  handlers.fetch(event);
+  const respondedWithPromise = dispatchFetch(handlers, "https://api.data.gov.my/gtfs-static/rapid-bus-kl/routes");
   assert.ok(respondedWithPromise, "Expected event.respondWith to be called for GTFS static routes");
 
   const response = await respondedWithPromise;
@@ -151,16 +157,7 @@ test("dev worker intercepts and caches GTFS static routes via stale-while-revali
   assert.equal(fetchCount, 1);
 
   // Subsequent fetch: should return cached version immediately
-  let cachedPromise = null;
-  const event2 = {
-    request: {
-      method: "GET",
-      url: "https://api.data.gov.my/gtfs-static/rapid-bus-kl/routes"
-    },
-    respondWith: (p) => { cachedPromise = p; }
-  };
-
-  handlers.fetch(event2);
+  const cachedPromise = dispatchFetch(handlers, "https://api.data.gov.my/gtfs-static/rapid-bus-kl/routes");
   const response2 = await cachedPromise;
   assert.equal(response2.status, 200);
 });
@@ -169,21 +166,12 @@ test("dev worker caches recreation_centres.json and bypasses non-static requests
   const { handlers } = setupDevWorker(async () => ({ status: 200, clone() { return this; } }));
 
   // recreation_centres.json should be intercepted
-  let rcPromise = null;
-  handlers.fetch({
-    request: { method: "GET", url: "https://example.com/data/recreation_centres.json" },
-    respondWith: (p) => { rcPromise = p; }
-  });
+  const rcPromise = dispatchFetch(handlers, "https://example.com/data/recreation_centres.json");
   assert.ok(rcPromise, "recreation_centres.json should be intercepted by dev worker");
-  const rcRes = await rcPromise;
-  assert.equal(rcRes.status, 200);
+  assert.equal((await rcPromise).status, 200);
 
   // app assembly should NOT be intercepted in dev worker
-  let dllPromise = null;
-  handlers.fetch({
-    request: { method: "GET", url: "https://example.com/_framework/MyTransportAppWASM.wasm" },
-    respondWith: (p) => { dllPromise = p; }
-  });
+  const dllPromise = dispatchFetch(handlers, "https://example.com/_framework/MyTransportAppWASM.wasm");
   assert.equal(dllPromise, null, "wasm framework file should bypass dev worker to avoid stale hot reload");
 });
 
@@ -208,36 +196,18 @@ test("prod worker pre-caches manifest assets and caches GTFS static routes with 
   const { handlers, caches } = setupProdWorker(mockFetch, manifest);
 
   // Install event
-  let installPromise = null;
-  handlers.install({ waitUntil: (p) => { installPromise = p; } });
-  await installPromise;
+  await dispatchInstall(handlers);
 
   const offlineCache = await caches.open("offline-cache-test-v1");
   const cachedRc = await offlineCache.match("https://example.com/data/recreation_centres.json");
   assert.ok(cachedRc, "recreation_centres.json must be pre-cached on install");
 
   // Fetch GTFS static data online first
-  let gtfsPromise = null;
-  handlers.fetch({
-    request: {
-      method: "GET",
-      url: "https://api.data.gov.my/gtfs-static/rapid-bus-kl/routes"
-    },
-    respondWith: (p) => { gtfsPromise = p; }
-  });
-  await gtfsPromise;
+  await dispatchFetch(handlers, "https://api.data.gov.my/gtfs-static/rapid-bus-kl/routes");
 
   // Now go offline and verify GTFS static lookup succeeds from cache
   online = false;
-  let offlineGtfsPromise = null;
-  handlers.fetch({
-    request: {
-      method: "GET",
-      url: "https://api.data.gov.my/gtfs-static/rapid-bus-kl/routes"
-    },
-    respondWith: (p) => { offlineGtfsPromise = p; }
-  });
-  const offlineResult = await offlineGtfsPromise;
+  const offlineResult = await dispatchFetch(handlers, "https://api.data.gov.my/gtfs-static/rapid-bus-kl/routes");
   assert.equal(offlineResult.status, 200);
 });
 
@@ -251,35 +221,15 @@ test("dev worker intercepts and caches configured static routes, departures, and
 
   const { handlers } = setupDevWorker(mockFetch);
 
-  // 1. /data/routes endpoint
-  let routesPromise = null;
-  handlers.fetch({
-    request: { method: "GET", url: "http://localhost:8787/rapid-bus-kl/data/routes?limit=100" },
-    respondWith: (p) => { routesPromise = p; }
-  });
-  assert.ok(routesPromise, "/data/routes should be intercepted by dev worker");
-  const res1 = await routesPromise;
-  assert.equal(res1.status, 200);
-
-  // 2. /departures endpoint
-  let depPromise = null;
-  handlers.fetch({
-    request: { method: "GET", url: "http://localhost:8787/rapid-bus-kl/departures?stop_id=123" },
-    respondWith: (p) => { depPromise = p; }
-  });
-  assert.ok(depPromise, "/departures should be intercepted by dev worker");
-  const res2 = await depPromise;
-  assert.equal(res2.status, 200);
-
-  // 3. /map endpoint
-  let mapPromise = null;
-  handlers.fetch({
-    request: { method: "GET", url: "http://localhost:8787/rapid-bus-kl/map?route_id=U60" },
-    respondWith: (p) => { mapPromise = p; }
-  });
-  assert.ok(mapPromise, "/map should be intercepted by dev worker");
-  const res3 = await mapPromise;
-  assert.equal(res3.status, 200);
+  for (const [label, url] of [
+    ["/data/routes", "http://localhost:8787/rapid-bus-kl/data/routes?limit=100"],
+    ["/departures", "http://localhost:8787/rapid-bus-kl/departures?stop_id=123"],
+    ["/map", "http://localhost:8787/rapid-bus-kl/map?route_id=U60"]
+  ]) {
+    const resPromise = dispatchFetch(handlers, url);
+    assert.ok(resPromise, `${label} should be intercepted by dev worker`);
+    assert.equal((await resPromise).status, 200);
+  }
   assert.equal(fetchCount, 3);
 });
 
@@ -298,23 +248,13 @@ test("prod worker caches configured static routes and departures with offline fa
   const { handlers } = setupProdWorker(mockFetch, manifest);
 
   // Fetch online
-  let onlinePromise = null;
-  handlers.fetch({
-    request: { method: "GET", url: "http://localhost:8787/rapid-rail-kl/data/routes" },
-    respondWith: (p) => { onlinePromise = p; }
-  });
-  await onlinePromise;
+  await dispatchFetch(handlers, "http://localhost:8787/rapid-rail-kl/data/routes");
 
   // Now go offline
   online = false;
-  let offlinePromise = null;
-  handlers.fetch({
-    request: { method: "GET", url: "http://localhost:8787/rapid-rail-kl/data/routes" },
-    respondWith: (p) => { offlinePromise = p; }
-  });
+  const offlinePromise = dispatchFetch(handlers, "http://localhost:8787/rapid-rail-kl/data/routes");
   assert.ok(offlinePromise, "Static route should be served offline");
-  const result = await offlinePromise;
-  assert.equal(result.status, 200);
+  assert.equal((await offlinePromise).status, 200);
 });
 
 test("prod worker correctly scopes subfolder hosting (e.g. /MyTransportProject/)", async () => {
@@ -326,27 +266,16 @@ test("prod worker correctly scopes subfolder hosting (e.g. /MyTransportProject/)
   const subfolderScope = "https://example.com/MyTransportProject/";
   const { handlers, caches } = setupProdWorker(async () => ({ status: 200, clone() { return this; } }), manifest, subfolderScope);
 
-  let installPromise = null;
-  handlers.install({ waitUntil: (p) => { installPromise = p; } });
-  await installPromise;
+  await dispatchInstall(handlers);
 
   const offlineCache = await caches.open("offline-cache-test-v1");
   const cachedRc = await offlineCache.match("https://example.com/MyTransportProject/data/recreation_centres.json");
   assert.ok(cachedRc, "recreation_centres.json must be pre-cached under the subfolder path");
 
   // Navigation request under subfolder should match
-  let navPromise = null;
-  handlers.fetch({
-    request: {
-      mode: "navigate",
-      method: "GET",
-      url: "https://example.com/MyTransportProject/weather"
-    },
-    respondWith: (p) => { navPromise = p; }
-  });
+  const navPromise = dispatchFetch(handlers, "https://example.com/MyTransportProject/weather", "navigate");
   assert.ok(navPromise, "Navigation request under subfolder should be intercepted");
-  const navResponse = await navPromise;
-  assert.ok(navResponse, "Navigation request under subfolder should return response");
+  assert.ok(await navPromise, "Navigation request under subfolder should return response");
 });
 
 test("dev and prod workers do not mistake /map SPA navigation for GTFS static data and return 503 on uncached fetch failure", async () => {
@@ -357,43 +286,25 @@ test("dev and prod workers do not mistake /map SPA navigation for GTFS static da
   const { handlers: devHandlers } = setupDevWorker(failingFetch);
 
   // 1. SPA navigation to /map must bypass dev worker
-  let devNavPromise = null;
-  devHandlers.fetch({
-    request: { mode: "navigate", method: "GET", url: "https://example.com/map" },
-    respondWith: (p) => { devNavPromise = p; }
-  });
-  assert.equal(devNavPromise, null, "/map navigation should not be intercepted by dev worker");
+  assert.equal(
+    dispatchFetch(devHandlers, "https://example.com/map", "navigate"),
+    null,
+    "/map navigation should not be intercepted by dev worker"
+  );
 
   // 2. Uncached GTFS static fetch failure resolves to 503 instead of unhandled rejection
-  let devFailPromise = null;
-  devHandlers.fetch({
-    request: { method: "GET", url: "http://localhost:8787/rapid-bus-kl/data/routes" },
-    respondWith: (p) => { devFailPromise = p; }
-  });
-  const devFailResponse = await devFailPromise;
+  const devFailResponse = await dispatchFetch(devHandlers, "http://localhost:8787/rapid-bus-kl/data/routes");
   assert.equal(devFailResponse.status, 503);
 
   // 3. Prod worker serves index.html on offline /map navigation and 503 on uncached GTFS static failure
   const manifest = [{ url: "index.html", hash: "sha256-idx" }];
   const { handlers: prodHandlers } = setupProdWorker(failingFetch, manifest);
-  let installPromise = null;
-  prodHandlers.install({ waitUntil: (p) => { installPromise = p; } });
-  await installPromise;
+  await dispatchInstall(prodHandlers);
 
-  let prodNavPromise = null;
-  prodHandlers.fetch({
-    request: { mode: "navigate", method: "GET", url: "https://example.com/map" },
-    respondWith: (p) => { prodNavPromise = p; }
-  });
-  const prodNavResponse = await prodNavPromise;
+  const prodNavResponse = await dispatchFetch(prodHandlers, "https://example.com/map", "navigate");
   assert.equal(prodNavResponse.status, 200);
   assert.equal(prodNavResponse.url, "https://example.com/index.html");
 
-  let prodFailPromise = null;
-  prodHandlers.fetch({
-    request: { method: "GET", url: "http://localhost:8787/rapid-bus-kl/data/routes" },
-    respondWith: (p) => { prodFailPromise = p; }
-  });
-  const prodFailResponse = await prodFailPromise;
+  const prodFailResponse = await dispatchFetch(prodHandlers, "http://localhost:8787/rapid-bus-kl/data/routes");
   assert.equal(prodFailResponse.status, 503);
 });

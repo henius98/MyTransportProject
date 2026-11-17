@@ -2,12 +2,12 @@
 @inject NavigationManager Navigation
 @using System.Security.Claims
 
-<PageTitle>@Title · MyTransportApp</PageTitle>
+<PageTitle>@(Language?[Title] ?? Title) · MyTransportApp</PageTitle>
 
 <section class="google-workspace @(IsTasksDashboard ? "google-workspace--tasks" : IsCalendarDashboard ? "google-workspace--calendar" : "")">
     <AuthorizeView>
         <Authorizing>
-            <p class="google-status" role="status">Checking your Google sign-in…</p>
+            <p class="google-status" role="status" aria-live="polite">@(Language?["CheckingGoogleSignIn"] ?? "Checking your Google sign-in…")</p>
         </Authorizing>
         <Authorized>
             @if (context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value is { Length: > 0 } uid)
@@ -27,15 +27,16 @@
         <NotAuthorized>
             <div class="google-panel google-empty">
                 <span class="bi bi-google google-service-icon" aria-hidden="true"></span>
-                <h2>Sign in to use your Google services</h2>
-                <p class="google-muted">View your events and manage your tasks from one place.</p>
-                <button type="button" class="btn btn--primary" @onclick="SignIn">Sign in with Google</button>
+                <h1 class="h2">@(Language?["GoogleSignInPromptTitle"] ?? "Sign in to use your Google services")</h1>
+                <p class="google-muted">@(Language?["GoogleSignInPromptSubtitle"] ?? "View your events and manage your tasks from one place.")</p>
+                <button type="button" class="btn btn--primary" @onclick="SignIn">@(Language?["SignInWithGoogle"] ?? "Sign in with Google")</button>
             </div>
         </NotAuthorized>
     </AuthorizeView>
 </section>
 
 @code {
+    [CascadingParameter] private LanguageService? Language { get; set; }
     [Parameter, EditorRequired] public string Title { get; set; } = "";
     [Parameter] public string? Service { get; set; }
     [Parameter, EditorRequired] public RenderFragment<string> ChildContent { get; set; } = default!;

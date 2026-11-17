@@ -38,7 +38,7 @@
                     style="cursor: pointer;" role="option" aria-selected="@(isActive ? "true" : "false")"
                     @onclick="() => SelectSuggestion(suggestion)" @onmouseover="() => _activeIndex = currentIndex">
                   <strong>@suggestion.Name</strong><br />
-                  <small class="@(isActive ? "text-primary opacity-75" : "text-dim")">@suggestion.FormattedAddress</small>
+                  <small class="@(isActive ? "text-primary opacity-75" : "text-dim")">@(string.IsNullOrWhiteSpace(suggestion.LocationId) ? suggestion.FormattedAddress : $"MET ID: {suggestion.LocationId}")</small>
                 </li>
               }
             }
@@ -121,14 +121,14 @@
   [Parameter] public string Value { get; set; } = string.Empty;
   [Parameter] public EventCallback<string> ValueChanged { get; set; }
   [Parameter]
-  public EventCallback<(double Lat, double Lng, string FormattedAddress, string Name)> OnSuggestionSelected
+  public EventCallback<PlaceSuggestion> OnSuggestionSelected
   {
     get; set;
   }
 
   private string _searchText = string.Empty;
   private CancellationTokenSource? _debounceCts;
-  private List<(double Lat, double Lng, string FormattedAddress, string Name)> _suggestions = new();
+  private List<PlaceSuggestion> _suggestions = new();
   private bool _showSuggestions = false;
   private bool _isSearchingSuggestions = false;
 
@@ -140,7 +140,7 @@
   private bool _initializeMap;
   private IReadOnlyList<MetLocation> _mapLocations = Array.Empty<MetLocation>();
   private string _mapSearch = string.Empty;
-  private IJSObjectReference? _mapModule;
+  private JsModuleLoader? _mapModule;
   private bool _disposed;
   private string ListboxId => $"{Id ?? "location-search"}-listbox";
   // The source SVG's embedded calibration points map longitude and latitude to its 1000 x 332 viewBox.
@@ -167,8 +167,7 @@
   {
     if (Value != _searchText)
     {
-      _debounceCts?.Cancel();
-      _debounceCts?.Dispose();
+      ResetDebounceCts();
       _showSuggestions = false;
       _searchText = Value;
     }
@@ -176,24 +175,32 @@
 
   protected override async Task OnAfterRenderAsync(bool firstRender)
   {
-    if (_initializeMap && _mapModule != null)
+    if (_initializeMap && _mapModule?.LoadedModule is { } mapModule)
     {
       _initializeMap = false;
-      await _mapModule.InvokeVoidAsync("initializeMap", _mapSvg, _mapViewport, _mapTooltip);
+      await mapModule.InvokeVoidAsync("initializeMap", _mapSvg, _mapViewport, _mapTooltip);
     }
   }
 
   private async Task TriggerSearch()
   {
     await ValueChanged.InvokeAsync(_searchText);
+    if (_disposed) return;
 
-    _debounceCts?.Cancel();
-    _debounceCts?.Dispose();
-    _debounceCts = new CancellationTokenSource();
+    ResetDebounceCts();
     _suggestions.Clear();
     _activeIndex = -1;
+
+    if (string.IsNullOrWhiteSpace(_searchText))
+    {
+      _isSearchingSuggestions = false;
+      _showSuggestions = false;
+      return;
+    }
+
+    _debounceCts = new CancellationTokenSource();
     _isSearchingSuggestions = true;
-    _showSuggestions = !string.IsNullOrWhiteSpace(_searchText);
+    _showSuggestions = true;
 
     _ = DebounceSearchAsync(_searchText, _debounceCts.Token);
   }
@@ -275,14 +282,17 @@
     }
   }
 
-  private async Task SelectSuggestion((double Lat, double Lng, string FormattedAddress, string Name) suggestion)
+  private async Task SelectSuggestion(PlaceSuggestion suggestion)
   {
-    _debounceCts?.Cancel();
+    ResetDebounceCts();
     _searchText = suggestion.Name;
     _showSuggestions = false;
     await ValueChanged.InvokeAsync(_searchText);
     await OnSuggestionSelected.InvokeAsync(suggestion);
   }
+
+  private JsModuleLoader MapModuleLoader =>
+    _mapModule ??= new JsModuleLoader(JSRuntime, "./js/locationPicker.js");
 
   private async Task OpenMapModal()
   {
@@ -291,12 +301,10 @@
 
     try
     {
-      if (_mapModule == null)
-      {
-        _mapModule = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./js/locationPicker.js");
-      }
+      var mapModule = await MapModuleLoader.TryGetAsync();
+      if (mapModule == null) return;
 
-      await _mapModule.InvokeVoidAsync("showDialog", _mapDialog);
+      await mapModule.InvokeVoidAsync("showDialog", _mapDialog);
       StateHasChanged();
 
       // Map the forecast coordinates directly onto the static SVG.
@@ -316,41 +324,53 @@
 
   private async Task ZoomMap(double factor)
   {
-    if (_mapModule != null)
+    if (_mapModule?.LoadedModule is { } mapModule)
     {
-      await _mapModule.InvokeVoidAsync("zoomMap", factor);
+      await mapModule.InvokeVoidAsync("zoomMap", factor);
     }
   }
 
   private async Task CloseMapModal()
   {
-    if (_mapModule != null)
+    if (_mapModule?.LoadedModule is { } mapModule)
     {
-      await _mapModule.InvokeVoidAsync("disposeMap");
-      await _mapModule.InvokeVoidAsync("closeDialog", _mapDialog);
+      await mapModule.InvokeVoidAsync("disposeMap");
+      await mapModule.InvokeVoidAsync("closeDialog", _mapDialog);
     }
   }
 
   private async Task SelectMapLocation(MetLocation location)
   {
     await CloseMapModal();
-    await SelectSuggestion((location.Latitude, location.Longitude, $"MET ID: {location.LocationId}", location.LocationName
-?? string.Empty));
+    await SelectSuggestion(new PlaceSuggestion(
+      location.Latitude,
+      location.Longitude,
+      location.LocationName ?? string.Empty,
+      location.LocationName ?? string.Empty,
+      location.LocationId));
+  }
+
+  private void ResetDebounceCts()
+  {
+    var cts = _debounceCts;
+    _debounceCts = null;
+    if (cts is null) return;
+    cts.Cancel();
+    cts.Dispose();
   }
 
   public async ValueTask DisposeAsync()
   {
     _disposed = true;
-    _debounceCts?.Cancel();
-    _debounceCts?.Dispose();
-    if (_mapModule != null)
+    ResetDebounceCts();
+    if (_mapModule is not null)
     {
-      try
+      if (_mapModule.LoadedModule is { } loaded)
       {
-        await _mapModule.InvokeVoidAsync("disposeMap");
-        await _mapModule.DisposeAsync();
+        await loaded.TryInvokeVoidSafeAsync("disposeMap");
       }
-      catch (JSDisconnectedException) { }
+
+      await _mapModule.DisposeAsync();
     }
   }
 }

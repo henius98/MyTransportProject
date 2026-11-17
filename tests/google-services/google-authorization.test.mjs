@@ -157,12 +157,15 @@ test("restore returns null when the backend function is not deployed or not foun
 
 test("client-side token fallback connects when backend function is unavailable but googleClientId is configured", async () => {
     const state = await setup({ appOptions: { googleClientId: "fallback-client-id.apps.googleusercontent.com" } });
-    const internalErr = new Error("internal");
+    const internalErr = new Error("Failed to fetch");
     internalErr.code = "functions/internal";
     state.call = () => { throw internalErr; };
     const result = await state.authorize();
     assert.equal(result.accessToken, "client-side-token");
     assert.equal(state.tokenClientOptions.client_id, "fallback-client-id.apps.googleusercontent.com");
+    assert.equal(state.tokenClientOptions.login_hint, "alice@example.com");
+    assert.equal(state.tokenClientOptions.include_granted_scopes, true);
+    assert.equal(state.tokenClientOptions.prompt, "");
     assert.match(state.tokenClientOptions.scope, /calendar\.events/);
     assert.equal(state.popups, 1);
 });
