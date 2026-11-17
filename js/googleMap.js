@@ -1404,6 +1404,7 @@ export async function syncMarkers(locations) {
 					infoWindow.setContent(buildVehicleInfoContent(id, marker.busData));
 					infoWindow.open({ anchor: marker, map });
 					currentInfoWindowAnchor = marker;
+					notifyVehicleSelected(marker.busData);
 				};
 
 				marker = createMarkerWithFallback(
@@ -1459,6 +1460,16 @@ export async function syncMarkers(locations) {
 	} catch (err) {
 		console.error("syncMarkers internal error:", err);
 	}
+}
+
+function notifyVehicleSelected(busData) {
+	if (!activeDotNetHelper || !busData) return;
+	const providerName = typeof busData.providerName === "string" ? busData.providerName : "";
+	const routeId = typeof busData.routeId === "string" ? busData.routeId : "";
+	const routeShortName = typeof busData.routeShortName === "string" ? busData.routeShortName : "";
+	if (!providerName || (!routeId && !routeShortName)) return;
+	activeDotNetHelper.invokeMethodAsync("OnVehicleSelected", providerName, routeId, routeShortName)
+		.catch(error => console.error("Vehicle route selection failed:", error));
 }
 
 function buildVehicleInfoContent(id, location) {
