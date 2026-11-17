@@ -106,15 +106,65 @@ internal static class LiveRouting
     ArgumentNullException.ThrowIfNull(route);
     ArgumentNullException.ThrowIfNull(liveVehicles);
 
-    var allowedRouteIds = CollectRouteIdentifiers(route);
+    return FilterVehiclesByRouteIdentifiers(liveVehicles, CollectRouteIdentifiers(route));
+  }
+
+  /// <summary>
+  /// Filters live vehicles to only those belonging to the selected static provider and route.
+  /// </summary>
+  public static List<BusLocation> FilterVehiclesForStaticRoute(
+    string providerName,
+    string routeId,
+    IReadOnlyList<StaticRoute> staticRoutes,
+    IReadOnlyList<BusLocation> liveVehicles)
+  {
+    ArgumentNullException.ThrowIfNull(staticRoutes);
+    ArgumentNullException.ThrowIfNull(liveVehicles);
+
+    if (string.IsNullOrWhiteSpace(providerName) || string.IsNullOrWhiteSpace(routeId))
+    {
+      return [];
+    }
+
+    var trimmedRouteId = routeId.Trim();
+    var allowedRouteIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    AddRouteAliases(allowedRouteIds, trimmedRouteId);
+
+    foreach (var route in staticRoutes)
+    {
+      if (string.Equals(route.Id?.Trim(), trimmedRouteId, StringComparison.OrdinalIgnoreCase))
+      {
+        AddRouteAliases(allowedRouteIds, route.Id);
+        AddRouteAliases(allowedRouteIds, route.Name);
+      }
+    }
+
+    return FilterVehiclesByRouteIdentifiers(liveVehicles, allowedRouteIds, providerName);
+  }
+
+  private static List<BusLocation> FilterVehiclesByRouteIdentifiers(
+    IReadOnlyList<BusLocation> liveVehicles,
+    HashSet<string> allowedRouteIds,
+    string? requiredProviderName = null)
+  {
     if (allowedRouteIds.Count == 0 || liveVehicles.Count == 0)
     {
       return [];
     }
 
+    var trimmedProvider = string.IsNullOrWhiteSpace(requiredProviderName)
+      ? null
+      : requiredProviderName.Trim();
+
     var filtered = new List<BusLocation>();
     foreach (var vehicle in liveVehicles)
     {
+      if (trimmedProvider is not null &&
+          !string.Equals(vehicle.ProviderName?.Trim(), trimmedProvider, StringComparison.OrdinalIgnoreCase))
+      {
+        continue;
+      }
+
       if (MatchesAnyRouteIdentifier(vehicle.RouteId, allowedRouteIds) ||
           MatchesAnyRouteIdentifier(vehicle.RouteShortName, allowedRouteIds))
       {

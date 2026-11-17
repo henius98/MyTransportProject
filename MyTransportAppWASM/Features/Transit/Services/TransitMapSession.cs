@@ -60,6 +60,8 @@ public sealed class TransitMapSession : IDisposable
   public List<EnrichedRoute> RouteOptions { get; private set; } = [];
   public int ActiveRouteId { get; private set; } = -1;
   public bool IsRouteVehicleFilterActive { get; private set; }
+  public bool IsStaticRouteVehicleFilterActive { get; private set; }
+  public bool HasActiveVehicleFilter => IsRouteVehicleFilterActive || IsStaticRouteVehicleFilterActive;
 
   public IReadOnlyList<BusLocation> GetDisplayedVehicles() =>
     FilterDisplayedVehicles(_transitTracking.CachedVehicles);
@@ -161,6 +163,7 @@ public sealed class TransitMapSession : IDisposable
 
     SelectedStaticProviderIndex = index;
     SelectedStaticRouteId = string.Empty;
+    IsStaticRouteVehicleFilterActive = false;
     StaticRoutes = [];
     StaticDepartures = [];
     SelectedStaticStopId = string.Empty;
@@ -176,16 +179,14 @@ public sealed class TransitMapSession : IDisposable
     StaticStatus = "Loading routes...";
     try
     {
-      var routesTask = _staticData.GetRoutesAsync(source, cancellationToken);
-      var mapTask = _staticData.GetMapAsync(source, "", cancellationToken);
-      await Task.WhenAll(routesTask, mapTask);
+      var routes = await _staticData.GetRoutesAsync(source, cancellationToken);
       if (_disposed || providerSeq != Volatile.Read(ref _staticProviderSeq)) return null;
 
-      StaticRoutes = await routesTask;
+      StaticRoutes = routes;
       StaticStatus = StaticRoutes.Count == 0
         ? "No routes available."
-        : "Select a stop on the map for departures.";
-      return string.IsNullOrEmpty(SelectedStaticRouteId) ? await mapTask : null;
+        : "Select a route to view its map.";
+      return null;
     }
     catch (OperationCanceledException)
     {
@@ -215,8 +216,19 @@ public sealed class TransitMapSession : IDisposable
     var source = SelectedStaticData;
     if (source == null)
     {
+      IsStaticRouteVehicleFilterActive = false;
       StaticStatus = string.Empty;
       return null;
+    }
+
+    if (!string.IsNullOrWhiteSpace(routeId))
+    {
+      IsStaticRouteVehicleFilterActive = true;
+      IsRouteVehicleFilterActive = false;
+    }
+    else
+    {
+      IsStaticRouteVehicleFilterActive = false;
     }
 
     return await LoadStaticRouteMapAsync(source, routeId, providerSeq, routeSeq, cancellationToken);
@@ -245,6 +257,7 @@ public sealed class TransitMapSession : IDisposable
 
       SelectedStaticProviderIndex = providerIndex;
       SelectedStaticRouteId = string.Empty;
+      IsStaticRouteVehicleFilterActive = false;
       StaticRoutes = [];
       ClearStaticStopSelection();
     }
@@ -260,6 +273,7 @@ public sealed class TransitMapSession : IDisposable
     var source = SelectedStaticData;
     if (source == null)
     {
+      IsStaticRouteVehicleFilterActive = false;
       StaticStatus = string.Empty;
       return null;
     }
@@ -277,11 +291,15 @@ public sealed class TransitMapSession : IDisposable
       var resolvedRouteId = ResolveStaticRouteId(StaticRoutes, candidateId, candidateShortName);
       if (string.IsNullOrEmpty(resolvedRouteId))
       {
+        SelectedStaticRouteId = string.Empty;
+        IsStaticRouteVehicleFilterActive = false;
         StaticStatus = "Static route map unavailable.";
         return null;
       }
 
       SelectedStaticRouteId = resolvedRouteId;
+      IsStaticRouteVehicleFilterActive = true;
+      IsRouteVehicleFilterActive = false;
       return await LoadStaticRouteMapAsync(source, resolvedRouteId, providerSeq, routeSeq, cancellationToken);
     }
     catch (OperationCanceledException)
@@ -449,6 +467,7 @@ public sealed class TransitMapSession : IDisposable
     RouteOptions = [];
     ActiveRouteId = -1;
     IsRouteVehicleFilterActive = false;
+    IsStaticRouteVehicleFilterActive = false;
     return true;
   }
 
@@ -456,6 +475,7 @@ public sealed class TransitMapSession : IDisposable
   {
     ActiveRouteId = -1;
     IsRouteVehicleFilterActive = false;
+    IsStaticRouteVehicleFilterActive = false;
     var trimmedMode = string.IsNullOrWhiteSpace(mode) ? "Route" : mode.Trim();
     LocationStatus = routeFound
       ? $"{char.ToUpperInvariant(trimmedMode[0])}{trimmedMode[1..].ToLowerInvariant()} route ready."
@@ -472,6 +492,7 @@ public sealed class TransitMapSession : IDisposable
     if (filterVehicles)
     {
       IsRouteVehicleFilterActive = true;
+      IsStaticRouteVehicleFilterActive = false;
     }
     if (announceRoute)
     {
@@ -485,17 +506,33 @@ public sealed class TransitMapSession : IDisposable
     RouteOptions = [];
     ActiveRouteId = -1;
     IsRouteVehicleFilterActive = false;
+    IsStaticRouteVehicleFilterActive = false;
     LocationStatus = "Route cleared.";
   }
 
   private IReadOnlyList<BusLocation> FilterDisplayedVehicles(IReadOnlyList<BusLocation> vehicles)
   {
-    if (!IsRouteVehicleFilterActive) return vehicles;
+    if (IsRouteVehicleFilterActive)
+    {
+      var activeRoute = RouteOptions.FirstOrDefault(r => r.OriginalRoute.RouteId == ActiveRouteId);
+      return activeRoute is null
+        ? vehicles
+        : LiveRouting.FilterVehiclesForRoute(activeRoute.OriginalRoute, vehicles);
+    }
 
-    var activeRoute = RouteOptions.FirstOrDefault(r => r.OriginalRoute.RouteId == ActiveRouteId);
-    if (activeRoute is null) return vehicles;
+    if (IsStaticRouteVehicleFilterActive &&
+        SelectedStaticProviderIndex >= 0 &&
+        SelectedStaticProviderIndex < Providers.Count &&
+        !string.IsNullOrWhiteSpace(SelectedStaticRouteId))
+    {
+      return LiveRouting.FilterVehiclesForStaticRoute(
+        Providers[SelectedStaticProviderIndex].Name,
+        SelectedStaticRouteId,
+        StaticRoutes,
+        vehicles);
+    }
 
-    return LiveRouting.FilterVehiclesForRoute(activeRoute.OriginalRoute, vehicles);
+    return vehicles;
   }
 
   public void Dispose()

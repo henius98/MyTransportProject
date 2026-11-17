@@ -104,9 +104,13 @@ public partial class Map : IAsyncDisposable
       }
 
       var geoJson = await loadGeoJsonAsync();
-      if (!_isDisposed && geoJson != null && mapModule != null)
+      if (!_isDisposed && mapModule != null)
       {
-        await mapModule.InvokeVoidAsync("showStaticRoute", geoJson, objRef);
+        if (geoJson != null)
+        {
+          await mapModule.InvokeVoidAsync("showStaticRoute", geoJson, objRef);
+        }
+        await SyncMarkersFromCacheAsync();
       }
     }
     catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or JSException)
@@ -447,7 +451,7 @@ public partial class Map : IAsyncDisposable
   {
     if (mapModule == null || _isDisposed) return;
 
-    var wasFiltered = Session.IsRouteVehicleFilterActive;
+    var wasFiltered = Session.HasActiveVehicleFilter;
     if (!Session.TryBeginRouteCalculation(origin, destination))
     {
       StateHasChanged();

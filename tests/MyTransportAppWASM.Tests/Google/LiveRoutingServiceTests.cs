@@ -340,6 +340,32 @@ public class LiveRoutingServiceTests
     Assert.Equal("bus-t155", Assert.Single(filtered).VehicleId);
   }
 
+  [Fact]
+  public void FilterVehiclesForStaticRoute_MatchesProviderAndRouteIdOrNameOnly()
+  {
+    var staticRoutes = new List<StaticRoute>
+    {
+      new("30000019", "401"),
+      new("U4200", "420")
+    };
+
+    var vehicles = new List<BusLocation>
+    {
+      BuildBus("30000019") with { VehicleId = "kl-id", ProviderName = "Rapid Bus KL", TransportType = "Bus" },
+      BuildBus("401") with { VehicleId = "kl-short", ProviderName = "Rapid Bus KL", TransportType = "Bus" },
+      BuildBus("other") with { VehicleId = "kl-mapped", ProviderName = "Rapid Bus KL", RouteShortName = "401", TransportType = "Bus" },
+      BuildBus("4010") with { VehicleId = "kl-prefix", ProviderName = "Rapid Bus KL", TransportType = "Bus" },
+      BuildBus("401") with { VehicleId = "penang-same-route", ProviderName = "Rapid Bus Penang", TransportType = "Bus" },
+      BuildBus("401") with { VehicleId = "no-provider", ProviderName = null, TransportType = "Bus" }
+    };
+
+    var filtered = LiveRouting.FilterVehiclesForStaticRoute("Rapid Bus KL", "30000019", staticRoutes, vehicles);
+
+    Assert.Equal(["kl-id", "kl-short", "kl-mapped"], filtered.Select(v => v.VehicleId ?? "").ToArray());
+    Assert.Empty(LiveRouting.FilterVehiclesForStaticRoute("Rapid Bus KL", "", staticRoutes, vehicles));
+    Assert.Empty(LiveRouting.FilterVehiclesForStaticRoute("", "30000019", staticRoutes, vehicles));
+  }
+
   private static GoogleRoute BuildRoute(string lineShortName) => new()
   {
     DurationSeconds = 600,

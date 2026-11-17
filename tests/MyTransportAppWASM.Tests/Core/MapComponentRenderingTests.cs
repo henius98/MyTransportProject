@@ -336,6 +336,91 @@ public class MapComponentRenderingTests
         session.Dispose();
     }
 
+    [Fact]
+    public async Task Map_FiltersAndRestoresVehicles_WhenStaticRouteSelectedAndCleared()
+    {
+        var staticSource = new TransportStaticData("https://worker.example/rapid", "/routes", "/map", "/departures");
+        var providers = new[]
+        {
+            new TransportProvider("Rapid Bus KL", "https://feed.test/kl", 3.139, 101.6869, 30, "Bus", staticSource),
+            new TransportProvider("KTMB National Rail", "https://feed.test/ktmb", 3.1344, 101.6865, 500, "KTMB")
+        };
+        var allVehicles = new List<BusLocation>
+        {
+            new() { VehicleId = "kl-401", ProviderName = "Rapid Bus KL", RouteId = "30000019", RouteShortName = "401", TransportType = "Bus" },
+            new() { VehicleId = "kl-420", ProviderName = "Rapid Bus KL", RouteId = "U4200", RouteShortName = "420", TransportType = "Bus" },
+            new() { VehicleId = "ktmb-1", ProviderName = "KTMB National Rail", RouteId = "Port Klang", TransportType = "KTMB" }
+        };
+
+        var tracking = new Mock<ITransitTrackingService>();
+        tracking.Setup(t => t.CachedVehicles).Returns(allVehicles);
+
+        var staticData = new Mock<ITransportStaticDataService>();
+        staticData.Setup(s => s.GetRoutesAsync(staticSource, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new StaticRoute("30000019", "401"), new StaticRoute("U4200", "420")]);
+        staticData.Setup(s => s.GetMapAsync(staticSource, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("""{"type":"FeatureCollection","features":[]}""");
+
+        var location = new Mock<ILocationService>();
+        var session = new TransitMapSession(
+            tracking.Object,
+            staticData.Object,
+            location.Object,
+            Options.Create(new TransitOptions { Providers = providers }),
+            Options.Create(new DefaultLocationOptions { Latitude = 3.139, Longitude = 101.6869 }));
+
+        var js = new Mock<IJSRuntime>();
+        var mapModule = new Mock<IJSObjectReference>();
+        IReadOnlyList<BusLocation>? syncedVehicles = null;
+        mapModule
+            .Setup(m => m.InvokeAsync<object>("syncMarkers", It.IsAny<object?[]?>()))
+            .Callback<string, object?[]?>((_, args) =>
+            {
+                syncedVehicles = args?[0] as IReadOnlyList<BusLocation>;
+            })
+            .Returns(ValueTask.FromResult<object>(null!));
+
+        var activator = new MapActivator();
+        var services = new ServiceCollection()
+            .AddLogging()
+            .AddSingleton(js.Object)
+            .AddSingleton(session)
+            .AddSingleton<IConfiguration>(new ConfigurationBuilder().Build())
+            .AddSingleton(location.Object)
+            .AddSingleton(new Mock<IPlaceResolutionService>().Object)
+            .AddSingleton<IComponentActivator>(activator)
+            .AddCascadingValue(_ => new LanguageService(new HttpClient()))
+            .AddCascadingValue(_ => new ThemeService(js.Object, new Mock<IUserSettingsService>().Object))
+            .BuildServiceProvider();
+
+        await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
+
+        await renderer.Dispatcher.InvokeAsync(async () =>
+        {
+            await renderer.RenderComponentAsync<MapPage>();
+            var mapComponent = activator.Component!;
+            typeof(MapPage).GetField("mapModule", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(mapComponent, mapModule.Object);
+
+            var selectProvider = typeof(MapPage).GetMethod("SelectStaticProvider", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var selectRoute = typeof(MapPage).GetMethod("SelectStaticRoute", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+            await (Task)selectProvider.Invoke(mapComponent, [new ChangeEventArgs { Value = "0" }])!;
+            Assert.NotNull(syncedVehicles);
+            Assert.Equal(3, syncedVehicles!.Count);
+
+            await (Task)selectRoute.Invoke(mapComponent, [new ChangeEventArgs { Value = "30000019" }])!;
+            Assert.NotNull(syncedVehicles);
+            Assert.Equal(["kl-401"], syncedVehicles!.Select(v => v.VehicleId ?? "").ToArray());
+
+            await (Task)selectRoute.Invoke(mapComponent, [new ChangeEventArgs { Value = "" }])!;
+            Assert.NotNull(syncedVehicles);
+            Assert.Equal(3, syncedVehicles!.Count);
+        });
+
+        session.Dispose();
+    }
+
     private sealed class MapActivator : IComponentActivator
     {
         public MapPage? Component { get; private set; }
