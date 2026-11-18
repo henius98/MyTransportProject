@@ -1,5 +1,5 @@
 .hero {
-  padding: 3rem 1rem;
+  padding: 2.5rem 1rem 3.5rem;
   text-align: center;
   min-height: calc(100vh - 3.5rem);
   display: flex;
@@ -16,30 +16,55 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   gap: 1.5rem;
-  margin-top: 1rem;
+  margin-top: 1.25rem;
+}
+
+.dashboard__icon,
+.dashboard__pill-icon,
+.onboarding-highlight__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: var(--border-crisp);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-control);
+  line-height: 1;
 }
 
 .dashboard__icon {
-  font-size: 3rem;
+  font-size: 2rem;
+  width: 3.75rem;
+  height: 3.75rem;
+  background: var(--accent-sage);
   margin-bottom: 1.25rem;
-  transition: transform 0.2s ease;
+  transition: transform 0.12s ease;
 }
 
-.dashboard__link {
+.card-weather .dashboard__icon {
+  background: var(--accent-peach);
+}
+
+.dashboard__link,
+.dashboard__pill {
   color: inherit;
   text-align: left;
   text-decoration: none;
-  padding: 1.75rem;
   display: flex;
   flex-direction: column;
 }
 
+.dashboard__link {
+  padding: 1.75rem;
+}
+
 .dashboard__title {
+  font-family: var(--font-display);
   color: var(--text-color);
-  font-size: 1.5rem;
-  font-weight: 700;
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   margin: 0 0 0.6rem 0;
-  line-height: 1.25;
+  line-height: 1.2;
 }
 
 .dashboard__desc {
@@ -51,53 +76,70 @@
 
 .dashboard__link:focus-visible,
 .dashboard__pill:focus-visible {
-  outline: 3px solid var(--focus-ring, var(--primary-blue));
-  outline-offset: 4px;
+  outline: 2.5px solid var(--focus-ring);
+  outline-offset: 3px;
 }
 
 .card:hover .dashboard__icon {
-  transform: scale(1.06);
+  transform: translateY(-1px);
 }
 
 .card:hover .arrow {
-  transform: translateX(4px);
+  transform: translateX(3px);
 }
 
 .arrow {
   display: inline-block;
-  transition: transform 0.2s ease;
+  transition: transform 0.12s ease;
+}
+
+.dashboard__footer,
+.dashboard__pill-cta {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  color: #1E1E1C;
+  border: var(--border-crisp);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-control);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .dashboard__footer {
-  display: flex;
-  align-items: center;
   gap: 0.5rem;
-  color: var(--primary-blue);
-  font-weight: 700;
-  font-size: 1rem;
+  padding: 0.4rem 1rem;
+  background: var(--btn-primary-bg);
+  font-size: 0.78rem;
+}
+
+.dashboard__link:hover .dashboard__footer,
+.dashboard__pill:hover .dashboard__pill-cta {
+  background: var(--accent-peach);
 }
 
 .dashboard-secondary {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-  gap: 1rem;
-  margin-top: 1.25rem;
+  gap: 1.25rem;
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: var(--hairline-dashed);
 }
 
 .dashboard__pill {
-  color: inherit;
-  text-align: left;
-  text-decoration: none;
   padding: 1.25rem 1.5rem;
-  border-radius: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 0.65rem;
+  border-radius: var(--radius-panel);
+  gap: 0.75rem;
 }
 
 .dashboard__pill-icon {
-  font-size: 1.6rem;
-  line-height: 1;
+  font-size: 1.35rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  background: var(--accent-lavender);
 }
 
 .dashboard__pill-body {
@@ -105,9 +147,10 @@
 }
 
 .dashboard__pill-title {
-  font-size: 1.1rem;
-  font-weight: 700;
-  margin: 0 0 0.25rem 0;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 800;
+  margin: 0 0 0.3rem 0;
   color: var(--text-color);
 }
 
@@ -115,62 +158,101 @@
   font-size: 0.875rem;
   color: var(--text-dim);
   margin: 0;
-  line-height: 1.5;
+  line-height: 1.55;
 }
 
 .dashboard__pill-cta {
-  font-size: 0.875rem;
-  font-weight: 700;
-  color: var(--primary-blue);
-  display: inline-flex;
-  align-items: center;
+  font-size: 0.74rem;
+  background: var(--accent-sage);
+  padding: 0.25rem 0.75rem;
   gap: 0.35rem;
 }
 
+.home-footer {
+  padding-top: 1.25rem;
+  border-top: var(--hairline-dashed);
+}
+
 .home-footer__link {
-  color: var(--text-dim);
-  padding: 0.35rem 0.75rem;
-  border-radius: 8px;
-  transition: color 0.2s ease;
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-color);
+  background: var(--surface-parchment);
+  border: var(--border-crisp);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow-control);
+  padding: 0.35rem 0.95rem;
+  transition:
+    background-color 0.12s ease,
+    transform 0.1s ease,
+    box-shadow 0.1s ease;
 }
 
 .home-footer__link:hover {
-  color: var(--text-color);
+  background: var(--accent-peach);
+  color: #1E1E1C;
+  transform: translateY(1px);
+  box-shadow: var(--shadow-press);
+}
+
+.home-footer__link:active {
+  transform: translateY(2px);
+  box-shadow: var(--shadow-none);
 }
 
 .onboarding-highlights {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.55rem;
   background: var(--surface-subtle);
-  border: 1px solid var(--border-color);
-  border-radius: 16px;
-  padding: 0.85rem 1rem;
+  border: var(--border-crisp);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-control);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem !important;
 }
 
 .onboarding-highlight {
   display: flex;
   align-items: flex-start;
-  gap: 0.85rem;
+  gap: 0.75rem;
+  padding-bottom: 0.55rem;
+  border-bottom: var(--hairline-dashed);
+}
+
+.onboarding-highlight:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
 }
 
 .onboarding-highlight__icon {
-  font-size: 1.4rem;
-  line-height: 1.2;
+  font-size: 1.25rem;
+  width: 2.35rem;
+  height: 2.35rem;
+  background: var(--accent-sage);
   flex-shrink: 0;
 }
 
 .onboarding-highlight__title {
   display: block;
-  font-size: 0.95rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   color: var(--text-color);
+  margin-bottom: 0.15rem;
 }
 
 .onboarding-highlight__desc {
   display: block;
-  font-size: 0.825rem;
+  font-size: 0.85rem;
   color: var(--text-dim);
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -181,7 +263,9 @@
   }
 
   .card:hover .dashboard__icon,
-  .card:hover .arrow {
+  .card:hover .arrow,
+  .home-footer__link:hover,
+  .home-footer__link:active {
     transform: none;
   }
 }

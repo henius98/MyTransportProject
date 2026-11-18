@@ -7,30 +7,30 @@
   {
     @foreach (var slice in Result.Periods)
     {
-      <div @key="(slice.Time, slice.Label)" class="d-flex align-items-center justify-content-between p-3 rounded mb-2 shadow-sm border border-secondary border-opacity-25" style="background: linear-gradient(135deg, var(--bs-secondary-bg) 0%, var(--bs-body-bg) 100%);">
+      <div @key="(slice.Time, slice.Label)" class="d-flex align-items-center justify-content-between panel-inset p-3 mb-2">
         <div class="d-flex align-items-center">
           <div class="me-3 fs-2">
             <i class="@slice.Icon"></i>
           </div>
           <div>
-            <strong class="d-block mb-1 text-primary" style="font-size: 1.15rem; letter-spacing: -0.01em;">@(slice.Summary ?? "N/A")</strong>
-            <div class="text-dim" style="font-size: 0.85rem;"><i class="bi bi-calendar-event me-1"></i>@MalaysiaTime.Convert(slice.Time).ToString("ddd, dd MMM HH:mm")</div>
+            <strong class="d-block mb-1" style="font-family: var(--font-display); font-size: 1.15rem; letter-spacing: -0.01em;">@(slice.Summary ?? "N/A")</strong>
+            <div class="text-dim tabular-nums" style="font-family: var(--font-mono); font-size: 0.78rem;"><i class="bi bi-calendar-event me-1"></i>@MalaysiaTime.Convert(slice.Time).ToString("ddd, dd MMM HH:mm")</div>
           </div>
         </div>
 
-        <div class="text-end ps-3 border-start border-secondary border-opacity-25">
+        <div class="text-end ps-3" style="border-left: var(--hairline-dashed);">
           @if (slice.TemperatureC.HasValue)
           {
-            <div class="fs-2 fw-bold text-danger" style="letter-spacing: -0.05em; line-height: 1;">@($"{slice.TemperatureC:0.#}°")</div>
+            <div class="fs-2 fw-bold text-danger tabular-nums" style="font-family: var(--font-mono); letter-spacing: -0.03em; line-height: 1;">@($"{slice.TemperatureC:0.#}°")</div>
           }
           else
           {
-            <div class="fs-3 fw-bold text-muted">-</div>
+            <div class="fs-3 fw-bold text-muted tabular-nums">-</div>
           }
 
           @if (!string.IsNullOrWhiteSpace(slice.Wind))
           {
-            <div class="text-dim mt-2" style="font-size: 0.8rem;"><i class="bi bi-wind me-1"></i>@slice.Wind</div>
+            <div class="text-dim mt-2 tabular-nums" style="font-family: var(--font-mono); font-size: 0.76rem;"><i class="bi bi-wind me-1"></i>@slice.Wind</div>
           }
         </div>
       </div>

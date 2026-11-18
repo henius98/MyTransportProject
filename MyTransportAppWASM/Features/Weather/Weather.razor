@@ -8,7 +8,7 @@
 
 <PageTitle>@Language["WeatherPageTitle"]</PageTitle>
 
-<div class="d-flex align-items-center flex-wrap gap-3 mb-4">
+<div class="d-flex flex-column align-items-start gap-2 mb-4">
   <div class="d-flex align-items-center">
     <h1 class="section-title mb-0">@Language["WeatherTitle"]</h1>
     <button type="button" class="btn btn--secondary btn--icon weather-help-btn ms-3" @onclick="ShowHelpDialog"
@@ -16,7 +16,7 @@
       <i class="bi bi-question-circle weather-help-icon" aria-hidden="true"></i>
     </button>
   </div>
-  <p class="section-subtitle m-0 text-dim w-100">
+  <p class="section-subtitle m-0 text-dim">
     @Language["WeatherSubtitle"]
   </p>
 </div>
@@ -35,8 +35,8 @@
   </form>
 </dialog>
 
-<div class="row g-4 mt-2">
-  <div class="col-lg-4 col-xl-3">
+<div class="weather-layout mt-2">
+  <div class="weather-layout__sidebar">
     <div class="position-sticky weather-sidebar-sticky">
       <div class="card">
         <h2 class="mb-0 h3">
@@ -118,8 +118,8 @@
         </div>
         @if (isFetched && plan != null)
         {
-          <div class="mt-4 d-flex flex-wrap gap-2 mb-0" role="status" aria-live="polite">
-            <span class="chip tabular-nums">📍 @DisplayLocation(plan.Query)</span>
+          <div class="mt-3 pt-3 d-flex flex-wrap gap-2 mb-0 weather-summary-chips" role="status" aria-live="polite">
+            <span class="chip chip--location tabular-nums">📍 @DisplayLocation(plan.Query)</span>
             @if (plan.Query.Departure.HasValue || plan.Query.Return.HasValue)
             {
               <span class="chip">📅 @DisplayDateRange(plan.Query.Departure, plan.Query.Return)</span>
@@ -130,7 +130,7 @@
     </div>
   </div>
 
-  <div class="col-lg-8 col-xl-9">
+  <div class="weather-layout__main">
     @if (isLoading)
     {
       <div class="weather-skeleton" role="status" aria-live="polite" aria-busy="true">
@@ -170,7 +170,7 @@
     {
       <section class="mb-4" aria-labelledby="realtime-forecast-heading">
         <h2 id="realtime-forecast-heading" class="mb-3 fw-semibold text-primary h4 weather-section-heading">@Language["RealtimeForecastTitle"]</h2>
-        <div class="planner">
+        <div class="planner planner--realtime">
           @foreach (var providerResult in plan.Realtime)
           {
             <WeatherCard @key="providerResult.Provider"
@@ -187,7 +187,7 @@
       {
         <section aria-labelledby="multiday-outlook-heading">
           <h2 id="multiday-outlook-heading" class="mb-3 fw-semibold text-primary h4 weather-section-heading">@Language["MultiDayOutlookTitle"]</h2>
-          <div class="planner">
+          <div class="planner planner--outlook">
             @foreach (var providerResult in plan.Outlooks)
             {
               <WeatherCard @key="providerResult.Provider"

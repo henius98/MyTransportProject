@@ -1,26 +1,41 @@
 .login-modal {
     padding: 0;
     border: none;
-    border-radius: 20px;
+    border-radius: var(--radius-panel);
     background: transparent;
     max-width: 450px;
     width: 90%;
 }
 
 .login-modal::backdrop {
-    background: rgba(0, 0, 0, 0.45);
-    animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    background: var(--backdrop-overlay);
+    animation: fadeIn 0.2s ease-out forwards;
 }
 
 .login-modal[open] {
-    animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .login-modal-content {
-    border-radius: 20px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--card-bg);
+    color: var(--text-color);
+    border-radius: var(--radius-panel);
+    border: var(--border-crisp);
+    box-shadow: var(--shadow-container);
     position: relative;
     overflow: hidden;
+}
+
+.modal-close-btn,
+.auth-btn {
+    border: var(--border-crisp);
+    border-radius: var(--radius-pill);
+    background-color: var(--surface-subtle);
+    box-shadow: var(--shadow-control);
+    transition:
+        background-color 0.12s ease,
+        transform 0.1s ease,
+        box-shadow 0.1s ease;
 }
 
 .modal-close-btn {
@@ -28,32 +43,43 @@
     top: 15px;
     right: 15px;
     z-index: 10;
+    width: 2rem;
+    height: 2rem;
+    opacity: 1;
+}
+
+.modal-close-btn:hover {
+    background-color: var(--accent-coral);
 }
 
 .auth-btn {
-    --bs-btn-bg: #1f1f1f;
-    --bs-btn-color: #c4c7c5;
-    --bs-btn-hover-bg: #2b2b2b;
-    --bs-btn-hover-color: #e3e3e3;
-    --bs-btn-active-bg: #303134;
-    --bs-btn-active-color: #e3e3e3;
-    --bs-btn-border-color: #5f6368;
-    --bs-btn-hover-border-color: #8e918f;
+    color: var(--text-color);
     width: 100%;
-    height: 40px;
-    padding: 0 12px;
+    height: 44px;
+    padding: 0 16px;
     gap: 10px;
-    border-radius: 2px;
-    font-size: 14px;
-    font-weight: 400;
+    font-family: var(--font-sans);
+    font-size: 0.92rem;
+    font-weight: 700;
     line-height: 20px;
-    box-shadow: none;
-    transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .auth-btn:hover {
-    transform: none;
-    box-shadow: none;
+    background-color: var(--accent-peach);
+    color: #1E1E1C;
+    border-color: var(--border-color);
+}
+
+.modal-close-btn:hover,
+.auth-btn:hover {
+    transform: translateY(1px);
+    box-shadow: var(--shadow-press);
+}
+
+.modal-close-btn:active,
+.auth-btn:active {
+    transform: translateY(2px);
+    box-shadow: var(--shadow-none);
 }
 
 .google-mark {
@@ -64,8 +90,8 @@
 
 .auth-btn:focus-visible,
 .modal-close-btn:focus-visible {
-    outline: 3px solid var(--primary-blue);
-    outline-offset: 3px;
+    outline: 2.5px solid var(--focus-ring);
+    outline-offset: 2px;
 }
 
 @keyframes fadeIn {
@@ -76,11 +102,11 @@
 @keyframes slideUp {
     from { 
         opacity: 0;
-        transform: translateY(20px) scale(0.95);
+        transform: translateY(12px);
     }
     to { 
         opacity: 1;
-        transform: translateY(0) scale(1);
+        transform: translateY(0);
     }
 }
 
@@ -92,7 +118,8 @@
         transition: none;
     }
 
-    .auth-btn:hover {
+    .auth-btn:hover,
+    .auth-btn:active {
         transform: none;
     }
 }

@@ -9,10 +9,10 @@
 @implements IDisposable
 
 <div class="@ContainerClass">
-  <div class="top-row ps-3 navbar" data-bs-theme="dark">
+  <div class="top-row ps-3 navbar">
     <div class="container-fluid d-flex justify-content-start align-items-center flex-nowrap">
       <div class="profile me-3 position-relative" @onclick="() => { }" @onclick:stopPropagation="true">
-        <button type="button" class="btn profile__trigger shadow-none" @onclick="ToggleUserMenu"
+        <button type="button" class="btn profile__trigger" @onclick="ToggleUserMenu"
                 aria-label="@Language["UserProfile"]" title="@Language["UserProfile"]">
           <AuthorizeView>
             <Authorized>
@@ -49,12 +49,11 @@
                     </div>
                   </div>
                   <small class="text-muted d-block mb-2">@Language["SignedInWithGoogle"]</small>
+                  <hr class="my-2 border-secondary" />
                 </Authorized>
               </AuthorizeView>
 
-              <hr class="my-2 border-secondary" />
-
-              <div class="mb-3 mt-3">
+              <div class="mb-3 mt-1">
                 <small class="menu-section-label">@Language["Preferences"]</small>
 
                 <div class="switch-group d-flex align-items-center justify-content-between p-2 rounded mb-2">

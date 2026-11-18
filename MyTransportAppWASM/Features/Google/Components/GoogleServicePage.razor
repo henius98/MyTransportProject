@@ -25,7 +25,7 @@
         </Authorized>
         <NotAuthorized>
             <div class="google-panel google-empty">
-                <span class="bi bi-google google-service-icon" aria-hidden="true"></span>
+                <span class="bi @(IsCalendarDashboard ? "bi-calendar3" : IsTasksDashboard ? "bi-check2-square" : "bi-google") google-service-icon" aria-hidden="true"></span>
                 <h1 class="h2">@(Language?["GoogleSignInPromptTitle"] ?? "Sign in to use your Google services")</h1>
                 <p class="google-muted">@(Language?["GoogleSignInPromptSubtitle"] ?? "View your events and manage your tasks from one place.")</p>
                 <button type="button" class="btn btn--primary" @onclick="SignIn">@(Language?["SignInWithGoogle"] ?? "Sign in with Google")</button>

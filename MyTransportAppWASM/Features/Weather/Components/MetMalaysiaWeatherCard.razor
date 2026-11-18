@@ -10,14 +10,14 @@
       @foreach (var group in groupedPeriods)
       {
         var groupSlices = group.ToList();
-        <div @key="group.Key" class="card flex-row shadow-sm border-secondary border-opacity-25"
-             style="overflow: hidden; background: var(--bs-body-bg);">
+        <div @key="group.Key" class="card panel-inset flex-row p-0" style="overflow: hidden;">
           <time datetime="@group.Key.ToString("yyyy-MM-dd")"
-                class="bg-secondary bg-opacity-10 py-3 px-2 px-sm-3 fw-semibold border-end border-secondary border-opacity-10 d-flex flex-column align-items-center flex-shrink-0 text-uppercase">
+                class="py-3 px-2 px-sm-3 fw-bold d-flex flex-column align-items-center justify-content-center flex-shrink-0 text-uppercase"
+                style="background: var(--accent-lavender); color: #1E1E1C; border-right: var(--hairline-dashed); font-family: var(--font-mono);">
             <span>@group.Key.ToString("ddd")</span>
-            <span class="fs-4 text-primary">@group.Key.ToString("dd")</span>
+            <span class="fs-4">@group.Key.ToString("dd")</span>
             <span>@group.Key.ToString("MMM")</span>
-            <span class="small text-dim">@group.Key.ToString("yyyy")</span>
+            <span class="small">@group.Key.ToString("yyyy")</span>
           </time>
           <div class="card-body forecast-periods p-0">
             @for (var i = 0; i < groupSlices.Count; i++)
@@ -26,27 +26,28 @@
               bool isLast = i == groupSlices.Count - 1;
               string labelColorClass = slice.Label switch
               {
-                "Pagi" => "bg-success text-white",
-                "Petang" => "bg-danger text-white",
-                "Malam" => "bg-primary text-white",
-                _ => "bg-secondary bg-opacity-25 text-body"
+                "Pagi" => "bg-success text-dark",
+                "Petang" => "bg-warning text-dark",
+                "Malam" => "bg-primary text-dark",
+                _ => "bg-secondary text-body"
               };
               <div @key="(slice.Time, slice.Label)"
-                class="d-flex align-items-center p-2 p-sm-3 @(isLast ? "" : "border-bottom border-secondary border-opacity-10")">
+                class="d-flex align-items-center p-2 p-sm-3"
+                style="@(isLast ? "" : "border-bottom: var(--hairline-dashed);")">
                 <div class="me-2 me-sm-4 fs-1" style="min-width: 3rem; text-align: center;">
                   <i class="@slice.Icon"></i>
                 </div>
                 <div class="forecast-details flex-grow-1">
-                  <div class="fw-medium mb-1 fs-5" style="letter-spacing: -0.01em;">@(Language?[slice.Summary ?? "N/A"] ?? slice.Summary ?? "N/A")</div>
+                  <div class="fw-semibold mb-1 fs-5" style="letter-spacing: -0.01em;">@(Language?[slice.Summary ?? "N/A"] ?? slice.Summary ?? "N/A")</div>
 
-                  <div class="d-flex flex-wrap gap-3 text-dim fw-medium" style="font-size: 0.85rem;">
+                  <div class="d-flex flex-wrap gap-3 text-dim fw-medium tabular-nums" style="font-family: var(--font-mono); font-size: 0.82rem;">
                     @if (slice.MinTemperatureC.HasValue && slice.MaxTemperatureC.HasValue)
                     {
-                      <span class="text-danger"><i class="bi bi-thermometer-half me-1"></i>@($"{slice.MinTemperatureC:0.#}°C ~ {slice.MaxTemperatureC:0.#}°C")</span>
+                      <span class="text-danger fw-bold"><i class="bi bi-thermometer-half me-1"></i>@($"{slice.MinTemperatureC:0.#}°C ~ {slice.MaxTemperatureC:0.#}°C")</span>
                     }
                     else if (slice.TemperatureC.HasValue)
                     {
-                      <span class="text-danger"><i class="bi bi-thermometer-half me-1"></i>@($"{slice.TemperatureC:0.#}°C")</span>
+                      <span class="text-danger fw-bold"><i class="bi bi-thermometer-half me-1"></i>@($"{slice.TemperatureC:0.#}°C")</span>
                     }
                     @if (!string.IsNullOrWhiteSpace(slice.Wind))
                     {
@@ -56,7 +57,7 @@
                 </div>
                 <span class="forecast-period-trigger ms-3 flex-shrink-0" tabindex="0" aria-label="@(Language?[slice.Label] ?? slice.Label)"
                       data-label="@(Language?[slice.Label] ?? slice.Label)">
-                  <span class="badge forecast-period-label @labelColorClass" style="font-weight: 500;">
+                  <span class="badge forecast-period-label @labelColorClass">
                     <span class="forecast-period-text">@(Language?[slice.Label] ?? slice.Label)</span>
                   </span>
                 </span>

@@ -15,11 +15,17 @@
   top: -100%;
   left: 1rem;
   z-index: 9999;
-  padding: 0.5rem 1rem;
-  background: var(--btn-primary-bg, var(--primary-blue));
-  color: var(--btn-primary-color, #ffffff);
-  border-radius: 0 0 8px 8px;
+  padding: 0.5rem 1.15rem;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-color);
+  border: var(--border-crisp);
+  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
+  box-shadow: var(--shadow-control);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
   font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
   text-decoration: none;
   transition: top 0.15s ease;
 }
@@ -35,31 +41,30 @@ main {
 
 .sidebar {
   background-color: var(--sidebar-bg);
+  border-bottom: var(--border-crisp);
   position: relative;
   z-index: 1100;
   transition:
     width 0.3s ease,
-    background-color 0.3s ease;
+    background-color 0.2s ease;
 }
 
 .top-row {
   background-color: var(--surface-elevated, var(--card-bg));
-  border-bottom: 1px solid var(--border-color);
+  border-bottom: var(--hairline-dashed);
   justify-content: flex-end;
   height: 3.5rem;
   display: flex;
   align-items: center;
 }
 
-.top-row ::deep a,
-.top-row ::deep .btn-link {
+.top-row ::deep a {
   white-space: nowrap;
   margin-left: 1.5rem;
   text-decoration: none;
 }
 
-.top-row ::deep a:hover,
-.top-row ::deep .btn-link:hover {
+.top-row ::deep a:hover {
   text-decoration: underline;
 }
 
@@ -73,8 +78,7 @@ main {
     justify-content: space-between;
   }
 
-  .top-row ::deep a,
-  .top-row ::deep .btn-link {
+  .top-row ::deep a {
     margin-left: 0;
   }
 }
@@ -90,6 +94,8 @@ main {
     position: sticky;
     top: 0;
     z-index: 1100;
+    border-bottom: 0;
+    border-right: var(--border-crisp);
   }
 
   .sidebar.collapsed {

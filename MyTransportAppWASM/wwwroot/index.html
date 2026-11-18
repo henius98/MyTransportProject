@@ -32,18 +32,18 @@
     <link href="manifest.webmanifest" rel="manifest" />
     <meta
       name="theme-color"
-      content="#ffffff"
+      content="#FAF7F2"
       media="(prefers-color-scheme: light)"
     />
     <meta
       name="theme-color"
-      content="#000000"
+      content="#1E1E1C"
       media="(prefers-color-scheme: dark)"
     />
     <link rel="apple-touch-icon" href="myTransport.svg" />
 
     <style>
-      /* Glassmorphism Splash Screen */
+      /* Soft Neo-Brutalist & Warm Technical Editorial Splash Screen */
       #app-splash {
         position: fixed;
         inset: 0;
@@ -51,38 +51,48 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        background: rgba(0, 0, 0, 1); /* fallback dark */
+        background: #FAF7F2; /* warm cream paper */
         z-index: 9999;
       }
       .splash-logo {
-        width: 120px;
-        height: 120px;
+        width: 112px;
+        height: 112px;
+        padding: 16px;
+        background: #F2ECE1;
+        border: 1.5px solid #1E1E1C;
+        border-radius: 8px;
+        box-shadow: 0 4px 0 #1E1E1C;
         animation: pulseLogo 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        filter: drop-shadow(0 0 20px rgba(56, 189, 248, 0.5));
       }
       .splash-text {
         margin-top: 24px;
-        font-family: system-ui, -apple-system, sans-serif;
-        font-size: 1.25rem;
-        font-weight: 600;
-        color: #f8fafc;
-        letter-spacing: 0.05em;
+        font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas, monospace;
+        font-size: 0.9rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: #1E1E1C;
+        letter-spacing: 0.1em;
+        padding: 6px 14px;
+        background: #F5D5B8;
+        border: 1.5px solid #1E1E1C;
+        border-radius: 9999px;
+        box-shadow: 0 2px 0 #1E1E1C;
         animation: fadeText 2s ease-in-out infinite alternate;
       }
       @keyframes pulseLogo {
         0%,
         100% {
           opacity: 1;
-          transform: scale(1);
+          transform: translateY(0);
         }
         50% {
-          opacity: 0.7;
-          transform: scale(0.95);
+          opacity: 0.92;
+          transform: translateY(1px);
         }
       }
       @keyframes fadeText {
         0% {
-          opacity: 0.5;
+          opacity: 0.7;
         }
         100% {
           opacity: 1;
@@ -107,13 +117,21 @@
     <script>
       // Pre-apply saved theme to avoid flash before Blazor and theme-manager load
       (function () {
-        var saved = localStorage.getItem("theme-mode-global");
-        var isDark = saved !== "light"; // Default to dark
+        var saved = null;
+        try {
+          saved = localStorage.getItem("theme-mode-global");
+          if (!saved) {
+            localStorage.setItem("theme-mode-global", "light");
+          }
+        } catch {}
+        var isDark = saved === "dark"; // Default to Warm Technical Editorial light
         if (isDark) {
           document.body.classList.remove("theme-light");
+          document.body.classList.add("theme-dark");
           document.documentElement.setAttribute("data-bs-theme", "dark");
         } else {
           document.body.classList.add("theme-light");
+          document.body.classList.remove("theme-dark");
           document.documentElement.setAttribute("data-bs-theme", "light");
         }
       })();

@@ -14,8 +14,8 @@
 
     @if (_showSuggestions)
     {
-      <div class="position-absolute w-100 mt-1 p-0 shadow-sm"
-           style="z-index: 1000; max-height: 250px; overflow-y: auto; background: var(--bg-color, #fff); border-radius: 12px; border: 1px solid var(--border-color); overflow-x: hidden;">
+      <div class="position-absolute w-100 mt-1 p-0"
+           style="z-index: 1000; max-height: 250px; overflow-y: auto; background: var(--card-bg); border-radius: var(--radius-panel); border: var(--border-crisp); box-shadow: var(--shadow-container); overflow-x: hidden;">
         <ul id="@ListboxId" class="list-unstyled m-0" role="listbox">
           @if (_isSearchingSuggestions && _suggestions.Count == 0)
           {
@@ -35,11 +35,11 @@
                 bool isActive = currentIndex == _activeIndex;
 
                 <li @key="(suggestion.LocationId, suggestion.Name, suggestion.Lat, suggestion.Lng)"
-                    id="suggestion-@currentIndex" class="p-2 border-bottom @(isActive ? "bg-light text-primary" : "")"
-                    style="cursor: pointer;" role="option" aria-selected="@(isActive ? "true" : "false")"
+                    id="suggestion-@currentIndex" class="p-2 @(isActive ? "bg-warning text-dark" : "")"
+                    style="cursor: pointer; border-bottom: var(--hairline-dashed);" role="option" aria-selected="@(isActive ? "true" : "false")"
                     @onclick="() => SelectSuggestion(suggestion)" @onmouseover="() => _activeIndex = currentIndex">
                   <strong>@suggestion.Name</strong><br />
-                  <small class="@(isActive ? "text-primary opacity-75" : "text-dim")">@(string.IsNullOrWhiteSpace(suggestion.LocationId) ? suggestion.FormattedAddress : $"MET ID: {suggestion.LocationId}")</small>
+                  <small class="@(isActive ? "text-dark" : "text-dim")" style="font-family: var(--font-mono);">@(string.IsNullOrWhiteSpace(suggestion.LocationId) ? suggestion.FormattedAddress : $"MET ID: {suggestion.LocationId}")</small>
                 </li>
               }
             }
@@ -56,8 +56,8 @@
 
   <dialog id="location-picker-modal" @ref="_mapDialog" @onclose="HandleDialogClosedAsync" aria-labelledby="map-modal-title" class="location-picker-dialog">
     <div class="d-flex flex-column h-100">
-      <div class="p-3 border-bottom d-flex justify-content-between align-items-center">
-        <h5 id="map-modal-title" class="m-0" style="color: var(--text-color, #000);">Select a Location</h5>
+      <div class="p-3 d-flex justify-content-between align-items-center" style="border-bottom: var(--hairline-dashed);">
+        <h5 id="map-modal-title" class="m-0" style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 800; text-transform: none; letter-spacing: -0.02em; color: var(--text-color);">Select a Location</h5>
         <form method="dialog">
           <button class="btn-close" aria-label="Close" @onclick="CloseMapModal"></button>
         </form>
