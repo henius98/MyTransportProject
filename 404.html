@@ -9,6 +9,8 @@
       content="Real-time public transit tracking and weather-aware trip planning for Malaysia. Track buses, plan routes, and check weather forecasts."
     />
     <base href="/MyTransportProject/" />
+    <link href="_framework/dotnet.a5cvw2yd10.js" rel="preload" as="script" fetchpriority="high" crossorigin="anonymous" integrity="sha256-Pheaw8yxgJJwsbdzglF5G1HBX/Nb0bGXtGEY5HXOq3I=" />
+    <link rel="preconnect" href="https://www.gstatic.com" crossorigin />
 
     <!-- The splash is fully inlined below, so app styles can download without blocking FCP. -->
     <link rel="preload" as="style" href="css/app.css" onload="this.onload=null;this.rel='stylesheet'" />
@@ -136,9 +138,28 @@
       <button class="dismiss" aria-label="Dismiss error">🗙</button>
     </div>
     <!-- Firebase manages popup completion and auth state natively, without a delayed opener reload. -->
-    <!-- Empty importmap removed — no module specifier overrides needed -->
+    <!-- Populated by MSBuild OverrideHtmlAssetPlaceholders with fingerprinted .NET module mappings -->
+    <script type="importmap">{
+  "imports": {
+    "./_framework/blazor.webassembly.js": "./_framework/blazor.webassembly.zxhwjtv6sc.js",
+    "./_framework/dotnet.js": "./_framework/dotnet.a5cvw2yd10.js",
+    "./_framework/dotnet.native.js": "./_framework/dotnet.native.0iaz1bt1xv.js",
+    "./_framework/dotnet.runtime.js": "./_framework/dotnet.runtime.v2rwe8u38b.js"
+  },
+  "scopes": {},
+  "integrity": {
+    "./_framework/blazor.webassembly.js": "sha256-1xlHuu1iNOJiMMz2BCq95uekwHf6pdpTcgVNKVBboPs=",
+    "./_framework/blazor.webassembly.zxhwjtv6sc.js": "sha256-1xlHuu1iNOJiMMz2BCq95uekwHf6pdpTcgVNKVBboPs=",
+    "./_framework/dotnet.a5cvw2yd10.js": "sha256-Pheaw8yxgJJwsbdzglF5G1HBX/Nb0bGXtGEY5HXOq3I=",
+    "./_framework/dotnet.js": "sha256-Pheaw8yxgJJwsbdzglF5G1HBX/Nb0bGXtGEY5HXOq3I=",
+    "./_framework/dotnet.native.0iaz1bt1xv.js": "sha256-6NwnWSZzaEN32FIB1ODakhoUE02O0oV0FsKukuhjcdA=",
+    "./_framework/dotnet.native.js": "sha256-6NwnWSZzaEN32FIB1ODakhoUE02O0oV0FsKukuhjcdA=",
+    "./_framework/dotnet.runtime.js": "sha256-6SBqDbLLy460Bxd7wMZoiO97hZfLTuF+HRhWT3elS7U=",
+    "./_framework/dotnet.runtime.v2rwe8u38b.js": "sha256-6SBqDbLLy460Bxd7wMZoiO97hZfLTuF+HRhWT3elS7U="
+  }
+}</script>
     <script src="js/theme-manager.js"></script>
-    <script src="_framework/blazor.webassembly.js"></script>
+    <script src="_framework/blazor.webassembly.zxhwjtv6sc.js"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', function () {

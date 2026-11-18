@@ -357,6 +357,13 @@ select.form-input {
   align-items: center;
 }
 
+.autocomplete-container:has(> input:focus-visible) {
+  outline: 2px solid var(--focus-ring, var(--primary-blue));
+  outline-offset: 1px;
+  border-color: var(--primary-blue);
+  box-shadow: 0 0 0 4px var(--primary-blue-transparent);
+}
+
 .autocomplete-container gmp-place-autocomplete {
   width: 100%;
   --gmpx-color-surface: var(--input-bg, var(--bg-color));

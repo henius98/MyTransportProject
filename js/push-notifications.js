@@ -224,17 +224,20 @@ export async function disable(uid) {
     return true;
 }
 
-if (
-  supported() &&
-  Notification.permission === "granted" &&
-  localStorage.getItem("push-token")
-) {
-  void (async () => {
+export async function ensureForegroundListener() {
+  if (
+    !supported() ||
+    Notification.permission !== "granted" ||
+    !localStorage.getItem("push-token")
+  ) {
+    return;
+  }
+  try {
     const registration = await navigator.serviceWorker.getRegistration(
       new URL("../", import.meta.url).href,
     );
     if (registration) await listenInForeground(registration);
-  })().catch((error) =>
-    console.warn("Foreground notifications are unavailable:", error.message),
-  );
+  } catch (error) {
+    console.warn("Foreground notifications are unavailable:", error.message);
+  }
 }
