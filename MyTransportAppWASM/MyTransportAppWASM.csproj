@@ -48,7 +48,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <TrimmableAssembly Include="MyTransportAppWASM" />
     <BlazorWebAssemblyLazyLoad Include="MyTransportAppWASM.Gtfs.dll" />
   </ItemGroup>
 
