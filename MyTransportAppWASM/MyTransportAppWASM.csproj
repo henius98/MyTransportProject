@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>partial</TrimMode>
     <CompressionEnabled>true</CompressionEnabled>
@@ -33,6 +34,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="MyTransportAppWASM.Tests" />
+    <InternalsVisibleTo Include="MyTransportAppWASM.PerformanceBenchmarks" />
   </ItemGroup>
 
   <ItemGroup>

@@ -341,6 +341,52 @@ public class LiveRoutingServiceTests
   }
 
   [Fact]
+  public void EnrichRoutes_StripsTrailingSuffixAndFallsBackToLineName()
+  {
+    var route = new GoogleRoute
+    {
+      RouteId = 0,
+      DurationSeconds = 600,
+      TransitSteps =
+      [
+        new TransitStep
+        {
+          LineShortName = "Port Klang Line",
+          LineName = "Port Klang Line",
+          DepartureLat = 3.139,
+          DepartureLng = 101.687
+        },
+        new TransitStep
+        {
+          LineShortName = "400",
+          LineName = "400",
+          DepartureLat = 3.139,
+          DepartureLng = 101.687
+        },
+        new TransitStep
+        {
+          LineShortName = "Express",
+          LineName = "Sunway Line",
+          DepartureLat = 3.139,
+          DepartureLng = 101.687
+        }
+      ]
+    };
+
+    var vehicles = new List<BusLocation>
+    {
+      BuildBus("Port Klang") with { VehicleId = "ktmb-pk", TransportType = "KTMB" },
+      BuildBus("400 Inbound") with { VehicleId = "bus-400", TransportType = "Bus" },
+      BuildBus("Sunway") with { VehicleId = "brt-sunway", TransportType = "BRT" }
+    };
+
+    var enriched = Assert.Single(LiveRouting.EnrichRoutes([route], vehicles));
+    Assert.True(enriched.HasLiveBus);
+    Assert.Equal(["ktmb-pk", "bus-400", "brt-sunway"], enriched.NearestBuses.Select(b => b.VehicleId).ToArray());
+    Assert.Equal("KTMB", enriched.NearestBuses[0].TransportType);
+  }
+
+  [Fact]
   public void FilterVehiclesForStaticRoute_MatchesProviderAndRouteIdOrNameOnly()
   {
     var staticRoutes = new List<StaticRoute>

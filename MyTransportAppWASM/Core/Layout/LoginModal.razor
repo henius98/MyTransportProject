@@ -2,6 +2,7 @@
 @inject IJSRuntime JS
 @inject FirebaseClientService Firebase
 @inject AuthenticationStateProvider AuthStateProvider
+@inject IAuthSessionService AuthSession
 @inject AppStateService AppState
 @inject NavigationManager Navigation
 @implements IDisposable
@@ -93,9 +94,8 @@
 
   private async Task CloseAsync()
   {
-    AppState.ClearLoginRequest();
     await CloseDialogAsync();
-    AppState.ClearReturnUrl();
+    AppState.DismissLoginRequest();
   }
 
   private Task CloseDialogAsync() =>
@@ -108,8 +108,7 @@
 
   private void HandleCancel(EventArgs e)
   {
-    AppState.ClearLoginRequest();
-    AppState.ClearReturnUrl();
+    AppState.DismissLoginRequest();
   }
 
   private async Task SignInWithGoogle()
@@ -120,19 +119,14 @@
       errorMessage = null;
       StateHasChanged();
 
-      if (AuthStateProvider is not FirebaseAuthenticationStateProvider firebaseAuth)
-      {
-        throw new InvalidOperationException("Firebase authentication is not available.");
-      }
-
-      await firebaseAuth.SignInWithGoogleAsync();
+      await AuthSession.SignInWithGoogleAsync();
       if (_disposed) return;
 
       var returnUrl = AppState.TakeReturnUrl();
       AppState.ClearLoginRequest();
       await CloseDialogAsync();
 
-      if (!_disposed && IsSafeReturnUrl(returnUrl))
+      if (!_disposed && AuthLoginHelpers.IsSafeReturnUrl(returnUrl, Navigation.BaseUri, uri => Navigation.ToAbsoluteUri(uri)))
       {
         Navigation.NavigateTo(returnUrl!, replace: true);
       }
@@ -140,23 +134,9 @@
     catch (Exception ex)
     {
       if (_disposed) return;
-      if (ex.Message.Contains("popup-blocked", StringComparison.OrdinalIgnoreCase))
-      {
-        errorMessage = "The sign-in pop-up was blocked by your browser. Please allow pop-ups for this site, or try again.";
-      }
-      else if (ex.Message.Contains("popup-closed-by-user", StringComparison.OrdinalIgnoreCase))
-      {
-        errorMessage = null;
-      }
-      else if (ex.Message.Contains("unauthorized-domain", StringComparison.OrdinalIgnoreCase))
-      {
-        errorMessage = "This domain is not authorized for Firebase Authentication. Please use localhost instead of 127.0.0.1, or add this domain in Firebase Console.";
-      }
-      else
-      {
-        errorMessage = "Failed to sign in. Please try again.";
-      }
-      if (!ex.Message.Contains("popup-closed-by-user", StringComparison.OrdinalIgnoreCase))
+      var (mappedError, shouldLog) = AuthLoginHelpers.MapSignInError(ex.Message);
+      errorMessage = mappedError;
+      if (shouldLog)
       {
         Console.WriteLine(ex);
       }
@@ -165,21 +145,6 @@
     {
       isLoggingIn = false;
       if (!_disposed) StateHasChanged();
-    }
-  }
-
-  private bool IsSafeReturnUrl(string? returnUrl)
-  {
-    if (string.IsNullOrWhiteSpace(returnUrl)) return false;
-    try
-    {
-      var target = Navigation.ToAbsoluteUri(returnUrl);
-      var appBase = new Uri(Navigation.BaseUri, UriKind.Absolute);
-      return appBase.IsBaseOf(target);
-    }
-    catch (UriFormatException)
-    {
-      return false;
     }
   }
 

@@ -112,7 +112,8 @@
                         @foreach (var travelOption in TravelModeOptions)
                         {
                             var isSelected = string.Equals(mode, travelOption.Value, StringComparison.Ordinal);
-                            <button type="button"
+                            <button @key="travelOption.Value"
+                                    type="button"
                                     role="radio"
                                     aria-checked="@(isSelected ? "true" : "false")"
                                     class="travel-mode-btn @(isSelected ? "travel-mode-btn--active" : "")"

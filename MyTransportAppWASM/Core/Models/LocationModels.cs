@@ -28,6 +28,15 @@ namespace MyTransportAppWASM.Core.Models
     [JsonPropertyName("formattedAddress")]
     public string FormattedAddress { get; set; } = string.Empty;
   }
+
+  public sealed record GeolocationRequestOptions(
+    [property: JsonPropertyName("cacheMaxAge")] long CacheMaxAge,
+    [property: JsonPropertyName("useCache")] bool UseCache,
+    [property: JsonPropertyName("enableHighAccuracy")] bool EnableHighAccuracy);
+
+  public sealed record LatLngCoordinates(
+    [property: JsonPropertyName("lat")] double Lat,
+    [property: JsonPropertyName("lng")] double Lng);
 }
 
 

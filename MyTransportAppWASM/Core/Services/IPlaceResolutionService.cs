@@ -1,4 +1,4 @@
-namespace MyTransportAppWASM.Features.Google.Services
+namespace MyTransportAppWASM.Core.Services
 {
   /// <summary>
   /// Universal seam for geographic coordinate resolution, suggestions, and reverse geocoding.

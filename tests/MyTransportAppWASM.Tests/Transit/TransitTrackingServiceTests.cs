@@ -289,6 +289,26 @@ public class TransitTrackingServiceTests
     Assert.Null(vehicle.RouteShortName);
   }
 
+  [Fact]
+  public async Task EnrichRoutesAsync_RetriesFortuneFetch_WhenPreviousAttemptReturnedNullWithoutCache()
+  {
+    var gtfs = new Mock<IGtfsService>();
+    var bazi = new Mock<IBaziFlowService>();
+    bazi.Setup(b => b.HasApiKeyAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
+    bazi.SetupSequence(b => b.GetDateFortuneAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        .ReturnsAsync((FortuneData?)null)
+        .ReturnsAsync(new FortuneData { LuckyHours = [MalaysiaTime.Now.Hour] });
+
+    var service = new TransitTrackingService(gtfs.Object, bazi.Object, []);
+
+    var first = await service.EnrichRoutesAsync([new GoogleRoute()]);
+    Assert.False(Assert.Single(first).IsAuspicious);
+
+    var second = await service.EnrichRoutesAsync([new GoogleRoute()]);
+    Assert.True(Assert.Single(second).IsAuspicious);
+    bazi.Verify(b => b.GetDateFortuneAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+  }
+
   private static MemoryCache CreateBoundedCache() =>
       new(new MemoryCacheOptions { SizeLimit = 10 });
 

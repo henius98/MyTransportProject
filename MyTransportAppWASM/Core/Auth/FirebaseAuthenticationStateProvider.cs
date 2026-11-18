@@ -4,66 +4,61 @@ using Microsoft.JSInterop;
 
 namespace MyTransportAppWASM.Core.Auth
 {
-    public sealed class FirebaseAuthenticationStateProvider : AuthenticationStateProvider, IAsyncDisposable
+  public sealed class FirebaseAuthenticationStateProvider(FirebaseClientService firebase)
+    : AuthenticationStateProvider, IAuthSessionService, IAsyncDisposable
+  {
+    private DotNetObjectReference<FirebaseAuthenticationStateProvider>? _dotNetRef;
+    private ClaimsPrincipal _currentUser = new ClaimsPrincipal(new ClaimsIdentity());
+    private readonly TaskCompletionSource _initialAuthStateTcs =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private Task? _initializationTask;
+
+    public async Task InitializeAsync()
     {
-        private readonly FirebaseClientService _firebase;
-        private DotNetObjectReference<FirebaseAuthenticationStateProvider>? _dotNetRef;
-        private ClaimsPrincipal _currentUser = new ClaimsPrincipal(new ClaimsIdentity());
-        private readonly TaskCompletionSource _initialAuthStateTcs =
-            new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private Task? _initializationTask;
+      if (!firebase.IsConfigured)
+      {
+        if (!_initialAuthStateTcs.Task.IsCompleted) SetAuthenticationState(user: null);
+        return;
+      }
 
-        public FirebaseAuthenticationStateProvider(FirebaseClientService firebase)
-        {
-            _firebase = firebase;
-        }
+      _initializationTask ??= InitializeCoreAsync();
 
-        public async Task InitializeAsync()
-        {
-            if (!_firebase.IsConfigured)
-            {
-                if (!_initialAuthStateTcs.Task.IsCompleted) SetAuthenticationState(user: null);
-                return;
-            }
+      try
+      {
+        await _initializationTask;
+      }
+      catch (Exception ex)
+      {
+        Console.Error.WriteLine($"Firebase authentication initialization failed: {ex.Message}");
+        if (!_initialAuthStateTcs.Task.IsCompleted) SetAuthenticationState(user: null);
+      }
+    }
 
-            _initializationTask ??= InitializeCoreAsync();
+    private async Task InitializeCoreAsync()
+    {
+      _dotNetRef?.Dispose();
+      _dotNetRef = DotNetObjectReference.Create(this);
+      await firebase.OnAuthStateChangedAsync(_dotNetRef);
+    }
 
-            try
-            {
-                await _initializationTask;
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Firebase authentication initialization failed: {ex.Message}");
-                if (!_initialAuthStateTcs.Task.IsCompleted) SetAuthenticationState(user: null);
-            }
-        }
+    [JSInvokable]
+    public void OnAuthStateChanged(FirebaseUser? user)
+    {
+      SetAuthenticationState(user);
+    }
 
-        private async Task InitializeCoreAsync()
-        {
-            _dotNetRef?.Dispose();
-            _dotNetRef = DotNetObjectReference.Create(this);
-            await _firebase.OnAuthStateChangedAsync(_dotNetRef);
-        }
+    private void SetAuthenticationState(FirebaseUser? user)
+    {
+      if (_initialAuthStateTcs.Task.IsCompleted &&
+          _currentUser.GetUserId() == user?.Uid &&
+          (_currentUser.FindFirst(ClaimTypes.Email)?.Value ?? "") == (user?.Email ?? "") &&
+          (_currentUser.Identity?.Name ?? "") == (user?.DisplayName ?? "") &&
+          (_currentUser.GetPictureUrl() ?? "") == (user?.PhotoURL ?? ""))
+        return;
 
-        [JSInvokable]
-        public void OnAuthStateChanged(FirebaseUser? user)
-        {
-            SetAuthenticationState(user);
-        }
-
-        private void SetAuthenticationState(FirebaseUser? user)
-        {
-            if (_initialAuthStateTcs.Task.IsCompleted &&
-                _currentUser.FindFirst(ClaimTypes.NameIdentifier)?.Value == user?.Uid &&
-                (_currentUser.FindFirst(ClaimTypes.Email)?.Value ?? "") == (user?.Email ?? "") &&
-                (_currentUser.Identity?.Name ?? "") == (user?.DisplayName ?? "") &&
-                (_currentUser.FindFirst("picture")?.Value ?? "") == (user?.PhotoURL ?? ""))
-                return;
-
-            if (user != null)
-            {
-                var claims = new List<Claim>
+      if (user != null)
+      {
+        var claims = new List<Claim>
                 {
                     new Claim(ClaimTypes.NameIdentifier, user.Uid),
                     new Claim(ClaimTypes.Email, user.Email ?? ""),
@@ -71,83 +66,83 @@ namespace MyTransportAppWASM.Core.Auth
                     new Claim("picture", user.PhotoURL ?? "")
                 };
 
-                var identity = new ClaimsIdentity(claims, "Firebase");
-                _currentUser = new ClaimsPrincipal(identity);
-            }
-            else
-            {
-                _currentUser = new ClaimsPrincipal(new ClaimsIdentity());
-            }
+        var identity = new ClaimsIdentity(claims, "Firebase");
+        _currentUser = new ClaimsPrincipal(identity);
+      }
+      else
+      {
+        _currentUser = new ClaimsPrincipal(new ClaimsIdentity());
+      }
 
-            var authState = new AuthenticationState(_currentUser);
+      var authState = new AuthenticationState(_currentUser);
 
-            _initialAuthStateTcs.TrySetResult();
+      _initialAuthStateTcs.TrySetResult();
 
-            NotifyAuthenticationStateChanged(Task.FromResult(authState));
-        }
-
-        public override async Task<AuthenticationState> GetAuthenticationStateAsync()
-        {
-            if (_initialAuthStateTcs.Task.IsCompleted)
-                return new AuthenticationState(_currentUser);
-
-            try
-            {
-                await WaitForInitialStateAsync().WaitAsync(TimeSpan.FromSeconds(10));
-            }
-            catch (TimeoutException)
-            {
-                Console.Error.WriteLine("Firebase authentication did not respond within 10 seconds; continuing anonymously.");
-                if (!_initialAuthStateTcs.Task.IsCompleted) SetAuthenticationState(user: null);
-            }
-
-            return new AuthenticationState(_currentUser);
-        }
-
-        private async Task WaitForInitialStateAsync()
-        {
-            await InitializeAsync();
-            await _initialAuthStateTcs.Task;
-        }
-
-        public async Task SignInWithGoogleAsync(string? clientId = null)
-        {
-            var user = await _firebase.SignInWithGoogleAsync(clientId);
-            SetAuthenticationState(user);
-            if (_initializationTask?.IsFaulted == true) _initializationTask = null;
-            await InitializeAsync();
-        }
-
-        public async Task SignOutAsync()
-        {
-            await _firebase.SignOutAsync();
-            SetAuthenticationState(user: null);
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            try
-            {
-                await _firebase.DisposeAuthStateChangedAsync();
-            }
-            catch (JSException)
-            {
-                // The module may never have loaded (for example while offline).
-            }
-            catch (JSDisconnectedException)
-            {
-                // Normal during browser teardown.
-            }
-
-            _dotNetRef?.Dispose();
-        }
+      NotifyAuthenticationStateChanged(Task.FromResult(authState));
     }
 
-    public sealed class FirebaseUser
+    public override async Task<AuthenticationState> GetAuthenticationStateAsync()
     {
-        public string Uid { get; set; } = "";
-        public string? Email { get; set; }
-        public string? DisplayName { get; set; }
-        public string? PhotoURL { get; set; }
+      if (_initialAuthStateTcs.Task.IsCompleted)
+        return new AuthenticationState(_currentUser);
+
+      try
+      {
+        await WaitForInitialStateAsync().WaitAsync(TimeSpan.FromSeconds(10));
+      }
+      catch (TimeoutException)
+      {
+        Console.Error.WriteLine("Firebase authentication did not respond within 10 seconds; continuing anonymously.");
+        if (!_initialAuthStateTcs.Task.IsCompleted) SetAuthenticationState(user: null);
+      }
+
+      return new AuthenticationState(_currentUser);
     }
+
+    private async Task WaitForInitialStateAsync()
+    {
+      await InitializeAsync();
+      await _initialAuthStateTcs.Task;
+    }
+
+    public async Task SignInWithGoogleAsync(string? clientId = null)
+    {
+      var user = await firebase.SignInWithGoogleAsync(clientId);
+      SetAuthenticationState(user);
+      if (_initializationTask?.IsFaulted == true) _initializationTask = null;
+      await InitializeAsync();
+    }
+
+    public async Task SignOutAsync()
+    {
+      await firebase.SignOutAsync();
+      SetAuthenticationState(user: null);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+      try
+      {
+        await firebase.DisposeAuthStateChangedAsync();
+      }
+      catch (JSException)
+      {
+        // The module may never have loaded (for example while offline).
+      }
+      catch (JSDisconnectedException)
+      {
+        // Normal during browser teardown.
+      }
+
+      _dotNetRef?.Dispose();
+    }
+  }
+
+  public sealed class FirebaseUser
+  {
+    public string Uid { get; set; } = "";
+    public string? Email { get; set; }
+    public string? DisplayName { get; set; }
+    public string? PhotoURL { get; set; }
+  }
 }

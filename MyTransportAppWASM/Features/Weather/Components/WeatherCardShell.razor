@@ -7,7 +7,7 @@
         <i class="bi bi-box-arrow-up-right me-1" aria-hidden="true"></i>@ResolvedSourceDomain
       </a>
     </div>
-    <WeatherStatusBadge Status="@(Result?.Status ?? "Loading")" ProviderName="@ResolvedTitle"
+    <WeatherStatusBadge Status="@(Result?.Status ?? "Loading")" Tone="@(Result?.Tone ?? WeatherBadgeTone.Muted)" ProviderName="@ResolvedTitle"
                         IsCached="@(Result?.IsCached == true)" IsRefreshing="IsRefreshing" OnRefresh="OnRefresh" />
   </div>
 

@@ -1,242 +1,242 @@
-
 @if (RouteOptions != null && RouteOptions.Count > 0)
 {
-    <div class="route-options mt-3">
-        <h3 class="fs-6 mb-2">@T("LiveRouteOptionsHeading", "Live Route Options")</h3>
-        @foreach (var route in RouteOptions)
-        {
-            var r = route.OriginalRoute;
-            var isActive = r.RouteId == ActiveRouteId;
-            var isExpanded = expandedRouteIds.Contains(r.RouteId);
-            var hasTimes = !string.IsNullOrWhiteSpace(r.DepartureTimeText) && !string.IsNullOrWhiteSpace(r.ArrivalTimeText);
-            var durationLabel = !string.IsNullOrWhiteSpace(r.LocalizedDuration)
-                ? r.LocalizedDuration
-                : $"{Math.Max(1, r.DurationSeconds / 60)} min";
-            var firstTransit = r.Segments.FirstOrDefault(s => string.Equals(s.TravelMode, "TRANSIT", StringComparison.OrdinalIgnoreCase));
-            var walkSeconds = r.Segments
-                .Where(s => string.Equals(s.TravelMode, "WALKING", StringComparison.OrdinalIgnoreCase))
-                .Sum(s => s.DurationSeconds);
-            var walkMinutes = walkSeconds > 0 ? Math.Max(1, walkSeconds / 60) : 0;
+  <div class="route-options mt-3">
+    <h3 class="fs-6 mb-2">@T("LiveRouteOptionsHeading", "Live Route Options")</h3>
+    @foreach (var route in RouteOptions)
+    {
+      var r = route.OriginalRoute;
+      var isActive = r.RouteId == ActiveRouteId;
+      var isExpanded = expandedRouteIds.Contains(r.RouteId);
+      var hasTimes = !string.IsNullOrWhiteSpace(r.DepartureTimeText) && !string.IsNullOrWhiteSpace(r.ArrivalTimeText);
+      var durationLabel = !string.IsNullOrWhiteSpace(r.LocalizedDuration)
+          ? r.LocalizedDuration
+          : $"{RoundMinutes(r.DurationSeconds)} min";
+      var firstTransit = r.Segments.FirstOrDefault(s => string.Equals(s.TravelMode, "TRANSIT",
+StringComparison.OrdinalIgnoreCase));
+      var walkSeconds = r.Segments
+          .Where(s => string.Equals(s.TravelMode, "WALKING", StringComparison.OrdinalIgnoreCase))
+          .Sum(s => s.DurationSeconds);
+      var walkMinutes = walkSeconds > 0 ? RoundMinutes(walkSeconds) : 0;
 
-            <div @key="r.RouteId"
-                 class="route-option card mb-2 shadow-sm @(route.HasLiveBus ? "border-success" : "") @(isActive ? "border-primary border-2 shadow route-option--active" : "")">
-                <button type="button"
-                        class="route-option__select"
-                        aria-pressed="@isActive.ToString().ToLowerInvariant()"
-                        @onclick="() => OnSelectRoute.InvokeAsync(route)">
-                    <div class="route-option__top">
-                        <div class="route-option__heading">
-                            <span class="route-option__mode-icon" aria-hidden="true">🚆</span>
-                            @if (hasTimes)
-                            {
-                                <strong class="route-option__title tabular-nums">@r.DepartureTimeText—@r.ArrivalTimeText</strong>
-                                <span class="route-option__index">Option @(r.RouteId + 1)</span>
-                            }
-                            else
-                            {
-                                <strong class="route-option__title">Option @(r.RouteId + 1)</strong>
-                            }
-                        </div>
-                        <span class="route-option__duration tabular-nums">@durationLabel</span>
-                    </div>
-
-                    @if (r.Segments.Count > 0)
-                    {
-                        <div class="route-option__segments">
-                            @for (var i = 0; i < r.Segments.Count; i++)
-                            {
-                                var seg = r.Segments[i];
-                                if (i > 0)
-                                {
-                                    <span class="route-step-chevron" aria-hidden="true">›</span>
-                                }
-                                if (string.Equals(seg.TravelMode, "WALKING", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    <span class="route-step-walk" title="@T("ModeWalking", "Walking")">🚶</span>
-                                }
-                                else
-                                {
-                                    <span class="route-step-transit">
-                                        <span class="route-step-mode" aria-hidden="true">@GetVehicleEmoji(seg.VehicleType)</span>
-                                        <span class="route-line-badge" style="@GetLineBadgeStyle(seg)">
-                                            @(!string.IsNullOrWhiteSpace(seg.LineShortName) ? seg.LineShortName : seg.LineName)
-                                        </span>
-                                    </span>
-                                }
-                            }
-                        </div>
-                    }
-
-                    @if (firstTransit != null && !string.IsNullOrWhiteSpace(firstTransit.DepartureStopName))
-                    {
-                        <div class="route-option__boarding small">
-                            @if (!string.IsNullOrWhiteSpace(firstTransit.DepartureTimeText))
-                            {
-                                <span class="route-option__depart-text">
-                                    @string.Format(T("RouteFromStopFormat", "{0} from {1}"), firstTransit.DepartureTimeText, firstTransit.DepartureStopName)
-                                </span>
-                            }
-                            else
-                            {
-                                <span>@firstTransit.DepartureStopName</span>
-                            }
-                        </div>
-                    }
-
-                    @if (walkMinutes > 0 || r.HeadwayMinutes is > 0)
-                    {
-                        <div class="route-option__walk small tabular-nums">
-                            @if (walkMinutes > 0)
-                            {
-                                <span>🚶 @string.Format(T("RouteWalkMinutesFormat", "{0} min"), walkMinutes)</span>
-                            }
-                            @if (r.HeadwayMinutes is > 0)
-                            {
-                                <span>@string.Format(T("RouteEveryMinutesFormat", "every {0} min"), r.HeadwayMinutes.Value)</span>
-                            }
-                        </div>
-                    }
-
-                    <div class="route-option__meta small mt-1 tabular-nums">
-                        <div class="route-option__badges mb-1">
-                            @if (route.IsAuspicious)
-                            {
-                                <span class="badge bg-warning text-dark me-1" title="Aligns with lucky directions or times">🌟 Auspicious</span>
-                            }
-                            <span class="badge @(route.HasLiveBus ? "bg-success" : "bg-secondary")">
-                                @(route.HasLiveBus ? T("Live", "Live") : T("Scheduled", "Scheduled"))
-                            </span>
-                        </div>
-                        <div class="route-option__etas">
-                            <span>Base ETA: @(r.DurationSeconds / 60) mins</span>
-                            @if (route.HasLiveBus)
-                            {
-                                <span class="text-success fw-bold ms-2">Live ETA: @(route.LiveTotalDurationSeconds / 60) mins</span>
-                            }
-                        </div>
-                        @if (route.NearestBuses.Any())
-                        {
-                            <div class="mt-1">
-                                @foreach (var bus in route.NearestBuses)
-                                {
-                                    <div>Bus <strong>@bus.RouteId</strong> is @((int)bus.DistanceToStopMeters)m away</div>
-                                }
-                            </div>
-                        }
-                    </div>
-                </button>
-
-                @if (r.Segments.Count > 0)
-                {
-                    <div class="route-option__footer">
-                        <button type="button"
-                                class="route-option__details-btn"
-                                aria-expanded="@isExpanded.ToString().ToLowerInvariant()"
-                                @onclick="() => ToggleDetails(r.RouteId)">
-                            @(isExpanded ? T("RouteDetailsHide", "Hide details") : T("RouteDetailsShow", "Details"))
-                        </button>
-                    </div>
-
-                    @if (isExpanded)
-                    {
-                        <ol class="route-option__details">
-                            @foreach (var seg in r.Segments)
-                            {
-                                <li class="route-detail-step">
-                                    @if (string.Equals(seg.TravelMode, "WALKING", StringComparison.OrdinalIgnoreCase))
-                                    {
-                                        <div class="route-detail-step__title">
-                                            <span>🚶 @(!string.IsNullOrWhiteSpace(seg.Instructions) ? seg.Instructions : T("ModeWalking", "Walking"))</span>
-                                            <span class="route-detail-step__dur tabular-nums">@Math.Max(1, seg.DurationSeconds / 60) min</span>
-                                        </div>
-                                    }
-                                    else
-                                    {
-                                        <div class="route-detail-step__title">
-                                            <span>
-                                                <span class="route-line-badge me-1" style="@GetLineBadgeStyle(seg)">
-                                                    @(!string.IsNullOrWhiteSpace(seg.LineShortName) ? seg.LineShortName : seg.LineName)
-                                                </span>
-                                                @(!string.IsNullOrWhiteSpace(seg.Headsign) ? seg.Headsign : seg.LineName)
-                                            </span>
-                                            <span class="route-detail-step__dur tabular-nums">@Math.Max(1, seg.DurationSeconds / 60) min</span>
-                                        </div>
-                                        <div class="route-detail-step__stops small">
-                                            <div>@seg.DepartureTimeText @seg.DepartureStopName</div>
-                                            @if (!string.IsNullOrWhiteSpace(seg.ArrivalStopName))
-                                            {
-                                                <div>→ @seg.ArrivalTimeText @seg.ArrivalStopName</div>
-                                            }
-                                            @if (seg.StopCount > 0)
-                                            {
-                                                <div class="route-detail-step__count">@string.Format(T("RouteStopsFormat", "{0} stops"), seg.StopCount)</div>
-                                            }
-                                        </div>
-                                    }
-                                </li>
-                            }
-                        </ol>
-                    }
-                }
+      <div @key="r.RouteId"
+           class="route-option card mb-2 shadow-sm @(route.HasLiveBus ? "border-success" : "") @(isActive ? "border-primary border-2 shadow route-option--active" : "")">
+        <button type="button" class="route-option__select" aria-pressed="@isActive.ToString().ToLowerInvariant()"
+                @onclick="() => OnSelectRoute.InvokeAsync(route)">
+          <div class="route-option__top">
+            <div class="route-option__heading">
+              <span class="route-option__mode-icon" aria-hidden="true">🚆</span>
+              @if (hasTimes)
+              {
+                <strong class="route-option__title tabular-nums">@r.DepartureTimeText—@r.ArrivalTimeText</strong>
+                <span class="route-option__index">Option @(r.RouteId + 1)</span>
+              }
+              else
+              {
+                <strong class="route-option__title">Option @(r.RouteId + 1)</strong>
+              }
             </div>
-        }
-    </div>
-}
+            <span class="route-option__duration tabular-nums">@durationLabel</span>
+          </div>
+
+          @if (r.Segments.Count > 0)
+          {
+            <div class="route-option__segments">
+              @for (var i = 0; i < r.Segments.Count; i++)
+              {
+                var seg = r.Segments[i];
+                if (i > 0)
+                {
+                  <span class="route-step-chevron" aria-hidden="true">›</span>
+                }
+                if (string.Equals(seg.TravelMode, "WALKING", StringComparison.OrdinalIgnoreCase))
+                {
+                  <span class="route-step-walk" title="@T("ModeWalking", "Walking")">🚶</span>
+                }
+                else
+                {
+                  <span class="route-step-transit">
+                    <span class="route-step-mode" aria-hidden="true">@GetVehicleEmoji(seg.VehicleType)</span>
+                    <span class="route-line-badge" style="@GetLineBadgeStyle(seg)">
+                      @(!string.IsNullOrWhiteSpace(seg.LineShortName) ? seg.LineShortName : seg.LineName)
+                    </span>
+                  </span>
+                }
+              }
+            </div>
+          }
+
+          @if (firstTransit != null && !string.IsNullOrWhiteSpace(firstTransit.DepartureStopName))
+          {
+            <div class="route-option__boarding small">
+              @if (!string.IsNullOrWhiteSpace(firstTransit.DepartureTimeText))
+              {
+                <span class="route-option__depart-text">
+                  @string.Format(T("RouteFromStopFormat", "{0} from {1}"), firstTransit.DepartureTimeText,
+firstTransit.DepartureStopName)
+                </span>
+              }
+              else
+              {
+                <span>@firstTransit.DepartureStopName</span>
+              }
+            </div>
+          }
+
+          @if (walkMinutes > 0 || r.HeadwayMinutes is > 0)
+          {
+            <div class="route-option__walk small tabular-nums">
+              @if (walkMinutes > 0)
+              {
+                <span>🚶 @string.Format(T("RouteWalkMinutesFormat", "{0} min"), walkMinutes)</span>
+              }
+              @if (r.HeadwayMinutes is > 0)
+              {
+                <span>@string.Format(T("RouteEveryMinutesFormat", "every {0} min"), r.HeadwayMinutes.Value)</span>
+              }
+            </div>
+          }
+
+          <div class="route-option__meta small mt-1 tabular-nums">
+            <div class="route-option__badges mb-1">
+              @if (route.IsAuspicious)
+              {
+                <span class="badge bg-warning text-dark me-1" title="Aligns with lucky directions or times">🌟 Auspicious</span>
+              }
+                <span class="badge @(route.HasLiveBus ? "bg-success" : "bg-secondary")">
+                  @(route.HasLiveBus ? T("Live", "Live") : T("Scheduled", "Scheduled"))
+                </span>
+              </div>
+              <div class="route-option__etas">
+                <span>Base ETA: @RoundMinutes(r.DurationSeconds) mins</span>
+                @if (route.HasLiveBus)
+                {
+                  <span class="text-success fw-bold ms-2">Live ETA: @RoundMinutes(route.LiveTotalDurationSeconds) mins</span>
+                }
+              </div>
+              @if (route.NearestBuses.Count > 0)
+              {
+                <div class="mt-1">
+                  @foreach (var bus in route.NearestBuses)
+                  {
+                    var vehicleLabel = string.IsNullOrWhiteSpace(bus.TransportType) ? "Bus" : bus.TransportType;
+                    <div @key="(bus.VehicleId, bus.RouteId)">@vehicleLabel <strong>@bus.RouteId</strong> is @((int)bus.DistanceToStopMeters)m away</div>
+                  }
+                  </div>
+                }
+              </div>
+            </button>
+
+            @if (r.Segments.Count > 0)
+            {
+              <div class="route-option__footer">
+                <button type="button" class="route-option__details-btn" aria-expanded="@isExpanded.ToString().ToLowerInvariant()"
+                        @onclick="() => ToggleDetails(r.RouteId)">
+                  @(isExpanded ? T("RouteDetailsHide", "Hide details") : T("RouteDetailsShow", "Details"))
+                </button>
+              </div>
+
+              @if (isExpanded)
+              {
+                <ol class="route-option__details">
+                  @foreach (var seg in r.Segments)
+                  {
+                    <li class="route-detail-step">
+                      @if (string.Equals(seg.TravelMode, "WALKING", StringComparison.OrdinalIgnoreCase))
+                      {
+                        <div class="route-detail-step__title">
+                          <span>🚶 @(!string.IsNullOrWhiteSpace(seg.Instructions) ? seg.Instructions : T("ModeWalking", "Walking"))</span>
+                          <span class="route-detail-step__dur tabular-nums">@RoundMinutes(seg.DurationSeconds) min</span>
+                        </div>
+                      }
+                      else
+                      {
+                          <div class="route-detail-step__title">
+                            <span>
+                              <span class="route-line-badge me-1" style="@GetLineBadgeStyle(seg)">
+                                @(!string.IsNullOrWhiteSpace(seg.LineShortName) ? seg.LineShortName : seg.LineName)
+                              </span>
+                              @(!string.IsNullOrWhiteSpace(seg.Headsign) ? seg.Headsign : seg.LineName)
+                            </span>
+                            <span class="route-detail-step__dur tabular-nums">@RoundMinutes(seg.DurationSeconds) min</span>
+                          </div>
+                          <div class="route-detail-step__stops small">
+                            <div>@seg.DepartureTimeText @seg.DepartureStopName</div>
+                            @if (!string.IsNullOrWhiteSpace(seg.ArrivalStopName))
+                            {
+                              <div>→ @seg.ArrivalTimeText @seg.ArrivalStopName</div>
+                            }
+                            @if (seg.StopCount > 0)
+                            {
+                              <div class="route-detail-step__count">@string.Format(T("RouteStopsFormat", "{0} stops"), seg.StopCount)</div>
+                            }
+                          </div>
+                        }
+                      </li>
+                    }
+                  </ol>
+                }
+              }
+            </div>
+          }
+        </div>
+      }
 
 @code {
-    private readonly HashSet<int> expandedRouteIds = [];
+  private readonly HashSet<int> expandedRouteIds = [];
 
-    [CascadingParameter]
-    private LanguageService? Language { get; set; }
+  [CascadingParameter]
+  private LanguageService? Language { get; set; }
 
-    [Parameter, EditorRequired]
-    public IReadOnlyList<EnrichedRoute> RouteOptions { get; set; } = [];
+  [Parameter, EditorRequired]
+  public IReadOnlyList<EnrichedRoute> RouteOptions { get; set; } = [];
 
-    [Parameter, EditorRequired]
-    public int ActiveRouteId { get; set; } = -1;
+  [Parameter, EditorRequired]
+  public int ActiveRouteId { get; set; } = -1;
 
-    [Parameter]
-    public EventCallback<EnrichedRoute> OnSelectRoute { get; set; }
+  [Parameter]
+  public EventCallback<EnrichedRoute> OnSelectRoute { get; set; }
 
-    private void ToggleDetails(int routeId)
+  private void ToggleDetails(int routeId)
+  {
+    if (!expandedRouteIds.Remove(routeId))
     {
-        if (!expandedRouteIds.Remove(routeId))
-        {
-            expandedRouteIds.Add(routeId);
-        }
+      expandedRouteIds.Add(routeId);
     }
+  }
 
-    private string T(string key, string fallback)
+  private string T(string key, string fallback)
+  {
+    if (Language is null) return fallback;
+    var localized = Language[key];
+    return string.Equals(localized, key, StringComparison.Ordinal) ? fallback : localized;
+  }
+
+  private static string GetVehicleEmoji(string? vehicleType) => (vehicleType ?? "").ToUpperInvariant() switch
+  {
+    "SUBWAY" or "METRO_RAIL" => "🚇",
+    "LIGHT_RAIL" or "TRAM" => "🚈",
+    "HEAVY_RAIL" or "COMMUTER_TRAIN" or "RAIL" => "🚆",
+    "MONORAIL" => "🚝",
+    "FERRY" => "⛴️",
+    _ => "🚌"
+  };
+
+  private static bool IsValidHexColor(string? value)
+  {
+    if (value is not { Length: 7 } || value[0] != '#') return false;
+    for (var i = 1; i < 7; i++)
     {
-        if (Language is null) return fallback;
-        var localized = Language[key];
-        return string.Equals(localized, key, StringComparison.Ordinal) ? fallback : localized;
+      if (!char.IsAsciiHexDigit(value[i])) return false;
     }
+    return true;
+  }
 
-    private static string GetVehicleEmoji(string? vehicleType) => (vehicleType ?? "").ToUpperInvariant() switch
-    {
-        "SUBWAY" or "METRO_RAIL" => "🚇",
-        "LIGHT_RAIL" or "TRAM" => "🚈",
-        "HEAVY_RAIL" or "COMMUTER_TRAIN" or "RAIL" => "🚆",
-        "MONORAIL" => "🚝",
-        "FERRY" => "⛴️",
-        _ => "🚌"
-    };
+  private static int RoundMinutes(int seconds) => seconds > 0 ? Math.Max(1, (int)Math.Round(seconds / 60.0)) : 0;
 
-    private static bool IsValidHexColor(string? value)
-    {
-        if (value is not { Length: 7 } || value[0] != '#') return false;
-        for (var i = 1; i < 7; i++)
-        {
-            if (!char.IsAsciiHexDigit(value[i])) return false;
-        }
-        return true;
-    }
-
-    private static string GetLineBadgeStyle(RouteSegment seg)
-    {
-        var bg = IsValidHexColor(seg.LineColor) ? seg.LineColor : "#1a73e8";
-        var fg = IsValidHexColor(seg.LineTextColor) ? seg.LineTextColor : "#ffffff";
-        return $"background-color: {bg}; color: {fg};";
-    }
+  private static string GetLineBadgeStyle(RouteSegment seg)
+  {
+    var bg = IsValidHexColor(seg.LineColor) ? seg.LineColor : "#1a73e8";
+    var fg = IsValidHexColor(seg.LineTextColor) ? seg.LineTextColor : "#ffffff";
+    return $"background-color: {bg}; color: {fg};";
+  }
 }

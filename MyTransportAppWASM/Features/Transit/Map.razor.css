@@ -45,7 +45,7 @@
   border-radius: 20px;
   box-shadow: var(--shadow-lg);
   z-index: 10;
-  overflow: hidden;
+  overflow: visible;
   transition: width 0.25s ease, border-radius 0.25s ease, box-shadow 0.25s ease;
 }
 
@@ -127,7 +127,11 @@
 .overlay-body {
   padding: 16px;
   width: 100%;
-  max-height: calc(100vh - 100px);
+  overflow: visible;
+}
+
+#panel-tracker {
+  max-height: calc(100vh - 185px);
   overflow-y: auto;
 }
 
@@ -297,8 +301,13 @@
 }
 
 .directions-input-box {
+  position: relative;
   height: auto;
   min-height: 46px;
+}
+
+.directions-input-box:focus-within {
+  z-index: 20;
 }
 
 .directions-swap-btn {
@@ -342,7 +351,7 @@
 }
 
 ::deep .route-options {
-  max-height: 360px;
+  max-height: min(360px, calc(100vh - 380px));
   overflow-y: auto;
   padding-right: 2px;
 }
@@ -401,7 +410,7 @@
 }
 
 .planner-search-collapsed ::deep .route-options {
-  max-height: none;
+  max-height: calc(100vh - 300px);
 }
 
 ::deep .route-option {
@@ -625,8 +634,20 @@
   }
 
   .overlay-body {
-    max-height: 52vh;
+    overflow: visible;
     padding: 14px 16px 20px;
+  }
+
+  #panel-tracker {
+    max-height: calc(52vh - 64px);
+  }
+
+  ::deep .route-options {
+    max-height: 28vh;
+  }
+
+  .planner-search-collapsed ::deep .route-options {
+    max-height: min(36vh, calc(100vh - 300px));
   }
 }
 
@@ -707,6 +728,24 @@
 
 ::deep .transport-marker:hover {
   transform: scale(1.2);
+}
+
+::deep .transport-marker--selected {
+  transform: scale(1.25);
+}
+
+::deep .transport-marker--selected:hover {
+  transform: scale(1.35);
+}
+
+::deep .transport-marker--selected .transport-marker-icon {
+  filter:
+    drop-shadow(1.5px 0 0 #ffffff)
+    drop-shadow(-1.5px 0 0 #ffffff)
+    drop-shadow(0 1.5px 0 #ffffff)
+    drop-shadow(0 -1.5px 0 #ffffff)
+    drop-shadow(0 0 8px var(--status-live-fg, #22c55e))
+    drop-shadow(0 0 14px var(--status-live-fg, #22c55e));
 }
 
 ::deep .transport-marker-icon {

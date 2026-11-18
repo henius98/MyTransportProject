@@ -27,94 +27,110 @@ namespace MyTransportAppWASM.Features.Weather.Utils
     public static IReadOnlyList<WeatherTimeSlice> ShapeSlices(JsonDocument document, IReadOnlyList<WeatherTimeSlice> fallback, string label)
     {
       JsonElement root = document.RootElement;
-      var results = new List<WeatherTimeSlice>();
+      return ShapeParallelArrays(root, label)
+        ?? ShapeForecastArray(root, label)
+        ?? ExtractSingleSlice(root, fallback, label);
+    }
 
-      if (root.ValueKind == JsonValueKind.Object)
+    internal static IReadOnlyList<WeatherTimeSlice>? ShapeParallelArrays(JsonElement root, string label)
+    {
+      if (root.ValueKind != JsonValueKind.Object)
       {
-        JsonElement? parallelNode = null;
-        bool isDaily = root.TryGetProperty("daily", out var daily);
-        if (isDaily) parallelNode = daily;
-        else if (root.TryGetProperty("hourly", out var hourly)) parallelNode = hourly;
+        return null;
+      }
 
-        if (parallelNode.HasValue && parallelNode.Value.ValueKind == JsonValueKind.Object)
+      JsonElement? parallelNode = null;
+      bool isDaily = root.TryGetProperty("daily", out var daily);
+      if (isDaily) parallelNode = daily;
+      else if (root.TryGetProperty("hourly", out var hourly)) parallelNode = hourly;
+
+      if (!parallelNode.HasValue || parallelNode.Value.ValueKind != JsonValueKind.Object)
+      {
+        return null;
+      }
+
+      var node = parallelNode.Value;
+      if (!node.TryGetProperty("time", out var timeArray) || timeArray.ValueKind != JsonValueKind.Array)
+      {
+        return null;
+      }
+
+      TimeSpan? utcOffset = GetUtcOffset(root);
+      int count = timeArray.GetArrayLength();
+      JsonElement? tempArray = GetPropertyAnyName(node, ParallelTemperatureNames);
+      JsonElement? minTempArray = isDaily ? GetPropertyAnyName(node, MinimumTemperatureNames) : null;
+      JsonElement? probabilityArray = GetPropertyAnyName(node, ProbabilityNames);
+      JsonElement? precipArray = GetPropertyAnyName(node, PrecipitationNames);
+      JsonElement? windArray = GetPropertyAnyName(node, WindNames);
+      JsonElement? uvArray = isDaily && node.TryGetProperty("uv_index_max", out var uvValues) ? uvValues : null;
+      JsonElement? sunriseArray = isDaily && node.TryGetProperty("sunrise", out var sunriseValues) ? sunriseValues : null;
+      JsonElement? sunsetArray = isDaily && node.TryGetProperty("sunset", out var sunsetValues) ? sunsetValues : null;
+      JsonElement? weatherCodeArray = GetPropertyAnyName(node, WeatherCodeNames);
+      string windUnit = root.TryGetProperty(isDaily ? "daily_units" : "hourly_units", out var units) && units.ValueKind == JsonValueKind.Object
+        && units.TryGetProperty(isDaily ? "wind_speed_10m_max" : "wind_speed_10m", out var unit) && unit.ValueKind == JsonValueKind.String
+          ? unit.GetString()! : "km/h";
+      var fallbackTime = DateTimeOffset.UtcNow;
+
+      var results = new List<WeatherTimeSlice>(count);
+
+      for (int i = 0; i < count; i++)
+      {
+        DateTimeOffset time = fallbackTime;
+        if (TryGetDate(timeArray[i], utcOffset, out var parsedTime)) time = parsedTime;
+
+        double? temp = GetArrayNumber(tempArray, i);
+        double? precip = GetArrayNumber(precipArray, i);
+        double? wind = GetArrayNumber(windArray, i);
+        double? weatherCodeDouble = GetArrayNumber(weatherCodeArray, i);
+
+        string? summary = null;
+        string? icon = null;
+        if (weatherCodeDouble.HasValue)
         {
-          var node = parallelNode.Value;
-          if (node.TryGetProperty("time", out var timeArray) && timeArray.ValueKind == JsonValueKind.Array)
-          {
-            TimeSpan? utcOffset = GetUtcOffset(root);
-            int count = timeArray.GetArrayLength();
-            JsonElement? tempArray = GetPropertyAnyName(node, ParallelTemperatureNames);
-            JsonElement? minTempArray = isDaily ? GetPropertyAnyName(node, MinimumTemperatureNames) : null;
-            JsonElement? probabilityArray = GetPropertyAnyName(node, ProbabilityNames);
-            JsonElement? precipArray = GetPropertyAnyName(node, PrecipitationNames);
-            JsonElement? windArray = GetPropertyAnyName(node, WindNames);
-            JsonElement? uvArray = isDaily && node.TryGetProperty("uv_index_max", out var uvValues) ? uvValues : null;
-            JsonElement? sunriseArray = isDaily && node.TryGetProperty("sunrise", out var sunriseValues) ? sunriseValues : null;
-            JsonElement? sunsetArray = isDaily && node.TryGetProperty("sunset", out var sunsetValues) ? sunsetValues : null;
-            JsonElement? weatherCodeArray = GetPropertyAnyName(node, WeatherCodeNames);
-            string windUnit = root.TryGetProperty(isDaily ? "daily_units" : "hourly_units", out var units) && units.ValueKind == JsonValueKind.Object
-              && units.TryGetProperty(isDaily ? "wind_speed_10m_max" : "wind_speed_10m", out var unit) && unit.ValueKind == JsonValueKind.String
-                ? unit.GetString()! : "km/h";
-            var fallbackTime = DateTimeOffset.UtcNow;
+          (summary, icon) = MapWmoCode(weatherCodeDouble.Value, IsNight(time));
+        }
 
-            results.EnsureCapacity(count);
+        results.Add(new WeatherTimeSlice
+        {
+          Label = label,
+          Time = time,
+          TemperatureC = temp,
+          MaxTemperatureC = isDaily ? temp : null,
+          MinTemperatureC = GetArrayNumber(minTempArray, i),
+          ProbabilityOfRain = GetArrayNumber(probabilityArray, i) / 100d,
+          PrecipitationMm = precip,
+          Wind = wind.HasValue ? $"{wind:0.#} {windUnit}" : null,
+          UvIndex = GetArrayNumber(uvArray, i),
+          Sunrise = GetArrayDate(sunriseArray, i, utcOffset),
+          Sunset = GetArrayDate(sunsetArray, i, utcOffset),
+          Summary = summary,
+          Icon = icon
+        });
+      }
 
-            for (int i = 0; i < count; i++)
-            {
-              DateTimeOffset time = fallbackTime;
-              if (TryGetDate(timeArray[i], utcOffset, out var parsedTime)) time = parsedTime;
+      return results.Count > 0 ? results : null;
+    }
 
-              double? temp = GetArrayNumber(tempArray, i);
-              double? precip = GetArrayNumber(precipArray, i);
-              double? wind = GetArrayNumber(windArray, i);
-              double? weatherCodeDouble = GetArrayNumber(weatherCodeArray, i);
+    internal static IReadOnlyList<WeatherTimeSlice>? ShapeForecastArray(JsonElement root, string label)
+    {
+      if (root.ValueKind != JsonValueKind.Array)
+      {
+        return null;
+      }
 
-              string? summary = null;
-              string? icon = null;
-              if (weatherCodeDouble.HasValue)
-              {
-                (summary, icon) = MapWmoCode(weatherCodeDouble.Value, IsNight(time));
-              }
-
-              results.Add(new WeatherTimeSlice
-              {
-                Label = label,
-                Time = time,
-                TemperatureC = temp,
-                MaxTemperatureC = isDaily ? temp : null,
-                MinTemperatureC = GetArrayNumber(minTempArray, i),
-                ProbabilityOfRain = GetArrayNumber(probabilityArray, i) / 100d,
-                PrecipitationMm = precip,
-                Wind = wind.HasValue ? $"{wind:0.#} {windUnit}" : null,
-                UvIndex = GetArrayNumber(uvArray, i),
-                Sunrise = GetArrayDate(sunriseArray, i, utcOffset),
-                Sunset = GetArrayDate(sunsetArray, i, utcOffset),
-                Summary = summary,
-                Icon = icon
-              });
-            }
-            if (results.Count > 0) return results;
-          }
+      // MetMalaysia records commonly expand into morning, afternoon, and night
+      // slices. Size for that shape so large forecasts do not grow and copy the
+      // backing array after two-thirds of the output has already been produced.
+      var results = new List<WeatherTimeSlice>(Math.Min(root.GetArrayLength(), 512) * 3);
+      foreach (var item in root.EnumerateArray())
+      {
+        if (item.ValueKind == JsonValueKind.Object)
+        {
+          AppendSingleSlices(item, results, label);
         }
       }
 
-      if (root.ValueKind == JsonValueKind.Array)
-      {
-        // MetMalaysia records commonly expand into morning, afternoon, and night
-        // slices. Size for that shape so large forecasts do not grow and copy the
-        // backing array after two-thirds of the output has already been produced.
-        results.EnsureCapacity(Math.Min(root.GetArrayLength(), 512) * 3);
-        foreach (var item in root.EnumerateArray())
-        {
-          if (item.ValueKind == JsonValueKind.Object)
-          {
-            AppendSingleSlices(item, results, label);
-          }
-        }
-        if (results.Count > 0) return results;
-      }
-
-      return ExtractSingleSlice(root, fallback, label);
+      return results.Count > 0 ? results : null;
     }
 
     private static int GetArrayLength(JsonElement? element) =>
@@ -141,7 +157,7 @@ namespace MyTransportAppWASM.Features.Weather.Utils
       return null;
     }
 
-    private static IReadOnlyList<WeatherTimeSlice> ExtractSingleSlice(JsonElement root, IReadOnlyList<WeatherTimeSlice>? fallback, string label)
+    internal static IReadOnlyList<WeatherTimeSlice> ExtractSingleSlice(JsonElement root, IReadOnlyList<WeatherTimeSlice>? fallback, string label)
     {
       var slices = new List<WeatherTimeSlice>(3);
       return AppendSingleSlices(root, slices, label)
@@ -523,36 +539,36 @@ namespace MyTransportAppWASM.Features.Weather.Utils
 
     private static string GetIconForSummaryString(string? summary, DateTimeOffset time)
     {
-        if (string.IsNullOrWhiteSpace(summary)) return "bi-cloud text-secondary";
+      if (string.IsNullOrWhiteSpace(summary)) return "bi-cloud text-secondary";
 
-        bool isNight = IsNight(time);
+      bool isNight = IsNight(time);
 
-        if (ContainsIgnoreCase(summary, "ribut petir") || ContainsIgnoreCase(summary, "thunder") || ContainsIgnoreCase(summary, "lightning") || ContainsIgnoreCase(summary, "squall"))
-        {
-            if (ContainsIgnoreCase(summary, "hail") || ContainsIgnoreCase(summary, "batu")) return "bi-cloud-hail text-warning";
-            if (ContainsIgnoreCase(summary, "beberapa tempat") || ContainsIgnoreCase(summary, "satu dua tempat") || ContainsIgnoreCase(summary, "few places") || ContainsIgnoreCase(summary, "isolated")) return "bi-cloud-lightning-fill text-warning";
-            return "bi-cloud-lightning-rain-fill text-warning";
-        }
-        if (ContainsIgnoreCase(summary, "snow") || ContainsIgnoreCase(summary, "salji"))
-        {
-            if (ContainsIgnoreCase(summary, "heavy") || ContainsIgnoreCase(summary, "lebat")) return "bi-cloud-snow-fill text-primary";
-            return "bi-snow text-primary";
-        }
-        if (ContainsIgnoreCase(summary, "freezing") || ContainsIgnoreCase(summary, "beku")) return "bi-cloud-sleet-fill text-info";
-        if (ContainsIgnoreCase(summary, "fog") || ContainsIgnoreCase(summary, "kabus") || ContainsIgnoreCase(summary, "haze") || ContainsIgnoreCase(summary, "rime")) return "bi-cloud-fog2-fill text-secondary";
-        if (ContainsIgnoreCase(summary, "heavy rain") || ContainsIgnoreCase(summary, "violent") || ContainsIgnoreCase(summary, "hujan lebat")) return "bi-cloud-rain-heavy-fill text-primary";
-        if (ContainsIgnoreCase(summary, "moderate rain") || ContainsIgnoreCase(summary, "hujan sederhana")) return "bi-cloud-rain-fill text-primary";
-        if (ContainsIgnoreCase(summary, "slight rain") || ContainsIgnoreCase(summary, "hujan renyai") || ContainsIgnoreCase(summary, "beberapa tempat")) return "bi-cloud-drizzle-fill text-info";
-        if (ContainsIgnoreCase(summary, "drizzle") || ContainsIgnoreCase(summary, "gerimis"))
-        {
-            if (ContainsIgnoreCase(summary, "light") || ContainsIgnoreCase(summary, "ringan")) return "bi-cloud-drizzle text-info";
-            return "bi-cloud-drizzle-fill text-info";
-        }
-        if (ContainsIgnoreCase(summary, "hujan") || ContainsIgnoreCase(summary, "rain") || ContainsIgnoreCase(summary, "shower")) return "bi-cloud-rain-fill text-info";
-        if (ContainsIgnoreCase(summary, "overcast") || ContainsIgnoreCase(summary, "mendung")) return "bi-clouds-fill text-secondary";
-        if (ContainsIgnoreCase(summary, "partly cloudy") || ContainsIgnoreCase(summary, "separa mendung") || ContainsIgnoreCase(summary, "cloudy")) return isNight ? "bi-cloud-moon-fill text-secondary" : "bi-cloud-sun-fill text-primary";
-        if (ContainsIgnoreCase(summary, "clear") || ContainsIgnoreCase(summary, "tiada hujan") || ContainsIgnoreCase(summary, "fair") || ContainsIgnoreCase(summary, "sunny") || ContainsIgnoreCase(summary, "cerah")) return isNight ? "bi-moon-stars-fill text-primary" : "bi-sun-fill text-warning";
-        return isNight ? "bi-cloud-moon-fill text-secondary" : "bi-cloud-sun-fill text-primary";
+      if (ContainsIgnoreCase(summary, "ribut petir") || ContainsIgnoreCase(summary, "thunder") || ContainsIgnoreCase(summary, "lightning") || ContainsIgnoreCase(summary, "squall"))
+      {
+        if (ContainsIgnoreCase(summary, "hail") || ContainsIgnoreCase(summary, "batu")) return "bi-cloud-hail text-warning";
+        if (ContainsIgnoreCase(summary, "beberapa tempat") || ContainsIgnoreCase(summary, "satu dua tempat") || ContainsIgnoreCase(summary, "few places") || ContainsIgnoreCase(summary, "isolated")) return "bi-cloud-lightning-fill text-warning";
+        return "bi-cloud-lightning-rain-fill text-warning";
+      }
+      if (ContainsIgnoreCase(summary, "snow") || ContainsIgnoreCase(summary, "salji"))
+      {
+        if (ContainsIgnoreCase(summary, "heavy") || ContainsIgnoreCase(summary, "lebat")) return "bi-cloud-snow-fill text-primary";
+        return "bi-snow text-primary";
+      }
+      if (ContainsIgnoreCase(summary, "freezing") || ContainsIgnoreCase(summary, "beku")) return "bi-cloud-sleet-fill text-info";
+      if (ContainsIgnoreCase(summary, "fog") || ContainsIgnoreCase(summary, "kabus") || ContainsIgnoreCase(summary, "haze") || ContainsIgnoreCase(summary, "rime")) return "bi-cloud-fog2-fill text-secondary";
+      if (ContainsIgnoreCase(summary, "heavy rain") || ContainsIgnoreCase(summary, "violent") || ContainsIgnoreCase(summary, "hujan lebat")) return "bi-cloud-rain-heavy-fill text-primary";
+      if (ContainsIgnoreCase(summary, "moderate rain") || ContainsIgnoreCase(summary, "hujan sederhana")) return "bi-cloud-rain-fill text-primary";
+      if (ContainsIgnoreCase(summary, "slight rain") || ContainsIgnoreCase(summary, "hujan renyai") || ContainsIgnoreCase(summary, "beberapa tempat")) return "bi-cloud-drizzle-fill text-info";
+      if (ContainsIgnoreCase(summary, "drizzle") || ContainsIgnoreCase(summary, "gerimis"))
+      {
+        if (ContainsIgnoreCase(summary, "light") || ContainsIgnoreCase(summary, "ringan")) return "bi-cloud-drizzle text-info";
+        return "bi-cloud-drizzle-fill text-info";
+      }
+      if (ContainsIgnoreCase(summary, "hujan") || ContainsIgnoreCase(summary, "rain") || ContainsIgnoreCase(summary, "shower")) return "bi-cloud-rain-fill text-info";
+      if (ContainsIgnoreCase(summary, "overcast") || ContainsIgnoreCase(summary, "mendung")) return "bi-clouds-fill text-secondary";
+      if (ContainsIgnoreCase(summary, "partly cloudy") || ContainsIgnoreCase(summary, "separa mendung") || ContainsIgnoreCase(summary, "cloudy")) return isNight ? "bi-cloud-moon-fill text-secondary" : "bi-cloud-sun-fill text-primary";
+      if (ContainsIgnoreCase(summary, "clear") || ContainsIgnoreCase(summary, "tiada hujan") || ContainsIgnoreCase(summary, "fair") || ContainsIgnoreCase(summary, "sunny") || ContainsIgnoreCase(summary, "cerah")) return isNight ? "bi-moon-stars-fill text-primary" : "bi-sun-fill text-warning";
+      return isNight ? "bi-cloud-moon-fill text-secondary" : "bi-cloud-sun-fill text-primary";
     }
 
     private static bool ContainsIgnoreCase(string value, string candidate) =>

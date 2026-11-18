@@ -94,17 +94,22 @@ public partial class Map : IAsyncDisposable
     return UpdateStaticOverlayAsync(() => Session.SelectStaticRouteAsync(routeId, _cts.Token));
   }
 
-  private async Task UpdateStaticOverlayAsync(Func<Task<string?>> loadGeoJsonAsync)
+  private int _staticOverlaySeq;
+
+  private async Task UpdateStaticOverlayAsync(Func<Task<string?>> loadGeoJsonAsync, bool preserveSelectedVehicle = false)
   {
+    var seq = ++_staticOverlaySeq;
     try
     {
       if (mapModule != null && !_isDisposed)
       {
-        await mapModule.InvokeVoidAsync("clearStaticRoute");
+        await (preserveSelectedVehicle
+          ? mapModule.InvokeVoidAsync("clearStaticRoute", true)
+          : mapModule.InvokeVoidAsync("clearStaticRoute"));
       }
 
       var geoJson = await loadGeoJsonAsync();
-      if (!_isDisposed && mapModule != null)
+      if (!_isDisposed && mapModule != null && seq == _staticOverlaySeq)
       {
         if (geoJson != null)
         {
@@ -126,7 +131,9 @@ public partial class Map : IAsyncDisposable
   public async Task OnVehicleSelected(string providerName, string routeId, string routeShortName)
   {
     if (_isDisposed || !Session.HasStaticDataForProvider(providerName)) return;
-    await UpdateStaticOverlayAsync(() => Session.SelectVehicleRouteAsync(providerName, routeId, routeShortName, _cts.Token));
+    await UpdateStaticOverlayAsync(
+      () => Session.SelectVehicleRouteAsync(providerName, routeId, routeShortName, _cts.Token),
+      preserveSelectedVehicle: true);
     if (!_isDisposed) StateHasChanged();
   }
 
@@ -198,7 +205,16 @@ public partial class Map : IAsyncDisposable
       var locationTask = LocationService.GetCurrentLocationAsync();
       mapModule = await JS.InvokeAsync<IJSObjectReference>("import", "./js/googleMap.js");
 
-      if (_isDisposed) return;
+      if (_isDisposed)
+      {
+        try
+        {
+          await mapModule.DisposeAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or ObjectDisposedException or OperationCanceledException) { }
+        mapModule = null;
+        return;
+      }
 
       // Initialize autocomplete concurrently so it's not blocked by GPS loading
       _autocompleteTask = InitializeAutocompleteAsync();
@@ -333,7 +349,7 @@ public partial class Map : IAsyncDisposable
       origin = resolved;
       if (mapModule != null)
       {
-        await mapModule.InvokeVoidAsync("setAutocompleteValue", "origin-input", origin, new { lat, lng });
+        await mapModule.InvokeVoidAsync("setAutocompleteValue", "origin-input", origin, new LatLngCoordinates(lat, lng));
       }
     }
     catch (Exception ex)
@@ -426,7 +442,7 @@ public partial class Map : IAsyncDisposable
 
       if (_isDisposed || mapModule == null) return;
       await mapModule.InvokeVoidAsync("setAutocompleteValue", "origin-input", origin,
-        new { lat = position.Latitude, lng = position.Longitude });
+        new LatLngCoordinates(position.Latitude, position.Longitude));
       await RefreshBusPosition();
       StateHasChanged();
     }
@@ -507,30 +523,25 @@ public partial class Map : IAsyncDisposable
         return;
       }
 
-      object? routeOptions = string.Equals(departureMode, "now", StringComparison.Ordinal)
+      TransitRouteRequestOptions? routeOptions = string.Equals(departureMode, "now", StringComparison.Ordinal)
         ? null
-        : new
-        {
+        : new TransitRouteRequestOptions(
           departureMode,
-          dateTimeIso = MalaysiaTime.At(departureDateTime).ToString("O")
-        };
+          MalaysiaTime.At(departureDateTime).ToString("O"));
 
       var googleRoutes = await mapModule.InvokeAsync<List<GoogleRoute>>("getTransitRoutes", origin, destination, routeOptions);
       var options = await Session.EnrichTransitRoutesAsync(googleRoutes, _cts.Token);
       if (_isDisposed) return;
 
-      var topRoutes = options.Take(4).ToList();
-      if (topRoutes.Count > 0)
+      if (options.Count > 0)
       {
-        var routeData = topRoutes.Select(r => new
-        {
-          id = r.OriginalRoute.RouteId,
-          path = r.OriginalRoute.EncodedPolyline,
-          hasLiveBus = r.HasLiveBus,
-          durationSeconds = r.OriginalRoute.DurationSeconds,
-          localizedDuration = r.OriginalRoute.LocalizedDuration,
-          headwayMinutes = r.OriginalRoute.HeadwayMinutes
-        }).ToList();
+        var routeData = options.Select(r => new RenderedRouteSummary(
+          Id: r.OriginalRoute.RouteId,
+          Path: r.OriginalRoute.EncodedPolyline,
+          HasLiveBus: r.HasLiveBus,
+          DurationSeconds: r.OriginalRoute.DurationSeconds,
+          LocalizedDuration: r.OriginalRoute.LocalizedDuration,
+          HeadwayMinutes: r.OriginalRoute.HeadwayMinutes)).ToList();
 
         await mapModule.InvokeVoidAsync("drawMultipleRoutes", routeData, Session.ActiveRouteId, objRef);
       }
@@ -613,12 +624,14 @@ public partial class Map : IAsyncDisposable
 
     if (mapModule != null)
     {
+      var module = mapModule;
+      mapModule = null;
+      await module.TryInvokeVoidSafeAsync("cleanupMap");
       try
       {
-        await mapModule.InvokeVoidAsync("cleanupMap");
-        await mapModule.DisposeAsync();
+        await module.DisposeAsync();
       }
-      catch (JSDisconnectedException) { }
+      catch (Exception ex) when (ex is JSException or JSDisconnectedException or ObjectDisposedException or OperationCanceledException) { }
     }
   }
 }

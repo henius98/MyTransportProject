@@ -3,13 +3,14 @@
                   Result="Result"
                   IsRefreshing="IsRefreshing"
                   OnRefresh="OnRefresh">
-  @if (Provider?.Periods != null)
+  @if (Result?.Periods != null)
   {
-    var groupedPeriods = Provider.Periods.GroupBy(p => MalaysiaTime.Convert(p.Time).Date);
+    var groupedPeriods = Result.Periods.GroupBy(p => MalaysiaTime.Convert(p.Time).Date);
     <div class="d-flex flex-column gap-3">
       @foreach (var group in groupedPeriods)
       {
-        <div class="card flex-row shadow-sm border-secondary border-opacity-25"
+        var groupSlices = group.ToList();
+        <div @key="group.Key" class="card flex-row shadow-sm border-secondary border-opacity-25"
              style="overflow: hidden; background: var(--bs-body-bg);">
           <time datetime="@group.Key.ToString("yyyy-MM-dd")"
                 class="bg-secondary bg-opacity-10 py-3 px-2 px-sm-3 fw-semibold border-end border-secondary border-opacity-10 d-flex flex-column align-items-center flex-shrink-0 text-uppercase">
@@ -19,9 +20,10 @@
             <span class="small text-dim">@group.Key.ToString("yyyy")</span>
           </time>
           <div class="card-body forecast-periods p-0">
-            @foreach (var slice in group)
+            @for (var i = 0; i < groupSlices.Count; i++)
             {
-              bool isLast = ReferenceEquals(slice, group.Last());
+              var slice = groupSlices[i];
+              bool isLast = i == groupSlices.Count - 1;
               string labelColorClass = slice.Label switch
               {
                 "Pagi" => "bg-success text-white",
@@ -29,7 +31,7 @@
                 "Malam" => "bg-primary text-white",
                 _ => "bg-secondary bg-opacity-25 text-body"
               };
-              <div
+              <div @key="(slice.Time, slice.Label)"
                 class="d-flex align-items-center p-2 p-sm-3 @(isLast ? "" : "border-bottom border-secondary border-opacity-10")">
                 <div class="me-2 me-sm-4 fs-1" style="min-width: 3rem; text-align: center;">
                   <i class="@slice.Icon"></i>
@@ -79,7 +81,4 @@
 
   [Parameter]
   public bool IsRefreshing { get; set; }
-
-  // If fetching realtime weather, just grab the closest time (handled by WeatherPlannerService shaping)
-  private WeatherProviderResult? Provider => Result;
 }

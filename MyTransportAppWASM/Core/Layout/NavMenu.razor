@@ -3,6 +3,7 @@
 @inject FirebaseClientService Firebase
 @inject AppStateService AppState
 @inject AuthenticationStateProvider AuthStateProvider
+@inject IAuthSessionService AuthSession
 @inject IUserSettingsService UserSettings
 
 @implements IDisposable
@@ -15,9 +16,9 @@
                 aria-label="@Language["UserProfile"]" title="@Language["UserProfile"]">
           <AuthorizeView>
             <Authorized>
-              @if (!string.IsNullOrEmpty(context.User?.FindFirst("picture")?.Value))
+              @if (context.User.GetPictureUrl() is { Length: > 0 } avatarUrl)
               {
-                <img src="@context.User?.FindFirst("picture")?.Value" class="avatar avatar--sm" alt="@Language["UserProfile"]" />
+                <img src="@avatarUrl" class="avatar avatar--sm" alt="@Language["UserProfile"]" />
               }
               else
               {
@@ -37,9 +38,9 @@
             <AuthorizeView>
               <Authorized>
                 <div class="d-flex align-items-center mb-3">
-                  @if (!string.IsNullOrEmpty(context.User?.FindFirst("picture")?.Value))
+                  @if (context.User.GetPictureUrl() is { Length: > 0 } menuAvatarUrl)
                   {
-                    <img src="@context.User?.FindFirst("picture")?.Value" class="avatar avatar--lg me-3" alt="@Language["UserProfile"]" />
+                    <img src="@menuAvatarUrl" class="avatar avatar--lg me-3" alt="@Language["UserProfile"]" />
                   }
                   <div class="text-truncate">
                     <div class="profile__name fw-bold">@(context.User?.Identity?.Name ?? "User")</div>
@@ -167,7 +168,7 @@
             </Authorized>
           </AuthorizeView>
           <div class="nav-item nav-item--keep px-3">
-            <a class="nav-link" href="@GoogleWorkspaceLinks.Keep" target="_blank" rel="noopener noreferrer"
+            <a class="nav-link" href="https://keep.google.com/" target="_blank" rel="noopener noreferrer"
                title="@Language["AddKeepNote"]">
               <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span>
               <span class="nav-text ms-2">@Language["AddKeepNote"] ↗</span>
@@ -194,6 +195,12 @@
     UserSettings.SyncStatusChanged += HandleSyncStatusChanged;
   }
 
+  private async Task<string?> GetCurrentUserIdAsync()
+  {
+    var state = await AuthStateProvider.GetAuthenticationStateAsync();
+    return state.User.GetUserId();
+  }
+
   private async Task ToggleUserMenu()
   {
     showUserMenu = !showUserMenu;
@@ -201,9 +208,7 @@
     pushError = null;
     try
     {
-      var state = await AuthStateProvider.GetAuthenticationStateAsync();
-      var uid = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-      pushStatus = await Firebase.GetPushStatusAsync(uid);
+      pushStatus = await Firebase.GetPushStatusAsync(await GetCurrentUserIdAsync());
     }
     catch (JSException)
     {
@@ -222,8 +227,7 @@
         pushError = pushStatus == "denied" ? Language["NotificationsDenied"] : Language["NotificationsUnsupported"];
         return;
       }
-      var state = await AuthStateProvider.GetAuthenticationStateAsync();
-      var uid = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+      var uid = await GetCurrentUserIdAsync();
       if (uid is null) return;
       if (pushStatus == "enabled")
         await Firebase.DisablePushAsync(uid);
@@ -241,9 +245,7 @@
       {
         try
         {
-          var state = await AuthStateProvider.GetAuthenticationStateAsync();
-          var uid = state.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-          pushStatus = await Firebase.GetPushStatusAsync(uid);
+          pushStatus = await Firebase.GetPushStatusAsync(await GetCurrentUserIdAsync());
         }
         catch (JSException)
         {
@@ -264,11 +266,7 @@
     }
   }
 
-  private void BeginLogin()
-  {
-    AppState.ReturnUrl = Navigation.Uri;
-    AppState.RequestShowLogin();
-  }
+  private void BeginLogin() => AppState.RequestShowLogin(Navigation.Uri);
 
   private async Task BeginLogOut()
   {
@@ -276,7 +274,7 @@
     logoutError = null;
     try
     {
-      await ((FirebaseAuthenticationStateProvider)AuthStateProvider).SignOutAsync();
+      await AuthSession.SignOutAsync();
       showUserMenu = false;
     }
     catch (JSException)

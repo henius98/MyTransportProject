@@ -9,7 +9,7 @@ public sealed class JsModuleLoader : IAsyncDisposable
   private readonly string _modulePath;
   private readonly Func<Task>? _prepareAsync;
   private readonly bool _passCancellationToken;
-  private readonly object _sync = new();
+  private readonly Lock _sync = new();
   private Task<IJSObjectReference>? _moduleTask;
   private bool _disposed;
 
@@ -117,14 +117,34 @@ public sealed class JsModuleLoader : IAsyncDisposable
 
   private async Task<IJSObjectReference> ImportCoreAsync()
   {
-    if (_prepareAsync is not null)
+    var importTask = (_passCancellationToken
+      ? _jsRuntime.InvokeAsync<IJSObjectReference>("import", CancellationToken.None, [_modulePath])
+      : _jsRuntime.InvokeAsync<IJSObjectReference>("import", _modulePath)).AsTask();
+
+    if (_prepareAsync is null)
     {
-      await _prepareAsync();
+      return await importTask;
     }
 
-    return _passCancellationToken
-      ? await _jsRuntime.InvokeAsync<IJSObjectReference>("import", CancellationToken.None, [_modulePath])
-      : await _jsRuntime.InvokeAsync<IJSObjectReference>("import", _modulePath);
+    try
+    {
+      await Task.WhenAll(_prepareAsync(), importTask);
+      return await importTask;
+    }
+    catch
+    {
+      if (importTask.IsCompletedSuccessfully)
+      {
+        try
+        {
+          await importTask.Result.DisposeAsync();
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or ObjectDisposedException or OperationCanceledException)
+        {
+        }
+      }
+      throw;
+    }
   }
 
   public async ValueTask DisposeAsync()

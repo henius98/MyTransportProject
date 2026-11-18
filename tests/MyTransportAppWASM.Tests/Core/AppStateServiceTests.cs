@@ -3,27 +3,43 @@ namespace MyTransportAppWASM.Tests;
 
 public class AppStateServiceTests
 {
-    [Fact]
-    public void RequestShowLogin_PersistsRequest_WhenNoSubscriberExistsYet()
+  [Fact]
+  public void RequestShowLogin_PersistsRequest_WhenNoSubscriberExistsYet()
+  {
+    var state = new AppStateService();
+
+    state.RequestShowLogin();
+
+    Assert.True(state.IsLoginRequested);
+  }
+
+  [Fact]
+  public void TakeReturnUrl_ReturnsAndClearsPendingUrl()
+  {
+    var state = new AppStateService
     {
-        var state = new AppStateService();
+      ReturnUrl = "https://example.test/weather"
+    };
 
-        state.RequestShowLogin();
+    var result = state.TakeReturnUrl();
 
-        Assert.True(state.IsLoginRequested);
-    }
+    Assert.Equal("https://example.test/weather", result);
+    Assert.Null(state.ReturnUrl);
+  }
 
-    [Fact]
-    public void TakeReturnUrl_ReturnsAndClearsPendingUrl()
-    {
-        var state = new AppStateService
-        {
-            ReturnUrl = "https://example.test/weather"
-        };
+  [Fact]
+  public void RequestShowLoginWithReturnUrl_AndDismiss_UpdatesAndClearsBothFields()
+  {
+    var state = new AppStateService();
 
-        var result = state.TakeReturnUrl();
+    state.RequestShowLogin("https://example.test/google/calendar");
 
-        Assert.Equal("https://example.test/weather", result);
-        Assert.Null(state.ReturnUrl);
-    }
+    Assert.True(state.IsLoginRequested);
+    Assert.Equal("https://example.test/google/calendar", state.ReturnUrl);
+
+    state.DismissLoginRequest();
+
+    Assert.False(state.IsLoginRequested);
+    Assert.Null(state.ReturnUrl);
+  }
 }

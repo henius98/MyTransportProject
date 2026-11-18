@@ -9,6 +9,8 @@
       content="Real-time public transit tracking and weather-aware trip planning for Malaysia. Track buses, plan routes, and check weather forecasts."
     />
     <base href="/" />
+    <link rel="preload" id="webassembly" />
+    <link rel="preconnect" href="https://www.gstatic.com" crossorigin />
 
     <!-- The splash is fully inlined below, so app styles can download without blocking FCP. -->
     <link rel="preload" as="style" href="css/app.css" onload="this.onload=null;this.rel='stylesheet'" />
@@ -136,9 +138,10 @@
       <button class="dismiss" aria-label="Dismiss error">🗙</button>
     </div>
     <!-- Firebase manages popup completion and auth state natively, without a delayed opener reload. -->
-    <!-- Empty importmap removed — no module specifier overrides needed -->
+    <!-- Populated by MSBuild OverrideHtmlAssetPlaceholders with fingerprinted .NET module mappings -->
+    <script type="importmap"></script>
     <script src="js/theme-manager.js"></script>
-    <script src="_framework/blazor.webassembly.js"></script>
+    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', function () {

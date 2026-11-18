@@ -14,7 +14,7 @@ namespace MyTransportAppWASM.Core.Services
     public string FullName { get; set; } = string.Empty;
   }
 
-  public sealed class LanguageService
+  public sealed class LanguageService(HttpClient http)
   {
     public static readonly IReadOnlyList<LanguageOption> SupportedLanguages = new[]
     {
@@ -23,17 +23,11 @@ namespace MyTransportAppWASM.Core.Services
             new LanguageOption { Code = "ms-MY", NativeLabel = "Bahasa", ShortName = "Bahasa", FullName = "Bahasa Melayu" },
         };
 
-    private readonly HttpClient _http;
     private Dictionary<string, string> _translations = new();
     private int _loadVersion;
     public event Action? OnLanguageChanged;
 
     public string CurrentLanguageName { get; private set; } = "en-US";
-
-    public LanguageService(HttpClient http)
-    {
-      _http = http;
-    }
 
     public async Task LoadLanguageAsync(string langCode)
     {
@@ -45,7 +39,7 @@ namespace MyTransportAppWASM.Core.Services
 
       try
       {
-        var response = await _http.GetFromJsonAsync($"i18n/{langCode}.json", AppJsonSerializerContext.Default.DictionaryStringString);
+        var response = await http.GetFromJsonAsync($"i18n/{langCode}.json", AppJsonSerializerContext.Default.DictionaryStringString);
         if (response != null && version == _loadVersion)
         {
           _translations = new Dictionary<string, string>(response, StringComparer.OrdinalIgnoreCase);

@@ -1,10 +1,11 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.JSInterop;
 
-namespace MyTransportAppWASM.Features.Google.Services
+namespace MyTransportAppWASM.Core.Services
 {
   /// <summary>
   /// Unified place resolution service: resolves coordinate inputs,
@@ -37,28 +38,10 @@ namespace MyTransportAppWASM.Features.Google.Services
         return null;
 
       // Geocode address via Google Maps JavaScript Geocoder to avoid browser CORS restrictions
-      if (_mapModule != null)
+      var place = await InvokeMapModuleAsync<GeocodeResult>("geocodePlaceName", "Geocoding", cancellationToken, address, _apiKey);
+      if (place != null && GeoMath.IsValidCoordinates(place.Lat, place.Lng))
       {
-        try
-        {
-          var module = await _mapModule.TryGetAsync(cancellationToken);
-          if (module != null)
-          {
-            var place = await module.InvokeAsync<GeocodeResult?>("geocodePlaceName", cancellationToken, address, _apiKey);
-            if (place != null && GeoMath.IsValidCoordinates(place.Lat, place.Lng))
-            {
-              return (place.Lat, place.Lng, place.FormattedAddress ?? string.Empty);
-            }
-          }
-        }
-        catch (OperationCanceledException)
-        {
-          throw;
-        }
-        catch (Exception ex)
-        {
-          _logger.LogDebug("Geocoding via JS failed: {Message}", ex.Message);
-        }
+        return (place.Lat, place.Lng, place.FormattedAddress ?? string.Empty);
       }
 
       return null;
@@ -70,12 +53,7 @@ namespace MyTransportAppWASM.Features.Google.Services
         return new();
 
       address = address.Trim();
-      var coordinates = address.Contains(',')
-        ? address.Split(',', StringSplitOptions.TrimEntries)
-        : address.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-      if (coordinates.Length == 2
-        && double.TryParse(coordinates[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var latitude)
-        && double.TryParse(coordinates[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var longitude))
+      if (TryParseCoordinatePair(address, out var latitude, out var longitude))
       {
         if (!GeoMath.IsValidCoordinates(latitude, longitude))
           return new();
@@ -129,27 +107,51 @@ namespace MyTransportAppWASM.Features.Google.Services
         return null;
       }
 
-      if (_mapModule != null)
+      return await InvokeMapModuleAsync<string>("reverseGeocode", "Reverse Geocoding", cancellationToken, lat, lng, _apiKey);
+    }
+
+    private async Task<T?> InvokeMapModuleAsync<
+      [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors |
+        DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.PublicProperties)] T>(
+      string identifier,
+      string failureAction,
+      CancellationToken cancellationToken,
+      params object?[] args)
+    {
+      if (_mapModule is null) return default;
+
+      try
       {
-        try
+        var module = await _mapModule.TryGetAsync(cancellationToken);
+        if (module is not null)
         {
-          var module = await _mapModule.TryGetAsync(cancellationToken);
-          if (module != null)
-          {
-            return await module.InvokeAsync<string?>("reverseGeocode", cancellationToken, lat, lng, _apiKey);
-          }
-        }
-        catch (OperationCanceledException)
-        {
-          throw;
-        }
-        catch (Exception ex)
-        {
-          _logger.LogDebug("Reverse Geocoding via JS failed: {Message}", ex.Message);
+          return await module.InvokeAsync<T?>(identifier, cancellationToken, args);
         }
       }
+      catch (OperationCanceledException)
+      {
+        throw;
+      }
+      catch (Exception ex)
+      {
+        _logger.LogDebug("{Action} via JS failed: {Message}", failureAction, ex.Message);
+      }
 
-      return null;
+      return default;
+    }
+
+    private static bool TryParseCoordinatePair(ReadOnlySpan<char> input, out double latitude, out double longitude)
+    {
+      latitude = 0;
+      longitude = 0;
+      Span<Range> ranges = stackalloc Range[3];
+      int count = input.Contains(',')
+        ? input.Split(ranges, ',', StringSplitOptions.TrimEntries)
+        : input.SplitAny(ranges, " \t\r\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+      return count == 2
+        && double.TryParse(input[ranges[0]], NumberStyles.Float, CultureInfo.InvariantCulture, out latitude)
+        && double.TryParse(input[ranges[1]], NumberStyles.Float, CultureInfo.InvariantCulture, out longitude);
     }
 
     public ValueTask DisposeAsync() => _mapModule?.DisposeAsync() ?? ValueTask.CompletedTask;

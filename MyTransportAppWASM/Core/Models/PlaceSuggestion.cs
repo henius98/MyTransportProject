@@ -1,4 +1,4 @@
-namespace MyTransportAppWASM.Features.Google.Models;
+namespace MyTransportAppWASM.Core.Models;
 
 public sealed record PlaceSuggestion(
   double Lat,

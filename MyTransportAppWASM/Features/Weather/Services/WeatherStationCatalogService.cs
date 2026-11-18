@@ -6,15 +6,9 @@ namespace MyTransportAppWASM.Features.Weather.Services
   /// Manages loading, caching, and spatial querying of the MetMalaysia recreation centres catalog.
   /// Decouples static station assets from dynamic geocoding services.
   /// </summary>
-  public sealed class WeatherStationCatalogService : IWeatherStationCatalogService
+  public sealed class WeatherStationCatalogService(HttpClient httpClient) : IWeatherStationCatalogService
   {
-    private readonly HttpClient _httpClient;
     private Task<List<MetLocation>?>? _stationsTask;
-
-    public WeatherStationCatalogService(HttpClient httpClient)
-    {
-      _httpClient = httpClient;
-    }
 
     public async Task<IReadOnlyList<MetLocation>> GetAllStationsAsync(CancellationToken cancellationToken = default)
     {
@@ -61,7 +55,7 @@ namespace MyTransportAppWASM.Features.Weather.Services
     {
       cancellationToken.ThrowIfCancellationRequested();
 
-      var loadTask = _stationsTask ??= _httpClient.GetFromJsonAsync(
+      var loadTask = _stationsTask ??= httpClient.GetFromJsonAsync(
         "data/recreation_centres.json",
         AppJsonSerializerContext.Default.ListMetLocation,
         CancellationToken.None);

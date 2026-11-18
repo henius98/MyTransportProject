@@ -10,7 +10,7 @@ public sealed class TransitMapSession : IDisposable
   private readonly ITransportStaticDataService _staticData;
   private readonly ILocationService _locationService;
   private readonly ILogger<TransitMapSession> _logger;
-  private readonly SemaphoreSlim _refreshGate = new(1, 1);
+  private int _refreshInProgress;
   private int _staticProviderSeq;
   private int _staticRouteSeq;
   private int _staticStopSeq;
@@ -43,7 +43,7 @@ public sealed class TransitMapSession : IDisposable
 
   public string LocationStatus { get; private set; } = "Initializing...";
   public bool MapAuthFailed { get; private set; }
-  public bool IsErrorStatus => IsStatusErrorMessage(LocationStatus);
+  public bool IsErrorStatus { get; private set; }
 
   public int SelectedStaticProviderIndex { get; private set; } = -1;
   public string SelectedStaticRouteId { get; private set; } = string.Empty;
@@ -52,13 +52,19 @@ public sealed class TransitMapSession : IDisposable
   public string SelectedStaticStopId { get; private set; } = string.Empty;
   public string StaticStopName { get; private set; } = string.Empty;
   public string StaticStatus { get; private set; } = string.Empty;
-  public bool IsStaticErrorStatus => IsStatusErrorMessage(StaticStatus);
+  public bool IsStaticErrorStatus { get; private set; }
 
-  private static bool IsStatusErrorMessage(string? status) =>
-    !string.IsNullOrEmpty(status) &&
-    (status.Contains("fail", StringComparison.OrdinalIgnoreCase) ||
-     status.Contains("error", StringComparison.OrdinalIgnoreCase) ||
-     status.Contains("unavailable", StringComparison.OrdinalIgnoreCase));
+  private void SetLocationStatus(string status, bool isError = false)
+  {
+    LocationStatus = status;
+    IsErrorStatus = isError;
+  }
+
+  private void SetStaticStatus(string status, bool isError = false)
+  {
+    StaticStatus = status;
+    IsStaticErrorStatus = isError;
+  }
 
   public List<EnrichedRoute> RouteOptions { get; private set; } = [];
   public int ActiveRouteId { get; private set; } = -1;
@@ -78,18 +84,18 @@ public sealed class TransitMapSession : IDisposable
 
   public void ResetAuthFailure() => MapAuthFailed = false;
 
-  public void ReportGpsLoading() => LocationStatus = "Loading GPS...";
+  public void ReportGpsLoading() => SetLocationStatus("Loading GPS...");
 
-  public void ReportLiveLocation() => LocationStatus = "Live";
+  public void ReportLiveLocation() => SetLocationStatus("Live");
 
-  public void ReportMapError() => LocationStatus = "Map error";
+  public void ReportMapError() => SetLocationStatus("Map error", isError: true);
 
-  public void ReportRouteFailure() => LocationStatus = "Route calculation failed.";
+  public void ReportRouteFailure() => SetLocationStatus("Route calculation failed.", isError: true);
 
   public void SetAuthError(string message)
   {
     MapAuthFailed = true;
-    LocationStatus = message;
+    SetLocationStatus(message, isError: true);
   }
 
   public void ApplyFallbackLocation(double initialLat, double initialLng)
@@ -97,11 +103,11 @@ public sealed class TransitMapSession : IDisposable
     if (_locationService.LastKnownLocation is null)
     {
       _locationService.UpdateLocation(initialLat, initialLng);
-      LocationStatus = "Using default location";
+      SetLocationStatus("Using default location");
     }
     else
     {
-      LocationStatus = "Using cached location";
+      SetLocationStatus("Using cached location");
     }
   }
 
@@ -114,24 +120,18 @@ public sealed class TransitMapSession : IDisposable
   public async Task<TransitTrackingResult?> RefreshVehiclesAsync(bool force, CancellationToken cancellationToken = default)
   {
     var pos = _locationService.LastKnownLocation;
-    if (_disposed || pos == null || MapAuthFailed) return null;
+    if (_disposed || pos == null || MapAuthFailed || cancellationToken.IsCancellationRequested) return null;
 
-    try
-    {
-      if (!await _refreshGate.WaitAsync(0, cancellationToken)) return null;
-    }
-    catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException)
-    {
-      return null;
-    }
+    if (Interlocked.CompareExchange(ref _refreshInProgress, 1, 0) != 0) return null;
 
     try
     {
       var result = await _transitTracking.RefreshVehiclesAsync(pos.Latitude, pos.Longitude, force, cancellationToken);
-      if (result is null) return null;
+      if (_disposed || result is null) return null;
       if (!MapAuthFailed)
       {
-        LocationStatus = result.StatusMessage;
+        var hasFeedFailure = result.Vehicles.Count == 0 && (result.FailedProviderCount > 0 || result.ExpiredProviderCount > 0);
+        SetLocationStatus(result.StatusMessage, hasFeedFailure);
       }
       return result with { Vehicles = FilterDisplayedVehicles(result.Vehicles) };
     }
@@ -150,11 +150,7 @@ public sealed class TransitMapSession : IDisposable
     }
     finally
     {
-      try
-      {
-        if (!_disposed) _refreshGate.Release();
-      }
-      catch (ObjectDisposedException) { }
+      Interlocked.Exchange(ref _refreshInProgress, 0);
     }
   }
 
@@ -175,20 +171,20 @@ public sealed class TransitMapSession : IDisposable
     var source = SelectedStaticData;
     if (source == null)
     {
-      StaticStatus = string.Empty;
+      SetStaticStatus(string.Empty);
       return null;
     }
 
-    StaticStatus = "Loading routes...";
+    SetStaticStatus("Loading routes...");
     try
     {
       var routes = await _staticData.GetRoutesAsync(source, cancellationToken);
       if (_disposed || providerSeq != Volatile.Read(ref _staticProviderSeq)) return null;
 
       StaticRoutes = routes;
-      StaticStatus = StaticRoutes.Count == 0
+      SetStaticStatus(StaticRoutes.Count == 0
         ? "No routes available."
-        : "Select a route to view its map.";
+        : "Select a route to view its map.");
       return null;
     }
     catch (OperationCanceledException)
@@ -198,7 +194,7 @@ public sealed class TransitMapSession : IDisposable
     catch (Exception ex)
     {
       if (_disposed || providerSeq != Volatile.Read(ref _staticProviderSeq)) return null;
-      StaticStatus = "Static routes unavailable.";
+      SetStaticStatus("Static routes unavailable.", isError: true);
       _logger.LogWarning("Static route list failed: {Message}", ex.Message);
       return null;
     }
@@ -220,7 +216,7 @@ public sealed class TransitMapSession : IDisposable
     if (source == null)
     {
       IsStaticRouteVehicleFilterActive = false;
-      StaticStatus = string.Empty;
+      SetStaticStatus(string.Empty);
       return null;
     }
 
@@ -277,11 +273,11 @@ public sealed class TransitMapSession : IDisposable
     if (source == null)
     {
       IsStaticRouteVehicleFilterActive = false;
-      StaticStatus = string.Empty;
+      SetStaticStatus(string.Empty);
       return null;
     }
 
-    StaticStatus = "Loading route map...";
+    SetStaticStatus("Loading route map...");
     try
     {
       if (StaticRoutes.Count == 0)
@@ -296,7 +292,7 @@ public sealed class TransitMapSession : IDisposable
       {
         SelectedStaticRouteId = string.Empty;
         IsStaticRouteVehicleFilterActive = false;
-        StaticStatus = "Static route map unavailable.";
+        SetStaticStatus("Static route map unavailable.", isError: true);
         return null;
       }
 
@@ -312,7 +308,7 @@ public sealed class TransitMapSession : IDisposable
     catch (Exception ex)
     {
       if (IsStaleStaticRouteSelection(providerSeq, routeSeq)) return null;
-      StaticStatus = "Static route map unavailable.";
+      SetStaticStatus("Static route map unavailable.", isError: true);
       _logger.LogWarning("Static route map failed: {Message}", ex.Message);
       return null;
     }
@@ -338,7 +334,7 @@ public sealed class TransitMapSession : IDisposable
 
     if (SelectedStaticData == null)
     {
-      StaticStatus = string.Empty;
+      SetStaticStatus(string.Empty);
       return true;
     }
 
@@ -346,11 +342,11 @@ public sealed class TransitMapSession : IDisposable
     {
       Interlocked.Increment(ref _staticProviderSeq);
       SelectedStaticProviderIndex = -1;
-      StaticStatus = string.Empty;
+      SetStaticStatus(string.Empty);
       return true;
     }
 
-    StaticStatus = "Select a route to view its map.";
+    SetStaticStatus("Select a route to view its map.");
     return true;
   }
 
@@ -361,17 +357,17 @@ public sealed class TransitMapSession : IDisposable
     int routeSeq,
     CancellationToken cancellationToken)
   {
-    StaticStatus = "Loading route map...";
+    SetStaticStatus("Loading route map...");
     try
     {
       var geoJson = await _staticData.GetMapAsync(source, routeId, cancellationToken);
       if (IsStaleStaticRouteSelection(providerSeq, routeSeq)) return null;
       if (string.IsNullOrWhiteSpace(geoJson))
       {
-        StaticStatus = "Static route map unavailable.";
+        SetStaticStatus("Static route map unavailable.", isError: true);
         return null;
       }
-      StaticStatus = "Select a stop on the map for departures.";
+      SetStaticStatus("Select a stop on the map for departures.");
       return geoJson;
     }
     catch (OperationCanceledException)
@@ -381,7 +377,7 @@ public sealed class TransitMapSession : IDisposable
     catch (Exception ex)
     {
       if (IsStaleStaticRouteSelection(providerSeq, routeSeq)) return null;
-      StaticStatus = "Static route map unavailable.";
+      SetStaticStatus("Static route map unavailable.", isError: true);
       _logger.LogWarning("Static route map failed: {Message}", ex.Message);
       return null;
     }
@@ -448,7 +444,7 @@ public sealed class TransitMapSession : IDisposable
     SelectedStaticStopId = stopId;
     StaticStopName = string.IsNullOrWhiteSpace(stopName) ? stopId : stopName;
     StaticDepartures = [];
-    StaticStatus = "Loading estimated departures...";
+    SetStaticStatus("Loading estimated departures...");
 
     try
     {
@@ -457,9 +453,9 @@ public sealed class TransitMapSession : IDisposable
         return false;
 
       StaticDepartures = departures;
-      StaticStatus = departures.Count == 0
+      SetStaticStatus(departures.Count == 0
         ? "No upcoming departures for this route."
-        : "Scheduled estimates, not live arrivals.";
+        : "Scheduled estimates, not live arrivals.");
       return true;
     }
     catch (OperationCanceledException)
@@ -475,7 +471,7 @@ public sealed class TransitMapSession : IDisposable
       if (_disposed || providerSeq != Volatile.Read(ref _staticProviderSeq) || routeSeq != Volatile.Read(ref _staticRouteSeq) || stopSeq != Volatile.Read(ref _staticStopSeq))
         return false;
 
-      StaticStatus = "Departures unavailable.";
+      SetStaticStatus("Departures unavailable.", isError: true);
       _logger.LogWarning("Static departures failed: {Message}", ex.Message);
       return true;
     }
@@ -486,7 +482,7 @@ public sealed class TransitMapSession : IDisposable
     RouteOptions = [];
     if (googleRoutes == null || googleRoutes.Count == 0)
     {
-      LocationStatus = "No transit routes found.";
+      SetLocationStatus("No transit routes found.");
       return RouteOptions;
     }
 
@@ -495,7 +491,7 @@ public sealed class TransitMapSession : IDisposable
     {
       ActiveRouteId = RouteOptions[0].OriginalRoute.RouteId;
     }
-    LocationStatus = $"Found {RouteOptions.Count} routes.";
+    SetLocationStatus($"Found {RouteOptions.Count} routes.");
     return RouteOptions;
   }
 
@@ -503,11 +499,11 @@ public sealed class TransitMapSession : IDisposable
   {
     if (string.IsNullOrWhiteSpace(origin) || string.IsNullOrWhiteSpace(destination))
     {
-      LocationStatus = "Please enter origin and destination.";
+      SetLocationStatus("Please enter origin and destination.");
       return false;
     }
 
-    LocationStatus = "Calculating live routes...";
+    SetLocationStatus("Calculating live routes...");
     RouteOptions = [];
     ActiveRouteId = -1;
     IsRouteVehicleFilterActive = false;
@@ -521,9 +517,9 @@ public sealed class TransitMapSession : IDisposable
     IsRouteVehicleFilterActive = false;
     IsStaticRouteVehicleFilterActive = false;
     var trimmedMode = string.IsNullOrWhiteSpace(mode) ? "Route" : mode.Trim();
-    LocationStatus = routeFound
+    SetLocationStatus(routeFound
       ? $"{char.ToUpperInvariant(trimmedMode[0])}{trimmedMode[1..].ToLowerInvariant()} route ready."
-      : $"No {trimmedMode.ToLowerInvariant()} routes found.";
+      : $"No {trimmedMode.ToLowerInvariant()} routes found.");
   }
 
   public bool SetActiveRoute(int routeId, bool announceRoute = false, bool filterVehicles = false)
@@ -540,7 +536,7 @@ public sealed class TransitMapSession : IDisposable
     }
     if (announceRoute)
     {
-      LocationStatus = $"Showing Route {routeId + 1}";
+      SetLocationStatus($"Showing Route {routeId + 1}");
     }
     return true;
   }
@@ -551,7 +547,7 @@ public sealed class TransitMapSession : IDisposable
     ActiveRouteId = -1;
     IsRouteVehicleFilterActive = false;
     IsStaticRouteVehicleFilterActive = false;
-    LocationStatus = "Route cleared.";
+    SetLocationStatus("Route cleared.");
   }
 
   private IReadOnlyList<BusLocation> FilterDisplayedVehicles(IReadOnlyList<BusLocation> vehicles)
@@ -583,6 +579,8 @@ public sealed class TransitMapSession : IDisposable
   {
     if (_disposed) return;
     _disposed = true;
-    _refreshGate.Dispose();
+    StaticRoutes = [];
+    StaticDepartures = [];
+    RouteOptions = [];
   }
 }

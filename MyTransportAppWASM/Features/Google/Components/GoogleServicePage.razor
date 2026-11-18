@@ -1,6 +1,5 @@
 @inject AppStateService AppState
 @inject NavigationManager Navigation
-@using System.Security.Claims
 
 <PageTitle>@(Language?[Title] ?? Title) · MyTransportApp</PageTitle>
 
@@ -10,7 +9,7 @@
             <p class="google-status" role="status" aria-live="polite">@(Language?["CheckingGoogleSignIn"] ?? "Checking your Google sign-in…")</p>
         </Authorizing>
         <Authorized>
-            @if (context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value is { Length: > 0 } uid)
+            @if (context.User.GetUserId() is { Length: > 0 } uid)
             {
                 @if (string.IsNullOrEmpty(Service))
                 {
@@ -44,9 +43,5 @@
     private bool IsTasksDashboard => Service == "tasks";
     private bool IsCalendarDashboard => Service == "calendar";
 
-    private void SignIn()
-    {
-        AppState.ReturnUrl = Navigation.Uri;
-        AppState.RequestShowLogin();
-    }
+    private void SignIn() => AppState.RequestShowLogin(Navigation.Uri);
 }

@@ -23,7 +23,6 @@ public static class BrowserBenchmarkRunner
     var typicalVehicles = CreateVehicles(vehicleCount: 1_000, distinctRoutes: 40);
     var stressRoutes = CreateRoutes(routeCount: 10, stepsPerRoute: 6);
     var stressVehicles = CreateVehicles(vehicleCount: 5_000, distinctRoutes: 80);
-    var routingService = new LiveRoutingService();
     using var typicalWeather = CreateWeatherDocument(periodCount: 14);
     using var stressWeather = CreateWeatherDocument(periodCount: 500);
     var fallback = Array.Empty<WeatherTimeSlice>();
@@ -34,11 +33,11 @@ public static class BrowserBenchmarkRunner
       Measure(
         "LiveRouting/typical-3x3x1000",
         iterations: 120,
-        () => routingService.EnrichRoutes(typicalRoutes, typicalVehicles).Count),
+        () => LiveRouting.EnrichRoutes(typicalRoutes, typicalVehicles).Count),
       Measure(
         "LiveRouting/stress-10x6x5000",
         iterations: 30,
-        () => routingService.EnrichRoutes(stressRoutes, stressVehicles).Count),
+        () => LiveRouting.EnrichRoutes(stressRoutes, stressVehicles).Count),
       Measure(
         "WeatherShaper/generic-14",
         iterations: 300,

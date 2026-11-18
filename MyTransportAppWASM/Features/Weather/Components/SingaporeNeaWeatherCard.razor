@@ -3,11 +3,11 @@
                   Result="Result"
                   IsRefreshing="IsRefreshing"
                   OnRefresh="OnRefresh">
-  @if (Provider?.Periods != null)
+  @if (Result?.Periods != null)
   {
-    @foreach (var slice in Provider.Periods)
+    @foreach (var slice in Result.Periods)
     {
-      <div class="d-flex align-items-center justify-content-between p-3 rounded mb-2 shadow-sm border border-secondary border-opacity-25" style="background: linear-gradient(135deg, var(--bs-secondary-bg) 0%, var(--bs-body-bg) 100%);">
+      <div @key="(slice.Time, slice.Label)" class="d-flex align-items-center justify-content-between p-3 rounded mb-2 shadow-sm border border-secondary border-opacity-25" style="background: linear-gradient(135deg, var(--bs-secondary-bg) 0%, var(--bs-body-bg) 100%);">
         <div class="d-flex align-items-center">
           <div class="me-3 fs-2">
             <i class="@slice.Icon"></i>
@@ -47,7 +47,4 @@
 
   [Parameter]
   public bool IsRefreshing { get; set; }
-
-  // Filter logic (now centralized in WeatherPlannerService)
-  private WeatherProviderResult? Provider => Result;
 }

@@ -7,7 +7,7 @@
                   Result="Result"
                   IsRefreshing="IsRefreshing"
                   OnRefresh="OnRefresh">
-  @if (Provider?.Periods != null && (Provider.Periods.Count > 1 || FetchOutlook && Provider.Periods.Count > 0))
+  @if (Result?.Periods != null && (Result.Periods.Count > 1 || FetchOutlook && Result.Periods.Count > 0))
   {
     <div class="table-responsive mt-2 bg-secondary bg-opacity-10 rounded p-2">
       <table class="table table-sm table-borderless align-middle mb-0" style="font-size: 0.95rem;">
@@ -21,9 +21,9 @@
           </tr>
         </thead>
         <tbody>
-          @foreach (var slice in Provider.Periods)
+          @foreach (var slice in Result.Periods)
           {
-            <tr
+            <tr @key="(slice.Time, slice.Label)"
               class="border-bottom border-secondary border-opacity-10 @(FetchOutlook && !slice.IsPlaceholder ? "forecast-day" : "")"
               @onclick="() => ShowHourlyForecastAsync(slice)">
               <td class="py-2 ps-2">
@@ -99,9 +99,9 @@
       </table>
     </div>
   }
-  else if (Provider?.Periods != null && Provider.Periods.Count == 1)
+  else if (Result?.Periods != null && Result.Periods.Count == 1)
   {
-    var slice = Provider.Periods[0];
+    var slice = Result.Periods[0];
     <div class="d-flex align-items-center p-3 rounded mb-2 mt-2 shadow-sm"
          style="background: var(--bs-body-bg); border: 1px solid var(--bs-border-color-translucent);">
       <div class="me-4 fs-1">
@@ -212,7 +212,7 @@
             <tbody>
               @foreach (var hour in hourlyPeriods)
               {
-                <tr>
+                <tr @key="hour.Time">
                   <th scope="row">@MalaysiaTime.Convert(hour.Time).ToString("HH:mm")</th>
                   <td><i class="@hour.Icon me-1" aria-hidden="true"></i>@Language[hour.Summary ?? "N/A"]</td>
                   <td class="text-end text-danger">@(hour.TemperatureC.HasValue ? $"{hour.TemperatureC:0.#}°C" : "-")</td>
@@ -249,7 +249,6 @@
   [Parameter]
   public bool FetchOutlook { get; set; } = false;
 
-  private WeatherProviderResult? Provider => Result;
   private string? lastQueryLocationKey;
   private readonly string hourlyDialogId = $"open-meteo-hourly-{Guid.NewGuid():N}";
   private readonly CancellationTokenSource _cts = new();

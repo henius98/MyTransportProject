@@ -173,7 +173,8 @@
         <div class="planner">
           @foreach (var providerResult in plan.Realtime)
           {
-            <WeatherCard Result="providerResult"
+            <WeatherCard @key="providerResult.Provider"
+                         Result="providerResult"
                          Query="plan.Query"
                          IsOutlook="false"
                          IsRefreshing="@IsRefreshing(providerResult.Provider, false)"
@@ -189,7 +190,8 @@
           <div class="planner">
             @foreach (var providerResult in plan.Outlooks)
             {
-              <WeatherCard Result="providerResult"
+              <WeatherCard @key="providerResult.Provider"
+                           Result="providerResult"
                            Query="plan.Query"
                            IsOutlook="true"
                            IsRefreshing="@IsRefreshing(providerResult.Provider, true)"
@@ -241,10 +243,18 @@
 
   protected override async Task OnInitializedAsync()
   {
-    (query.Latitude, query.Longitude) = DefaultLocation.Value.ResolveCoordinates();
+    var (initialLat, initialLng) = DefaultLocation.Value.ResolveCoordinates();
+    (query.Latitude, query.Longitude) = (initialLat, initialLng);
     try
     {
-      await WeatherPlannerService.ResolveNearestLocationAsync(query, updatePlaceName: true, _cts.Token);
+      var initialQuery = new WeatherQuery { Latitude = initialLat, Longitude = initialLng };
+      await WeatherPlannerService.ResolveNearestLocationAsync(initialQuery, updatePlaceName: true, _cts.Token);
+      if (_isDisposed || !string.IsNullOrEmpty(locationSearchText) || query.PendingSearchText is not null)
+      {
+        return;
+      }
+      query.LocationId = initialQuery.LocationId;
+      query.PlaceName = initialQuery.PlaceName;
       locationSearchText = query.PlaceName ?? string.Empty;
     }
     catch (OperationCanceledException)
@@ -262,12 +272,8 @@
   private void ApplySuggestion(PlaceSuggestion suggestion)
   {
     errorMessage = null;
-    query.PlaceName = suggestion.Name;
-    query.Latitude = suggestion.Lat;
-    query.Longitude = suggestion.Lng;
+    query.ApplyPlace(suggestion);
     locationSearchText = suggestion.Name;
-    query.PendingSearchText = null;
-    query.LocationId = string.IsNullOrWhiteSpace(suggestion.LocationId) ? null : suggestion.LocationId.Trim();
   }
 
   private async Task HandleSuggestionSelected(PlaceSuggestion suggestion)
@@ -360,17 +366,18 @@
   private async Task RefreshProviderAsync(string provider, bool isOutlook)
   {
     if (plan == null) return;
+    var targetPlan = plan;
     var key = ProviderKey(provider, isOutlook);
     if (!refreshingProviders.Add(key)) return;
     try
     {
-      var updated = await WeatherPlannerService.RefreshProviderAsync(provider, plan.Query, isOutlook, _cts.Token);
+      var updated = await WeatherPlannerService.RefreshProviderAsync(provider, targetPlan.Query, isOutlook, _cts.Token);
       if (_isDisposed) return;
-      if (plan != null)
+      if (ReferenceEquals(plan, targetPlan))
       {
         plan = isOutlook
-          ? plan with { Outlooks = ReplaceProvider(plan.Outlooks, provider, updated) }
-          : plan with { Realtime = ReplaceProvider(plan.Realtime, provider, updated) };
+          ? targetPlan with { Outlooks = ReplaceProvider(targetPlan.Outlooks, provider, updated) }
+          : targetPlan with { Realtime = ReplaceProvider(targetPlan.Realtime, provider, updated) };
       }
     }
     catch (OperationCanceledException)

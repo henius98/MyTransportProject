@@ -19,14 +19,12 @@ global using MyTransportAppWASM.Core.Utils;
 global using MyTransportAppWASM.Features.Fortune;
 global using MyTransportAppWASM.Features.Fortune.Models;
 global using MyTransportAppWASM.Features.Fortune.Services;
-global using MyTransportAppWASM.Features.Fortune.Utils;
 
 global using MyTransportAppWASM.Features.Google;
 global using MyTransportAppWASM.Features.Google.Components;
 global using MyTransportAppWASM.Features.Google.Models;
 global using MyTransportAppWASM.Features.Google.Services;
 global using MyTransportAppWASM.Features.Google.Tasks;
-global using MyTransportAppWASM.Features.Google.Utils;
 
 global using MyTransportAppWASM.Features.Home;
 

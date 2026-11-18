@@ -6,6 +6,13 @@ namespace MyTransportAppWASM.Features.Weather.Models
     public const int OpenMeteoForecastDays = 16;
   }
 
+  public enum WeatherBadgeTone
+  {
+    Muted,
+    Live,
+    Error
+  }
+
   public record WeatherQuery
   {
     public double Latitude { get; set; }
@@ -15,6 +22,15 @@ namespace MyTransportAppWASM.Features.Weather.Models
     public string? PendingSearchText { get; set; }
     public DateTimeOffset? Departure { get; set; }
     public DateTimeOffset? Return { get; set; }
+
+    internal void ApplyPlace(PlaceSuggestion suggestion)
+    {
+      PlaceName = suggestion.Name;
+      Latitude = suggestion.Lat;
+      Longitude = suggestion.Lng;
+      PendingSearchText = null;
+      LocationId = string.IsNullOrWhiteSpace(suggestion.LocationId) ? null : suggestion.LocationId.Trim();
+    }
   }
 
   public record WeatherTimeSlice
@@ -40,6 +56,7 @@ namespace MyTransportAppWASM.Features.Weather.Models
     public string Provider { get; init; } = string.Empty;
     public string Source { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
+    public WeatherBadgeTone Tone { get; init; } = WeatherBadgeTone.Muted;
     public bool IsCached { get; init; }
     public DateTimeOffset RetrievedAt { get; init; } = DateTimeOffset.UtcNow;
     public IReadOnlyList<WeatherTimeSlice> Periods { get; init; } = Array.Empty<WeatherTimeSlice>();

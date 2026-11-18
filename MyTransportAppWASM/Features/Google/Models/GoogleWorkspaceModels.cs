@@ -4,122 +4,175 @@ namespace MyTransportAppWASM.Features.Google.Models;
 
 public sealed class GoogleCalendar
 {
-    public string Id { get; set; } = "";
-    public string Summary { get; set; } = "";
-    public string AccessRole { get; set; } = "";
-    public bool Primary { get; set; }
-    public string TimeZone { get; set; } = "";
-    public string? BackgroundColor { get; set; }
-    public string? ForegroundColor { get; set; }
-    public bool Selected { get; set; } = true;
+  public string Id { get; set; } = "";
+  public string Summary { get; set; } = "";
+  public string AccessRole { get; set; } = "";
+  public bool Primary { get; set; }
+  public string TimeZone { get; set; } = "";
+  public string? BackgroundColor { get; set; }
+  public string? ForegroundColor { get; set; }
+  public bool Selected { get; set; } = true;
 }
 
 public sealed class GoogleCalendarEvent
 {
-    // The API returns events per calendar; retain their source when combining calendars.
-    [JsonIgnore]
-    public string CalendarId { get; set; } = "";
+  // The API returns events per calendar; retain their source when combining calendars.
+  [JsonIgnore]
+  public string CalendarId { get; set; } = "";
 
-    public string Id { get; set; } = "";
-    public string Summary { get; set; } = "";
-    public string? Description { get; set; }
-    public string? Location { get; set; }
-    public string? HtmlLink { get; set; }
-    public string Etag { get; set; } = "";
-    public string EventType { get; set; } = "default";
-    public string? RecurringEventId { get; set; }
-    public bool Locked { get; set; }
-    public GoogleEventTime Start { get; set; } = new();
-    public GoogleEventTime End { get; set; } = new();
+  public string Id { get; set; } = "";
+  public string Summary { get; set; } = "";
+  public string? Description { get; set; }
+  public string? Location { get; set; }
+  public string? HtmlLink { get; set; }
+  public string Etag { get; set; } = "";
+  public string EventType { get; set; } = "default";
+  public string? RecurringEventId { get; set; }
+  public bool Locked { get; set; }
+  public GoogleEventTime Start { get; set; } = new();
+  public GoogleEventTime End { get; set; } = new();
 }
 
 public sealed class GoogleEventTime
 {
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Date { get; set; }
+  private DateTime? _cachedEventDate;
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? DateTime { get; set; }
+  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public string? Date
+  {
+    get => field;
+    set
+    {
+      field = value;
+      _cachedEventDate = null;
+    }
+  }
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? TimeZone { get; set; }
+  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public string? DateTime
+  {
+    get => field;
+    set
+    {
+      field = value;
+      _cachedEventDate = null;
+    }
+  }
+
+  [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+  public string? TimeZone { get; set; }
+
+  [JsonIgnore]
+  internal DateTime ParsedEventDate => _cachedEventDate ??= ParseEventDate();
+
+  private DateTime ParseEventDate() => !string.IsNullOrEmpty(Date)
+      ? (System.DateTime.TryParseExact(Date, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var parsedDate)
+          ? parsedDate
+          : System.DateTime.MinValue)
+      : DateTimeOffset.TryParse(DateTime, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var time)
+          ? MalaysiaTime.LocalDateTime(time)
+          : System.DateTime.MinValue;
 }
 
 public sealed class GoogleEventEdit
 {
-    public string Summary { get; set; } = "";
+  public string Summary { get; set; } = "";
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-    public string? Description { get; set; }
+  [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+  public string? Description { get; set; }
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-    public string? Location { get; set; }
+  [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+  public string? Location { get; set; }
 
-    public GoogleEventTime Start { get; set; } = new();
-    public GoogleEventTime End { get; set; } = new();
+  public GoogleEventTime Start { get; set; } = new();
+  public GoogleEventTime End { get; set; } = new();
 }
 
 public sealed class GoogleTaskList
 {
-    public string Id { get; set; } = "";
-    public string Title { get; set; } = "";
+  public string Id { get; set; } = "";
+  public string Title { get; set; } = "";
 }
 
 public sealed class GoogleTask
 {
-    public string Id { get; set; } = "";
-    public string Title { get; set; } = "";
-    public string? Notes { get; set; }
-    public string? Due { get; set; }
-    [JsonIgnore]
-    public DateTime? DueDate => Due?.Length >= 10 && DateTime.TryParseExact(Due[..10], "yyyy-MM-dd",
-        System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var date) ? date : null;
+  private bool _dueDateParsed;
+  private DateTime? _cachedDueDate;
 
-    public string Status { get; set; } = "needsAction";
-    public string? Completed { get; set; }
-    public string Etag { get; set; } = "";
-    public string? Parent { get; set; }
-    public string? WebViewLink { get; set; }
-    public GoogleTaskAssignmentInfo? AssignmentInfo { get; set; }
+  public string Id { get; set; } = "";
+  public string Title { get; set; } = "";
+  public string? Notes { get; set; }
+  public string? Due
+  {
+    get => field;
+    set
+    {
+      field = value;
+      _dueDateParsed = false;
+      _cachedDueDate = null;
+    }
+  }
+
+  [JsonIgnore]
+  public DateTime? DueDate
+  {
+    get
+    {
+      if (!_dueDateParsed)
+      {
+        _cachedDueDate = Due?.Length >= 10 && DateTime.TryParseExact(Due.AsSpan(0, 10), "yyyy-MM-dd",
+            System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var date) ? date : null;
+        _dueDateParsed = true;
+      }
+      return _cachedDueDate;
+    }
+  }
+
+  public string Status { get; set; } = "needsAction";
+  public string? Completed { get; set; }
+  public string Etag { get; set; } = "";
+  public string? Parent { get; set; }
+  public string? WebViewLink { get; set; }
+  public GoogleTaskAssignmentInfo? AssignmentInfo { get; set; }
 }
 
 public sealed class GoogleTaskAssignmentInfo
 {
-    public string? SurfaceType { get; set; }
-    public string? LinkToTask { get; set; }
+  public string? SurfaceType { get; set; }
+  public string? LinkToTask { get; set; }
 }
 
 public sealed class GoogleTaskEdit
 {
-    public string Title { get; set; } = "";
+  public string Title { get; set; } = "";
 
-    // Explicit nulls let a PATCH clear optional values on an existing task.
-    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-    public string? Notes { get; set; }
+  // Explicit nulls let a PATCH clear optional values on an existing task.
+  [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+  public string? Notes { get; set; }
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-    public string? Due { get; set; }
+  [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+  public string? Due { get; set; }
 
-    public string Status { get; set; } = "needsAction";
+  public string Status { get; set; } = "needsAction";
 
-    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
-    public string? Completed { get; set; }
+  [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+  public string? Completed { get; set; }
 }
 
 public sealed class GoogleTaskReference
 {
-    public string TaskListId { get; set; } = "";
-    public string TaskId { get; set; } = "";
+  public string TaskListId { get; set; } = "";
+  public string TaskId { get; set; } = "";
 }
 
 public sealed class GoogleTaskExtension
 {
-    public string TaskListId { get; set; } = "";
-    public string TaskId { get; set; } = "";
-    public int? EstimatedMinutes { get; set; }
-    public List<GoogleTaskReference> DependsOn { get; set; } = [];
-    public string? StartedAt { get; set; }
+  public string TaskListId { get; set; } = "";
+  public string TaskId { get; set; } = "";
+  public int? EstimatedMinutes { get; set; }
+  public List<GoogleTaskReference> DependsOn { get; set; } = [];
+  public string? StartedAt { get; set; }
 
-    [JsonIgnore]
-    public bool IsEmpty => EstimatedMinutes == null && DependsOn.Count == 0 && StartedAt == null;
+  [JsonIgnore]
+  public bool IsEmpty => EstimatedMinutes == null && DependsOn.Count == 0 && StartedAt == null;
 }

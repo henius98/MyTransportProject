@@ -34,7 +34,8 @@
                 int currentIndex = i;
                 bool isActive = currentIndex == _activeIndex;
 
-                <li id="suggestion-@currentIndex" class="p-2 border-bottom @(isActive ? "bg-light text-primary" : "")"
+                <li @key="(suggestion.LocationId, suggestion.Name, suggestion.Lat, suggestion.Lng)"
+                    id="suggestion-@currentIndex" class="p-2 border-bottom @(isActive ? "bg-light text-primary" : "")"
                     style="cursor: pointer;" role="option" aria-selected="@(isActive ? "true" : "false")"
                     @onclick="() => SelectSuggestion(suggestion)" @onmouseover="() => _activeIndex = currentIndex">
                   <strong>@suggestion.Name</strong><br />
@@ -53,7 +54,7 @@
     </button>
   </div>
 
-  <dialog id="location-picker-modal" @ref="_mapDialog" aria-labelledby="map-modal-title" class="location-picker-dialog">
+  <dialog id="location-picker-modal" @ref="_mapDialog" @onclose="HandleDialogClosedAsync" aria-labelledby="map-modal-title" class="location-picker-dialog">
     <div class="d-flex flex-column h-100">
       <div class="p-3 border-bottom d-flex justify-content-between align-items-center">
         <h5 id="map-modal-title" class="m-0" style="color: var(--text-color, #000);">Select a Location</h5>
@@ -67,16 +68,16 @@
         <label class="form-label" for="location-picker-search">Find a forecast location by name or ID</label>
         <input id="location-picker-search" class="form-input w-100" placeholder="e.g., Langkawi or Ds001"
                @bind="_mapSearch" @bind:event="oninput" />
-        @if (_isLoadingMap)
+        @if (_isMapModalOpen && _isLoadingMap)
         {
           <!-- Blazor loading status -->
           <div class="location-picker-status" role="status">Loading locations...</div>
         }
-        else if (_mapLocations.Count == 0)
+        else if (_isMapModalOpen && _mapLocations.Count == 0)
         {
           <div class="location-picker-status">No forecast locations are available.</div>
         }
-        else
+        else if (_isMapModalOpen)
         {
           var filteredLocations = FilteredMapLocations;
           <p class="location-picker-hint">Select a dot or search for a location. Zoom with the buttons or mouse wheel, then
@@ -102,7 +103,7 @@
               <ul class="location-picker-results" aria-label="Matching forecast locations">
                 @foreach (var location in filteredLocations.Take(15))
                 {
-                  <li><button type="button" @onclick="() => SelectMapLocation(location)">@location.LocationName
+                  <li @key="location.LocationId"><button type="button" @onclick="() => SelectMapLocation(location)">@location.LocationName
                     (@location.LocationId)</button></li>
                   }
                 </ul>
@@ -136,6 +137,7 @@
   private ElementReference _mapViewport;
   private ElementReference _mapSvg;
   private ElementReference _mapTooltip;
+  private bool _isMapModalOpen;
   private bool _isLoadingMap = false;
   private bool _initializeMap;
   private IReadOnlyList<MetLocation> _mapLocations = Array.Empty<MetLocation>();
@@ -296,6 +298,7 @@
 
   private async Task OpenMapModal()
   {
+    _isMapModalOpen = true;
     _isLoadingMap = true;
     _mapSearch = string.Empty;
 
@@ -317,8 +320,11 @@
     finally
     {
       _isLoadingMap = false;
-      _initializeMap = _mapLocations.Count > 0;
-      StateHasChanged();
+      if (!_disposed)
+      {
+        _initializeMap = _isMapModalOpen && _mapLocations.Count > 0;
+        StateHasChanged();
+      }
     }
   }
 
@@ -330,12 +336,21 @@
     }
   }
 
+  private Task HandleDialogClosedAsync()
+  {
+    _isMapModalOpen = false;
+    return _mapModule?.LoadedModule is { } mapModule
+      ? mapModule.TryInvokeVoidSafeAsync("disposeMap")
+      : Task.CompletedTask;
+  }
+
   private async Task CloseMapModal()
   {
+    _isMapModalOpen = false;
     if (_mapModule?.LoadedModule is { } mapModule)
     {
-      await mapModule.InvokeVoidAsync("disposeMap");
-      await mapModule.InvokeVoidAsync("closeDialog", _mapDialog);
+      await mapModule.TryInvokeVoidSafeAsync("disposeMap");
+      await mapModule.TryInvokeVoidSafeAsync("closeDialog", _mapDialog);
     }
   }
 

@@ -87,20 +87,21 @@ namespace MyTransportAppWASM.Features.Transit.Models
   {
     public string VehicleId { get; set; } = "";
     public string RouteId { get; set; } = "";
+    public string TransportType { get; set; } = "";
     public double Lat { get; set; }
     public double Lng { get; set; }
     public double DistanceToStopMeters { get; set; }
     public int EstimatedArrivalSeconds { get; set; }
   }
 
-    public record EnrichedRoute
-    {
-        public GoogleRoute OriginalRoute { get; set; } = new();
-        public int LiveTotalDurationSeconds { get; set; }
-        public List<LiveBusInfo> NearestBuses { get; set; } = new();
-        public bool HasLiveBus { get; set; }
-        public bool IsAuspicious { get; set; }
-    }
+  public record EnrichedRoute
+  {
+    public GoogleRoute OriginalRoute { get; set; } = new();
+    public int LiveTotalDurationSeconds { get; set; }
+    public List<LiveBusInfo> NearestBuses { get; set; } = new();
+    public bool HasLiveBus { get; set; }
+    public bool IsAuspicious { get; set; }
+  }
 
   public record TransitTrackingResult
   {
@@ -115,4 +116,16 @@ namespace MyTransportAppWASM.Features.Transit.Models
     public bool HasNearbyFeeds { get; init; }
     public bool VehiclesChanged { get; init; } = true;
   }
+
+  public sealed record TransitRouteRequestOptions(
+    [property: System.Text.Json.Serialization.JsonPropertyName("departureMode")] string DepartureMode,
+    [property: System.Text.Json.Serialization.JsonPropertyName("dateTimeIso")] string DateTimeIso);
+
+  public sealed record RenderedRouteSummary(
+    [property: System.Text.Json.Serialization.JsonPropertyName("id")] int Id,
+    [property: System.Text.Json.Serialization.JsonPropertyName("path")] string Path,
+    [property: System.Text.Json.Serialization.JsonPropertyName("hasLiveBus")] bool HasLiveBus,
+    [property: System.Text.Json.Serialization.JsonPropertyName("durationSeconds")] int DurationSeconds,
+    [property: System.Text.Json.Serialization.JsonPropertyName("localizedDuration")] string LocalizedDuration,
+    [property: System.Text.Json.Serialization.JsonPropertyName("headwayMinutes")] int? HeadwayMinutes);
 }

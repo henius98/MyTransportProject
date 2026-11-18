@@ -4,10 +4,10 @@ namespace MyTransportAppWASM.Tests;
 
 public class WeatherShaperTests
 {
-    [Fact]
-    public void ShapeSlices_MapsNestedDailyPeriodsInOneRecord()
-    {
-        using var document = JsonDocument.Parse("""
+  [Fact]
+  public void ShapeSlices_MapsNestedDailyPeriodsInOneRecord()
+  {
+    using var document = JsonDocument.Parse("""
             [
               {
                 "location": { "location_name": "Kuala Lumpur" },
@@ -26,21 +26,21 @@ public class WeatherShaperTests
             ]
             """);
 
-        var result = WeatherShaper.ShapeSlices(document, Array.Empty<WeatherTimeSlice>(), "Outlook");
+    var result = WeatherShaper.ShapeSlices(document, Array.Empty<WeatherTimeSlice>(), "Outlook");
 
-        Assert.Collection(
-            result,
-            morning => Assert.Equal("Pagi", morning.Label),
-            afternoon => Assert.Equal("Petang", afternoon.Label),
-            night => Assert.Equal("Malam", night.Label));
-        Assert.All(result, slice => Assert.Equal(0.75, slice.ProbabilityOfRain!.Value, 6));
-        Assert.All(result, slice => Assert.Equal(32.5, slice.TemperatureC));
-    }
+    Assert.Collection(
+        result,
+        morning => Assert.Equal("Pagi", morning.Label),
+        afternoon => Assert.Equal("Petang", afternoon.Label),
+        night => Assert.Equal("Malam", night.Label));
+    Assert.All(result, slice => Assert.Equal(0.75, slice.ProbabilityOfRain!.Value, 6));
+    Assert.All(result, slice => Assert.Equal(32.5, slice.TemperatureC));
+  }
 
-    [Fact]
-    public void ShapeSlices_MapsOpenMeteoParallelArrays()
-    {
-        using var document = JsonDocument.Parse("""
+  [Fact]
+  public void ShapeSlices_MapsOpenMeteoParallelArrays()
+  {
+    using var document = JsonDocument.Parse("""
             {
               "hourly": {
                 "time": ["2026-08-26T00:00:00Z", "2026-08-26T01:00:00Z"],
@@ -51,19 +51,19 @@ public class WeatherShaperTests
             }
             """);
 
-        var result = WeatherShaper.ShapeSlices(document, Array.Empty<WeatherTimeSlice>(), "Realtime");
+    var result = WeatherShaper.ShapeSlices(document, Array.Empty<WeatherTimeSlice>(), "Realtime");
 
-        Assert.Equal(2, result.Count);
-        Assert.Equal(29.5, result[0].TemperatureC);
-        Assert.Equal(0.2, result[0].ProbabilityOfRain!.Value, 6);
-        Assert.Equal("Mainly clear", result[0].Summary);
-        Assert.Equal("Thunderstorm", result[1].Summary);
-    }
+    Assert.Equal(2, result.Count);
+    Assert.Equal(29.5, result[0].TemperatureC);
+    Assert.Equal(0.2, result[0].ProbabilityOfRain!.Value, 6);
+    Assert.Equal("Mainly clear", result[0].Summary);
+    Assert.Equal("Thunderstorm", result[1].Summary);
+  }
 
-    [Fact]
-    public void ShapeSlices_MapsOpenMeteoDailyTripDetails()
-    {
-        using var document = JsonDocument.Parse("""
+  [Fact]
+  public void ShapeSlices_MapsOpenMeteoDailyTripDetails()
+  {
+    using var document = JsonDocument.Parse("""
             {
               "utc_offset_seconds": 28800,
               "daily_units": { "wind_speed_10m_max": "m/s" },
@@ -82,22 +82,22 @@ public class WeatherShaperTests
             }
             """);
 
-        var day = Assert.Single(WeatherShaper.ShapeSlices(document, [], "Outlook"));
+    var day = Assert.Single(WeatherShaper.ShapeSlices(document, [], "Outlook"));
 
-        Assert.Equal(30.1, day.MaxTemperatureC);
-        Assert.Equal(24.2, day.MinTemperatureC);
-        Assert.Equal(0.93, day.ProbabilityOfRain);
-        Assert.Equal(7.4, day.PrecipitationMm);
-        Assert.Equal("8.5 m/s", day.Wind);
-        Assert.Equal(9.2, day.UvIndex);
-        Assert.Equal(new DateTimeOffset(2026, 9, 24, 7, 4, 0, TimeSpan.FromHours(8)), day.Sunrise);
-        Assert.Equal(new DateTimeOffset(2026, 9, 24, 19, 11, 0, TimeSpan.FromHours(8)), day.Sunset);
-    }
+    Assert.Equal(30.1, day.MaxTemperatureC);
+    Assert.Equal(24.2, day.MinTemperatureC);
+    Assert.Equal(0.93, day.ProbabilityOfRain);
+    Assert.Equal(7.4, day.PrecipitationMm);
+    Assert.Equal("8.5 m/s", day.Wind);
+    Assert.Equal(9.2, day.UvIndex);
+    Assert.Equal(new DateTimeOffset(2026, 9, 24, 7, 4, 0, TimeSpan.FromHours(8)), day.Sunrise);
+    Assert.Equal(new DateTimeOffset(2026, 9, 24, 19, 11, 0, TimeSpan.FromHours(8)), day.Sunset);
+  }
 
-    [Fact]
-    public void ShapeSlices_KeepsHourlyRainChancePrecipitationAndWindSeparate()
-    {
-        using var document = JsonDocument.Parse("""
+  [Fact]
+  public void ShapeSlices_KeepsHourlyRainChancePrecipitationAndWindSeparate()
+  {
+    using var document = JsonDocument.Parse("""
             {
               "hourly_units": { "wind_speed_10m": "km/h" },
               "hourly": {
@@ -109,20 +109,20 @@ public class WeatherShaperTests
             }
             """);
 
-        var result = WeatherShaper.ShapeSlices(document, [], "Outlook");
+    var result = WeatherShaper.ShapeSlices(document, [], "Outlook");
 
-        Assert.Equal(4.2, result[0].PrecipitationMm);
-        Assert.Equal(0.75, result[0].ProbabilityOfRain);
-        Assert.Equal("12.5 km/h", result[0].Wind);
-        Assert.Equal(0, result[1].PrecipitationMm);
-        Assert.Equal(0.01, result[1].ProbabilityOfRain);
-        Assert.Equal("0 km/h", result[1].Wind);
-    }
+    Assert.Equal(4.2, result[0].PrecipitationMm);
+    Assert.Equal(0.75, result[0].ProbabilityOfRain);
+    Assert.Equal("12.5 km/h", result[0].Wind);
+    Assert.Equal(0, result[1].PrecipitationMm);
+    Assert.Equal(0.01, result[1].ProbabilityOfRain);
+    Assert.Equal("0 km/h", result[1].Wind);
+  }
 
-    [Fact]
-    public void ShapeSlices_DoesNotTreatRainfallAsProbabilityWhenProbabilityIsMissing()
-    {
-        using var document = JsonDocument.Parse("""
+  [Fact]
+  public void ShapeSlices_DoesNotTreatRainfallAsProbabilityWhenProbabilityIsMissing()
+  {
+    using var document = JsonDocument.Parse("""
             {
               "hourly": {
                 "time": ["2026-09-23T00:00:00+08:00"],
@@ -131,17 +131,17 @@ public class WeatherShaperTests
             }
             """);
 
-        var slice = Assert.Single(WeatherShaper.ShapeSlices(document, [], "Outlook"));
+    var slice = Assert.Single(WeatherShaper.ShapeSlices(document, [], "Outlook"));
 
-        Assert.Equal(8.5, slice.PrecipitationMm);
-        Assert.Null(slice.ProbabilityOfRain);
-        Assert.Null(slice.Wind);
-    }
+    Assert.Equal(8.5, slice.PrecipitationMm);
+    Assert.Null(slice.ProbabilityOfRain);
+    Assert.Null(slice.Wind);
+  }
 
-    [Fact]
-    public void ShapeSlices_HandlesNullAndShortHourlyArraysAndUsesReportedWindUnit()
-    {
-        using var document = JsonDocument.Parse("""
+  [Fact]
+  public void ShapeSlices_HandlesNullAndShortHourlyArraysAndUsesReportedWindUnit()
+  {
+    using var document = JsonDocument.Parse("""
             {
               "hourly_units": { "wind_speed_10m": "m/s" },
               "hourly": {
@@ -153,18 +153,18 @@ public class WeatherShaperTests
             }
             """);
 
-        var result = WeatherShaper.ShapeSlices(document, [], "Outlook");
+    var result = WeatherShaper.ShapeSlices(document, [], "Outlook");
 
-        Assert.All(result, slice => Assert.Null(slice.PrecipitationMm));
-        Assert.All(result, slice => Assert.Null(slice.ProbabilityOfRain));
-        Assert.Equal("3.5 m/s", result[0].Wind);
-        Assert.Null(result[1].Wind);
-    }
+    Assert.All(result, slice => Assert.Null(slice.PrecipitationMm));
+    Assert.All(result, slice => Assert.Null(slice.ProbabilityOfRain));
+    Assert.Equal("3.5 m/s", result[0].Wind);
+    Assert.Null(result[1].Wind);
+  }
 
-    [Fact]
-    public void ShapeSlices_AppliesOpenMeteoUtcOffsetToLocalTimestamps()
-    {
-        using var document = JsonDocument.Parse("""
+  [Fact]
+  public void ShapeSlices_AppliesOpenMeteoUtcOffsetToLocalTimestamps()
+  {
+    using var document = JsonDocument.Parse("""
             {
               "utc_offset_seconds": 28800,
               "hourly": {
@@ -174,30 +174,30 @@ public class WeatherShaperTests
             }
             """);
 
-        var result = WeatherShaper.ShapeSlices(document, Array.Empty<WeatherTimeSlice>(), "Realtime");
+    var result = WeatherShaper.ShapeSlices(document, Array.Empty<WeatherTimeSlice>(), "Realtime");
 
-        var slice = Assert.Single(result);
-        Assert.Equal(new DateTimeOffset(2026, 9, 23, 0, 0, 0, TimeSpan.FromHours(8)), slice.Time);
-    }
+    var slice = Assert.Single(result);
+    Assert.Equal(new DateTimeOffset(2026, 9, 23, 0, 0, 0, TimeSpan.FromHours(8)), slice.Time);
+  }
 
-    [Fact]
-    public void ShapeSlices_MatchesPropertyNamesCaseInsensitively()
-    {
-        using var document = JsonDocument.Parse("""
+  [Fact]
+  public void ShapeSlices_MatchesPropertyNamesCaseInsensitively()
+  {
+    using var document = JsonDocument.Parse("""
             { "TEMPERATURE": 31, "TIME": "2026-08-26T12:00:00Z", "SUMMARY": "Clear" }
             """);
 
-        var result = WeatherShaper.ShapeSlices(document, Array.Empty<WeatherTimeSlice>(), "Realtime");
+    var result = WeatherShaper.ShapeSlices(document, Array.Empty<WeatherTimeSlice>(), "Realtime");
 
-        var slice = Assert.Single(result);
-        Assert.Equal(31, slice.TemperatureC);
-        Assert.Equal("Clear", slice.Summary);
-    }
+    var slice = Assert.Single(result);
+    Assert.Equal(31, slice.TemperatureC);
+    Assert.Equal("Clear", slice.Summary);
+  }
 
-    [Fact]
-    public void ShapeSlices_IgnoresMalformedParallelValueCollections()
-    {
-        using var document = JsonDocument.Parse("""
+  [Fact]
+  public void ShapeSlices_IgnoresMalformedParallelValueCollections()
+  {
+    using var document = JsonDocument.Parse("""
             {
               "hourly": {
                 "time": ["2026-08-26T00:00:00Z"],
@@ -208,32 +208,32 @@ public class WeatherShaperTests
             }
             """);
 
-        var result = WeatherShaper.ShapeSlices(document, Array.Empty<WeatherTimeSlice>(), "Realtime");
+    var result = WeatherShaper.ShapeSlices(document, Array.Empty<WeatherTimeSlice>(), "Realtime");
 
-        var slice = Assert.Single(result);
-        Assert.Null(slice.TemperatureC);
-        Assert.Null(slice.ProbabilityOfRain);
-        Assert.Null(slice.Summary);
-    }
+    var slice = Assert.Single(result);
+    Assert.Null(slice.TemperatureC);
+    Assert.Null(slice.ProbabilityOfRain);
+    Assert.Null(slice.Summary);
+  }
 
-    [Fact]
-    public void ShapeSlices_ReturnsProvidedFallback_WhenNoWeatherFieldsExist()
-    {
-        using var document = JsonDocument.Parse("""{ "metadata": { "provider": "test" } }""");
-        IReadOnlyList<WeatherTimeSlice> fallback =
-        [
-            new WeatherTimeSlice { Label = "N/A", IsPlaceholder = true }
-        ];
+  [Fact]
+  public void ShapeSlices_ReturnsProvidedFallback_WhenNoWeatherFieldsExist()
+  {
+    using var document = JsonDocument.Parse("""{ "metadata": { "provider": "test" } }""");
+    IReadOnlyList<WeatherTimeSlice> fallback =
+    [
+        new WeatherTimeSlice { Label = "N/A", IsPlaceholder = true }
+    ];
 
-        var result = WeatherShaper.ShapeSlices(document, fallback, "Realtime");
+    var result = WeatherShaper.ShapeSlices(document, fallback, "Realtime");
 
-        Assert.Same(fallback, result);
-    }
+    Assert.Same(fallback, result);
+  }
 
-    [Fact]
-    public void ShapeSlices_MatchesPascalCaseAndCaseInsensitiveProperties()
-    {
-        using var document = JsonDocument.Parse("""
+  [Fact]
+  public void ShapeSlices_MatchesPascalCaseAndCaseInsensitiveProperties()
+  {
+    using var document = JsonDocument.Parse("""
             [
               {
                 "Date": "2026-08-26T00:00:00Z",
@@ -245,19 +245,19 @@ public class WeatherShaperTests
             ]
             """);
 
-        var result = WeatherShaper.ShapeSlices(document, [], "Realtime");
+    var result = WeatherShaper.ShapeSlices(document, [], "Realtime");
 
-        var slice = Assert.Single(result);
-        Assert.Equal(28.5, slice.TemperatureC);
-        Assert.Equal(2.0, slice.PrecipitationMm);
-        Assert.Equal(0.60, slice.ProbabilityOfRain!.Value, 6);
-        Assert.Equal("Light Rain", slice.Summary);
-    }
+    var slice = Assert.Single(result);
+    Assert.Equal(28.5, slice.TemperatureC);
+    Assert.Equal(2.0, slice.PrecipitationMm);
+    Assert.Equal(0.60, slice.ProbabilityOfRain!.Value, 6);
+    Assert.Equal("Light Rain", slice.Summary);
+  }
 
-    [Fact]
-    public void ShapeSlices_NormalizesOnePercentProbabilityToFraction()
-    {
-        using var document = JsonDocument.Parse("""
+  [Fact]
+  public void ShapeSlices_NormalizesOnePercentProbabilityToFraction()
+  {
+    using var document = JsonDocument.Parse("""
             [
               {
                 "Date": "2026-08-26T00:00:00Z",
@@ -268,9 +268,9 @@ public class WeatherShaperTests
             ]
             """);
 
-        var result = WeatherShaper.ShapeSlices(document, [], "Realtime");
+    var result = WeatherShaper.ShapeSlices(document, [], "Realtime");
 
-        var slice = Assert.Single(result);
-        Assert.Equal(0.01, slice.ProbabilityOfRain!.Value, 6);
-    }
+    var slice = Assert.Single(result);
+    Assert.Equal(0.01, slice.ProbabilityOfRain!.Value, 6);
+  }
 }

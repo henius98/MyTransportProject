@@ -238,8 +238,15 @@ function createMockGoogleMaps(overrides = {}) {
               constructor() {
                 this.style = {};
                 this.listeners = {};
+                this.attributes = {};
+                this.placeholder = "";
               }
-              setAttribute() {}
+              setAttribute(name, value) {
+                this.attributes[name] = value;
+              }
+              getAttribute(name) {
+                return this.attributes[name] ?? null;
+              }
               addEventListener(type, fn) {
                 this.listeners[type] = fn;
                 overrides.autocompleteListeners?.set(this.id, fn);
@@ -275,16 +282,18 @@ async function loadMapModule(
   };
   Object.defineProperties(doc, Object.getOwnPropertyDescriptors(documentOverrides));
 
+  const win = Object.defineProperties(
+    { google: googleMock },
+    Object.getOwnPropertyDescriptors(windowOverrides),
+  );
+
   const context = createContext({
     URLSearchParams,
     Number,
     setInterval,
     clearInterval,
     document: doc,
-    window: {
-      google: googleMock,
-      ...windowOverrides,
-    },
+    window: win,
     google: googleMock,
     console,
     ...globalOverrides,
@@ -1717,6 +1726,138 @@ test("clicking bus marker toggles info window and invokes OnVehicleSelected then
   ]);
 });
 
+test("selected bus marker stays emphasized after map click while static route is shown and cancels on second click", async () => {
+  const createdMarkers = [];
+  const mapListeners = {};
+  let closedCount = 0;
+
+  class RecordingMarker {
+    constructor(opts) {
+      this.listeners = {};
+      Object.assign(this, opts);
+      createdMarkers.push(this);
+    }
+    addEventListener(type, fn) {
+      this.listeners[type] = fn;
+    }
+    removeEventListener() {}
+  }
+  class RecordingInfoWindow {
+    setContent() {}
+    open() {}
+    close() {
+      closedCount++;
+    }
+  }
+
+  const mock = createMockGoogleMaps();
+  const origImport = mock.maps.importLibrary;
+  mock.maps.importLibrary = async (lib) => {
+    const m = await origImport(lib);
+    if (lib === "maps") {
+      class RecordingMap extends m.Map {
+        addListener(name, fn) {
+          mapListeners[name] = fn;
+        }
+      }
+      return { ...m, Map: RecordingMap, InfoWindow: RecordingInfoWindow };
+    }
+    if (lib === "marker") {
+      return { ...m, AdvancedMarkerElement: RecordingMarker };
+    }
+    return m;
+  };
+
+  const api = await loadMapModule(mock, {
+    createElement: createFakeElement,
+    createElementNS: (_ns, tag) => createFakeElement(tag),
+    getElementById: () => createFakeElement("div"),
+  });
+
+  const { invocations, dotNetHelper } = createDotNetRecorder();
+  await api.initGoogleMaps(
+    "map",
+    3.14,
+    101.69,
+    13,
+    "test-api-key",
+    dotNetHelper,
+    "DARK",
+    "Asia/Kuala_Lumpur",
+  );
+  createdMarkers.length = 0;
+
+  const bus = {
+    providerName: "Rapid Bus KL",
+    transportType: "Bus",
+    routeId: "U4200",
+    routeShortName: "420",
+    vehicleId: "BUS-420",
+    lat: 3.14,
+    lng: 101.69,
+    speed: 5,
+    timestamp: 1794885820,
+  };
+  await api.syncMarkers([bus]);
+
+  const marker = createdMarkers[0];
+  assert.equal(marker.content.classList.contains("transport-marker--selected"), false);
+
+  // Clicking the bus emphasizes it immediately.
+  marker.listeners["gmp-click"]();
+  assert.equal(marker.content.classList.contains("transport-marker--selected"), true);
+  assert.equal(marker.zIndex, 1000);
+
+  // clearStaticRoute(true) + showStaticRoute keeps emphasis on the selected bus.
+  api.clearStaticRoute(true);
+  await api.showStaticRoute(
+    JSON.stringify({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [101.69, 3.14],
+              [101.7, 3.15],
+            ],
+          },
+          properties: { route_color: "#1769aa" },
+        },
+      ],
+    }),
+    dotNetHelper,
+  );
+  assert.equal(marker.content.classList.contains("transport-marker--selected"), true);
+
+  // Subsequent syncMarkers poll updates keep emphasis on the selected bus.
+  await api.syncMarkers([{ ...bus, lat: 3.141, timestamp: 1794885850 }]);
+  assert.equal(marker.content.classList.contains("transport-marker--selected"), true);
+
+  // Clicking elsewhere on the map closes InfoWindow but keeps the bus emphasized while static route is active.
+  mapListeners.click();
+  assert.equal(closedCount, 1);
+  assert.equal(marker.content.classList.contains("transport-marker--selected"), true);
+  assert.equal(marker.zIndex, 1000);
+
+  // Clicking the emphasized bus back deselects it and triggers OnVehicleDeselected.
+  marker.listeners["gmp-click"]();
+  assert.equal(marker.content.classList.contains("transport-marker--selected"), false);
+  assert.equal(marker.zIndex, null);
+  assert.deepEqual(invocations, [
+    ["OnVehicleSelected", "Rapid Bus KL", "U4200", "420"],
+    ["OnVehicleDeselected", "Rapid Bus KL"],
+  ]);
+
+  // Clicking again re-selects; clearStaticRoute() (without preserve) clears the emphasis.
+  marker.listeners["gmp-click"]();
+  assert.equal(marker.content.classList.contains("transport-marker--selected"), true);
+  api.clearStaticRoute();
+  assert.equal(marker.content.classList.contains("transport-marker--selected"), false);
+  assert.equal(marker.zIndex, null);
+});
+
 test("syncMarkers skips DOM and style mutations when vehicle snapshot is unchanged", async () => {
   let styleWrites = 0;
   let classToggles = 0;
@@ -2479,4 +2620,270 @@ test("drawMultipleRoutes keeps first option static until a Live Route Option is 
 
   api.clearRoute();
   assert.equal(scheduledFrames.size, 0);
+});
+
+test("gm_authFailure persists across subsequent initGoogleMaps calls for the same API key", async () => {
+  let gmAuthFailure = null;
+  const api = await loadMapModule(createMockGoogleMaps(), {}, {
+    set gm_authFailure(fn) {
+      gmAuthFailure = fn;
+    },
+    get gm_authFailure() {
+      return gmAuthFailure;
+    },
+  });
+  const firstRecorder = createDotNetRecorder();
+
+  await api.initGoogleMaps(
+    "map",
+    3.14,
+    101.69,
+    13,
+    "invalid-key",
+    firstRecorder.dotNetHelper,
+    "DARK",
+    "Asia/Kuala_Lumpur",
+  );
+  gmAuthFailure();
+  assert.equal(firstRecorder.invocations.length, 1);
+  assert.equal(firstRecorder.invocations[0][0], "OnMapAuthError");
+
+  api.cleanupMap();
+
+  const secondRecorder = createDotNetRecorder();
+  const secondMap = await api.initGoogleMaps(
+    "map",
+    3.14,
+    101.69,
+    13,
+    "invalid-key",
+    secondRecorder.dotNetHelper,
+    "DARK",
+    "Asia/Kuala_Lumpur",
+  );
+  assert.equal(secondMap, null);
+  assert.equal(secondRecorder.invocations.length, 1);
+  assert.equal(secondRecorder.invocations[0][0], "OnMapAuthError");
+});
+
+test("gm_authFailure after initAutocomplete replaces disabled PlaceAutocompleteElement with editable fallback input", async () => {
+  let gmAuthFailure = null;
+  const containers = new Map([
+    ["origin-input", createFakeElement("div")],
+    ["destination-input", createFakeElement("div")],
+  ]);
+  const createdInputs = [];
+
+  const api = await loadMapModule(
+    createMockGoogleMaps({ withPlaces: true }),
+    {
+      getElementById: (id) => containers.get(id) ?? createFakeElement("div"),
+      createElement: (tag) => {
+        const el = createFakeElement(tag);
+        if (tag === "input") {
+          const inputListeners = new Map();
+          el.addEventListener = (type, fn) => inputListeners.set(type, fn);
+          el.emitInput = (val) => {
+            el.value = val;
+            return inputListeners.get("input")?.({ target: { value: val } });
+          };
+          createdInputs.push(el);
+        }
+        return el;
+      },
+    },
+    {
+      set gm_authFailure(fn) {
+        gmAuthFailure = fn;
+      },
+      get gm_authFailure() {
+        return gmAuthFailure;
+      },
+    },
+  );
+
+  const { invocations, dotNetHelper } = createDotNetRecorder();
+  await api.initAutocomplete(
+    "origin-input",
+    dotNetHelper,
+    "UpdateOrigin",
+    "invalid-key",
+  );
+  await api.initAutocomplete(
+    "destination-input",
+    dotNetHelper,
+    "UpdateDestination",
+    "invalid-key",
+  );
+  assert.equal(createdInputs.length, 0);
+
+  // Trigger asynchronous gm_authFailure after PlaceAutocompleteElement mounted
+  gmAuthFailure();
+  assert.equal(createdInputs.length, 2);
+
+  await createdInputs[0].emitInput("KL Sentral");
+  await createdInputs[1].emitInput("KLCC");
+  assert.deepEqual(invocations, [
+    ["UpdateOrigin", "KL Sentral"],
+    ["UpdateDestination", "KLCC"],
+  ]);
+});
+
+test("initAutocomplete mounts even when Blazor marshals distinct DotNetObjectReference wrappers across calls", async () => {
+  const containers = new Map([
+    ["origin-input", createFakeElement("div")],
+    ["destination-input", createFakeElement("div")],
+  ]);
+  const api = await loadMapModule(
+    createMockGoogleMaps({ withPlaces: true }),
+    {
+      getElementById: (id) => containers.get(id) ?? createFakeElement("div"),
+    },
+  );
+
+  const mapRecorder = createDotNetRecorder();
+  const originRecorder = createDotNetRecorder();
+  const destRecorder = createDotNetRecorder();
+
+  await api.initGoogleMaps(
+    "map",
+    3.14,
+    101.69,
+    13,
+    "test-api-key",
+    mapRecorder.dotNetHelper,
+    "DARK",
+    "Asia/Kuala_Lumpur",
+  );
+  await api.initAutocomplete(
+    "origin-input",
+    originRecorder.dotNetHelper,
+    "UpdateOrigin",
+    "test-api-key",
+  );
+  await api.initAutocomplete(
+    "destination-input",
+    destRecorder.dotNetHelper,
+    "UpdateDestination",
+    "test-api-key",
+  );
+
+  assert.equal(containers.get("origin-input").children.length, 1);
+  assert.equal(containers.get("destination-input").children.length, 1);
+  assert.equal(
+    containers.get("origin-input").children[0].placeholder,
+    "Enter origin...",
+  );
+  assert.equal(
+    containers.get("destination-input").children[0].placeholder,
+    "Enter destination...",
+  );
+
+  // Typing then clicking internal clear button syncs both changes to Blazor
+  const originWidget = containers.get("origin-input").children[0];
+  originWidget.value = "KL Sentral";
+  originWidget.listeners.input({ target: originWidget });
+  originWidget.value = "";
+  originWidget.listeners.click();
+  await Promise.resolve();
+  assert.deepEqual(originRecorder.invocations, [
+    ["UpdateOrigin", "KL Sentral"],
+    ["UpdateOrigin", ""],
+  ]);
+});
+
+test("cleanupMap cancels in-flight initAutocomplete and clears state cleanly", async () => {
+  const containers = new Map([
+    ["origin-input", createFakeElement("div")],
+  ]);
+  let resolvePlaces = null;
+  const placesGate = new Promise((resolve) => {
+    resolvePlaces = resolve;
+  });
+  const mock = createMockGoogleMaps({ withPlaces: true });
+  const origImportLibrary = mock.maps.importLibrary;
+  mock.maps.importLibrary = async (lib) => {
+    if (lib === "places") {
+      await placesGate;
+    }
+    return origImportLibrary(lib);
+  };
+
+  const api = await loadMapModule(mock, {
+    getElementById: (id) => containers.get(id) ?? createFakeElement("div"),
+  });
+  const { dotNetHelper } = createDotNetRecorder();
+
+  const pendingInit = api.initAutocomplete(
+    "origin-input",
+    dotNetHelper,
+    "UpdateOrigin",
+    "test-api-key",
+  );
+  api.cleanupMap();
+  resolvePlaces();
+  await pendingInit;
+
+  assert.equal(containers.get("origin-input").children.length, 0);
+});
+
+test("gm_authFailure for one key does not force fallback autocomplete when remounting with a different key", async () => {
+  let gmAuthFailure = null;
+  const containers = new Map([
+    ["origin-input", createFakeElement("div")],
+  ]);
+  const api = await loadMapModule(
+    createMockGoogleMaps({ withPlaces: true }),
+    {
+      getElementById: (id) => containers.get(id) ?? createFakeElement("div"),
+    },
+    {
+      set gm_authFailure(fn) {
+        gmAuthFailure = fn;
+      },
+      get gm_authFailure() {
+        return gmAuthFailure;
+      },
+    },
+  );
+
+  const firstRecorder = createDotNetRecorder();
+  await api.initGoogleMaps(
+    "map",
+    3.14,
+    101.69,
+    13,
+    "invalid-key",
+    firstRecorder.dotNetHelper,
+    "DARK",
+    "Asia/Kuala_Lumpur",
+  );
+  gmAuthFailure();
+  api.cleanupMap();
+
+  const autocompleteRecorder = createDotNetRecorder();
+  const mapRecorder = createDotNetRecorder();
+  await Promise.all([
+    api.initAutocomplete(
+      "origin-input",
+      autocompleteRecorder.dotNetHelper,
+      "UpdateOrigin",
+      "valid-key",
+    ),
+    api.initGoogleMaps(
+      "map",
+      3.14,
+      101.69,
+      13,
+      "valid-key",
+      mapRecorder.dotNetHelper,
+      "DARK",
+      "Asia/Kuala_Lumpur",
+    ),
+  ]);
+
+  const mounted = containers.get("origin-input").children[0];
+  assert.ok(mounted);
+  assert.notEqual(String(mounted.tagName).toLowerCase(), "input");
+  assert.equal(mapRecorder.invocations.length, 0);
 });

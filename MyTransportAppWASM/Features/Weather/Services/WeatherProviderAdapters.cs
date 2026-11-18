@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 
 namespace MyTransportAppWASM.Features.Weather.Services;
 
@@ -9,10 +10,19 @@ internal interface IWeatherProviderAdapter
   int OutlookMaxDays { get; }
   bool IsEligible(WeatherQuery query);
   Uri BuildEndpoint(WeatherQuery query, bool isOutlook);
+  IReadOnlyList<WeatherTimeSlice> ParseSlices(JsonDocument document, IReadOnlyList<WeatherTimeSlice> fallback, string label);
 }
 
 internal static class WeatherProviderTemplates
 {
+  public static string ResolveName(WeatherProviderOptions options, string defaultName) =>
+    string.IsNullOrWhiteSpace(options.Name) ? defaultName : options.Name;
+
+  public static string GetEndpointTemplate(KeyedWeatherProviderOptions options, string endpointKey) =>
+    options.BaseUrl + (options.Endpoints.TryGetValue(endpointKey, out var path) ? path : string.Empty);
+
+  public static string ModeKey(bool isOutlook) => isOutlook ? "Outlook" : "Realtime";
+
   public static string ApplyCommonPlaceholders(
     string template,
     WeatherProviderOptions options,
@@ -38,7 +48,7 @@ internal static class WeatherProviderTemplates
 
 internal sealed class MetMalaysiaWeatherAdapter(MetMalaysiaWeatherProviderOptions options) : IWeatherProviderAdapter
 {
-  public string Name => string.IsNullOrWhiteSpace(options.Name) ? "MetMalaysia" : options.Name;
+  public string Name { get; } = WeatherProviderTemplates.ResolveName(options, "MetMalaysia");
   public WeatherProviderOptions Options => options;
   public int OutlookMaxDays => 14;
 
@@ -67,42 +77,35 @@ internal sealed class MetMalaysiaWeatherAdapter(MetMalaysiaWeatherProviderOption
 
     return new Uri(WeatherProviderTemplates.ApplyCommonPlaceholders(template, options), UriKind.Absolute);
   }
+
+  public IReadOnlyList<WeatherTimeSlice> ParseSlices(JsonDocument document, IReadOnlyList<WeatherTimeSlice> fallback, string label) =>
+    WeatherShaper.ShapeForecastArray(document.RootElement, label)
+    ?? WeatherShaper.ExtractSingleSlice(document.RootElement, fallback, label);
 }
 
-internal abstract class KeyedWeatherProviderAdapter(KeyedWeatherProviderOptions options, string defaultName)
-  : IWeatherProviderAdapter
+internal sealed class OpenMeteoWeatherAdapter(KeyedWeatherProviderOptions options) : IWeatherProviderAdapter
 {
-  protected KeyedWeatherProviderOptions KeyedOptions { get; } = options;
-  public string Name => string.IsNullOrWhiteSpace(KeyedOptions.Name) ? defaultName : KeyedOptions.Name;
-  public WeatherProviderOptions Options => KeyedOptions;
-  public abstract int OutlookMaxDays { get; }
-  public virtual bool IsEligible(WeatherQuery query) => KeyedOptions.Enabled;
+  public string Name { get; } = WeatherProviderTemplates.ResolveName(options, "Open-Meteo");
+  public WeatherProviderOptions Options => options;
+  public int OutlookMaxDays => WeatherForecastLimits.OpenMeteoForecastDays;
 
-  protected static string ModeKey(bool isOutlook) => isOutlook ? "Outlook" : "Realtime";
+  public bool IsEligible(WeatherQuery query) => options.Enabled;
 
-  protected string GetEndpointTemplate(string endpointKey) =>
-    KeyedOptions.BaseUrl + (KeyedOptions.Endpoints.TryGetValue(endpointKey, out var path) ? path : string.Empty);
+  public Uri BuildEndpoint(WeatherQuery query, bool isOutlook) =>
+    BuildOpenMeteoUri(WeatherProviderTemplates.GetEndpointTemplate(options, WeatherProviderTemplates.ModeKey(isOutlook)), query);
 
-  public abstract Uri BuildEndpoint(WeatherQuery query, bool isOutlook);
-}
-
-internal sealed class OpenMeteoWeatherAdapter(KeyedWeatherProviderOptions options)
-  : KeyedWeatherProviderAdapter(options, "Open-Meteo")
-{
-  public override int OutlookMaxDays => WeatherForecastLimits.OpenMeteoForecastDays;
-
-  public override Uri BuildEndpoint(WeatherQuery query, bool isOutlook) =>
-    BuildOpenMeteoUri(GetEndpointTemplate(ModeKey(isOutlook)), query);
+  public IReadOnlyList<WeatherTimeSlice> ParseSlices(JsonDocument document, IReadOnlyList<WeatherTimeSlice> fallback, string label) =>
+    WeatherShaper.ShapeParallelArrays(document.RootElement, label) ?? fallback;
 
   public bool TryBuildHourlyEndpoint(WeatherQuery query, DateTime date, out Uri? uri)
   {
-    if (!KeyedOptions.Endpoints.TryGetValue("Hourly", out var hourlyPath))
+    if (!options.Endpoints.TryGetValue("Hourly", out var hourlyPath))
     {
       uri = null;
       return false;
     }
 
-    var template = (KeyedOptions.BaseUrl + hourlyPath)
+    var template = (options.BaseUrl + hourlyPath)
       .Replace("{date}", date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), StringComparison.OrdinalIgnoreCase)
       .Replace("{timezone}", Uri.EscapeDataString(MalaysiaTime.IanaTimeZone), StringComparison.OrdinalIgnoreCase);
     uri = BuildOpenMeteoUri(template, query);
@@ -111,7 +114,7 @@ internal sealed class OpenMeteoWeatherAdapter(KeyedWeatherProviderOptions option
 
   private Uri BuildOpenMeteoUri(string template, WeatherQuery query)
   {
-    var formatted = WeatherProviderTemplates.ApplyCommonPlaceholders(template, KeyedOptions, query);
+    var formatted = WeatherProviderTemplates.ApplyCommonPlaceholders(template, options, query);
 
     if (formatted.Contains("{forecast_hours}", StringComparison.OrdinalIgnoreCase))
     {
@@ -133,20 +136,26 @@ internal sealed class OpenMeteoWeatherAdapter(KeyedWeatherProviderOptions option
   }
 }
 
-internal sealed class SingaporeNeaWeatherAdapter(KeyedWeatherProviderOptions options)
-  : KeyedWeatherProviderAdapter(options, "Singapore NEA")
+internal sealed class SingaporeNeaWeatherAdapter(KeyedWeatherProviderOptions options) : IWeatherProviderAdapter
 {
-  public override int OutlookMaxDays => 4;
+  public string Name { get; } = WeatherProviderTemplates.ResolveName(options, "Singapore NEA");
+  public WeatherProviderOptions Options => options;
+  public int OutlookMaxDays => 4;
 
-  public override bool IsEligible(WeatherQuery query) =>
-    base.IsEligible(query) && IsNearSingapore(query.Latitude, query.Longitude);
+  public bool IsEligible(WeatherQuery query) =>
+    options.Enabled && IsNearSingapore(query.Latitude, query.Longitude);
 
-  public override Uri BuildEndpoint(WeatherQuery query, bool isOutlook)
+  public Uri BuildEndpoint(WeatherQuery query, bool isOutlook)
   {
     var formatted = WeatherProviderTemplates.ApplyCommonPlaceholders(
-      GetEndpointTemplate(ModeKey(isOutlook)), KeyedOptions, query);
+      WeatherProviderTemplates.GetEndpointTemplate(options, WeatherProviderTemplates.ModeKey(isOutlook)),
+      options,
+      query);
     return new Uri(formatted, UriKind.Absolute);
   }
+
+  public IReadOnlyList<WeatherTimeSlice> ParseSlices(JsonDocument document, IReadOnlyList<WeatherTimeSlice> fallback, string label) =>
+    WeatherShaper.ExtractSingleSlice(document.RootElement, fallback, label);
 
   public static bool IsNearSingapore(double lat, double lon) =>
     lat >= 1.15 && lat <= 1.50 && lon >= 103.55 && lon <= 104.15;

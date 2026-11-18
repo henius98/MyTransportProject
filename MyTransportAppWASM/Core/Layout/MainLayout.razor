@@ -8,12 +8,15 @@
     <a href="#main-content" class="skip-link">
         @Language["SkipToMainContent"]
     </a>
-    <div class="@SidebarClass" @onclick="ExpandSidebar" @onmouseenter="HandleMouseEnter"
-         @onmouseleave="HandleMouseLeave" @onclick:stopPropagation>
+    <div class="@SidebarClass"
+         @onclick="@OptionalMouse(isCollapsed, ExpandSidebar)"
+         @onmouseenter="@OptionalMouse(isCollapsed && !isHovered, HandleMouseEnter)"
+         @onmouseleave="@OptionalMouse(isHovered, HandleMouseLeave)"
+         @onclick:stopPropagation>
         <NavMenu IsCollapsed="EffectiveIsCollapsed" />
     </div>
 
-    <main id="main-content" tabindex="-1" @onclick="CollapseSidebar">
+    <main id="main-content" tabindex="-1" @onclick="@OptionalMouse(!isCollapsed, CollapseSidebar)">
         <article class="content px-4">
             <ErrorBoundary>
                 <ChildContent>
@@ -100,8 +103,20 @@
         }
     }
 
-    private void ExpandSidebar() => isCollapsed = false;
-    private void CollapseSidebar() => isCollapsed = true;
+    private EventCallback<MouseEventArgs> OptionalMouse(bool enabled, Action handler) =>
+        enabled ? EventCallback.Factory.Create<MouseEventArgs>(this, handler) : default;
+
+    private void ExpandSidebar()
+    {
+        isCollapsed = false;
+        isHovered = false;
+    }
+
+    private void CollapseSidebar()
+    {
+        isCollapsed = true;
+        isHovered = false;
+    }
 
     private void HandleMouseEnter() => isHovered = true;
     private void HandleMouseLeave() => isHovered = false;

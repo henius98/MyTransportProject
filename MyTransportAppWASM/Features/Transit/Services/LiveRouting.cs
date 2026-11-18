@@ -22,17 +22,8 @@ internal static class LiveRouting
       for (int stepIndex = 0; stepIndex < route.TransitSteps.Count; stepIndex++)
       {
         var step = route.TransitSteps[stepIndex];
-        var stepLine = !string.IsNullOrWhiteSpace(step.LineShortName)
-          ? step.LineShortName
-          : step.LineName;
-        if (string.IsNullOrWhiteSpace(stepLine))
-        {
-          continue;
-        }
-
-        var normalizedLineName = NormalizeRouteName(stepLine);
-        if (normalizedLineName.Length == 0 ||
-            !vehiclesByRoute.TryGetValue(normalizedLineName, out var matchingBuses))
+        var matchingBuses = FindMatchingVehicles(vehiclesByRoute, step);
+        if (matchingBuses is null)
         {
           continue;
         }
@@ -63,6 +54,7 @@ internal static class LiveRouting
           RouteId = !string.IsNullOrWhiteSpace(closestBus.RouteShortName)
             ? closestBus.RouteShortName
             : closestBus.RouteId ?? "",
+          TransportType = closestBus.TransportType ?? "",
           Lat = closestBus.Lat,
           Lng = closestBus.Lng,
           DistanceToStopMeters = closestDistance,
@@ -175,6 +167,33 @@ internal static class LiveRouting
     return filtered;
   }
 
+  private static List<BusLocation>? FindMatchingVehicles(
+    Dictionary<string, List<BusLocation>> vehiclesByRoute,
+    TransitStep step) =>
+    FindMatchingVehiclesByName(vehiclesByRoute, step.LineShortName)
+    ?? FindMatchingVehiclesByName(vehiclesByRoute, step.LineName);
+
+  private static List<BusLocation>? FindMatchingVehiclesByName(
+    Dictionary<string, List<BusLocation>> vehiclesByRoute,
+    string? rawName)
+  {
+    if (string.IsNullOrWhiteSpace(rawName))
+    {
+      return null;
+    }
+
+    var normalized = NormalizeRouteName(rawName);
+    if (normalized.Length > 0 && vehiclesByRoute.TryGetValue(normalized, out var direct))
+    {
+      return direct;
+    }
+
+    var withoutSuffix = StripTrailingRouteSuffix(rawName);
+    return withoutSuffix is not null && vehiclesByRoute.TryGetValue(withoutSuffix, out var stripped)
+      ? stripped
+      : null;
+  }
+
   private static HashSet<string> CollectRouteIdentifiers(GoogleRoute route)
   {
     var allowedRouteIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -240,7 +259,7 @@ internal static class LiveRouting
 
   private static string? StripTrailingRouteSuffix(string rawName)
   {
-    var trimmed = rawName.Trim();
+    var trimmed = rawName.AsSpan().Trim();
     foreach (var suffix in TrailingRouteSuffixes)
     {
       if (!trimmed.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
@@ -250,7 +269,7 @@ internal static class LiveRouting
 
       var prefix = trimmed[..^suffix.Length].Trim();
       var normalizedPrefix = NormalizeRouteName(prefix);
-      if (normalizedPrefix.Length == 0 || !normalizedPrefix.Any(char.IsLetter))
+      if (normalizedPrefix.Length == 0)
       {
         return null;
       }
@@ -331,7 +350,10 @@ internal static class LiveRouting
     routeVehicles.Add(vehicle);
   }
 
-  private static string NormalizeRouteName(string routeName)
+  private static string NormalizeRouteName(string routeName) =>
+    NormalizeRouteName(routeName.AsSpan(), routeName);
+
+  private static string NormalizeRouteName(ReadOnlySpan<char> routeName, string? original = null)
   {
     var normalizedLength = 0;
     var isAlreadyNormalized = true;
@@ -355,7 +377,9 @@ internal static class LiveRouting
 
     if (isAlreadyNormalized)
     {
-      return routeName;
+      return original is not null && original.Length == routeName.Length
+        ? original
+        : new string(routeName);
     }
 
     return string.Create(normalizedLength, routeName, static (destination, source) =>

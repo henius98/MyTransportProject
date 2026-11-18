@@ -47,12 +47,10 @@ namespace MyTransportAppWASM.Core.Services
           }
         }
 
-        var location = await geoModule.InvokeAsync<Location?>("getUserLocation", new
-        {
-          cacheMaxAge = forceRefresh ? 0 : _cacheMaxAgeMilliseconds,
-          useCache = !forceRefresh,
-          enableHighAccuracy = forceRefresh
-        });
+        var location = await geoModule.InvokeAsync<Location?>("getUserLocation", new GeolocationRequestOptions(
+          CacheMaxAge: forceRefresh ? 0 : _cacheMaxAgeMilliseconds,
+          UseCache: !forceRefresh,
+          EnableHighAccuracy: forceRefresh));
         if (_geoModule.IsDisposed) return null;
         if (location != null)
         {

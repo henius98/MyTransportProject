@@ -1,17 +1,17 @@
-namespace MyTransportAppWASM.Features.Fortune.Utils;
+namespace MyTransportAppWASM.Features.Google.Calendar;
 
 internal static class SolarTermDates
 {
-    // Hong Kong Observatory Gregorian-lunar conversion tables, 1901–2100 (UTC+8).
-    // https://www.hko.gov.hk/en/gts/time/conversion.htm
-    // Each row contains the day of the month for the two terms in January through December.
-    // Extracted from https://www.hko.gov.hk/tc/gts/time/calendar/text/files/T{year}c.txt.
-    public const int FirstSupportedYear = 1901;
-    public const int LastSupportedYear = 2100;
-    private static readonly string[] Names = ["小寒", "大寒", "立春", "雨水", "惊蛰", "春分", "清明", "谷雨", "立夏", "小满", "芒种", "夏至", "小暑", "大暑", "立秋", "处暑", "白露", "秋分", "寒露", "霜降", "立冬", "小雪", "大雪", "冬至"];
-    private static readonly byte[] Days =
-    [
-        6, 21, 4, 19, 6, 21, 5, 21, 6, 22, 6, 22, 8, 23, 8, 24, 8, 24, 9, 24, 8, 23, 8, 22, // 1901
+  // Hong Kong Observatory Gregorian-lunar conversion tables, 1901–2100 (UTC+8).
+  // https://www.hko.gov.hk/en/gts/time/conversion.htm
+  // Each row contains the day of the month for the two terms in January through December.
+  // Extracted from https://www.hko.gov.hk/tc/gts/time/calendar/text/files/T{year}c.txt.
+  public const int FirstSupportedYear = 1901;
+  public const int LastSupportedYear = 2100;
+  private static readonly string[] Names = ["小寒", "大寒", "立春", "雨水", "惊蛰", "春分", "清明", "谷雨", "立夏", "小满", "芒种", "夏至", "小暑", "大暑", "立秋", "处暑", "白露", "秋分", "寒露", "霜降", "立冬", "小雪", "大雪", "冬至"];
+  private static readonly byte[] Days =
+  [
+      6, 21, 4, 19, 6, 21, 5, 21, 6, 22, 6, 22, 8, 23, 8, 24, 8, 24, 9, 24, 8, 23, 8, 22, // 1901
         6, 21, 5, 19, 6, 21, 6, 21, 6, 22, 7, 22, 8, 24, 8, 24, 8, 24, 9, 24, 8, 23, 8, 23, // 1902
         6, 21, 5, 20, 7, 22, 6, 21, 7, 22, 7, 22, 8, 24, 9, 24, 9, 24, 9, 24, 8, 23, 8, 23, // 1903
         7, 21, 5, 20, 6, 21, 5, 20, 6, 21, 6, 22, 7, 23, 8, 23, 8, 23, 9, 24, 8, 23, 7, 22, // 1904
@@ -213,13 +213,13 @@ internal static class SolarTermDates
         5, 20, 4, 18, 5, 20, 5, 20, 5, 21, 5, 21, 7, 23, 7, 23, 7, 23, 8, 23, 7, 22, 7, 22, // 2100
     ];
 
-    public static string? NameOn(DateTime date)
-    {
-        var year = date.Year - FirstSupportedYear;
-        if (year < 0 || year >= Days.Length / Names.Length) return null;
-        var term = (date.Month - 1) * 2;
-        var offset = year * Names.Length + term;
-        if (date.Day == Days[offset]) return Names[term];
-        return date.Day == Days[offset + 1] ? Names[term + 1] : null;
-    }
+  public static string? NameOn(DateTime date)
+  {
+    var year = date.Year - FirstSupportedYear;
+    if (year < 0 || year >= Days.Length / Names.Length) return null;
+    var term = (date.Month - 1) * 2;
+    var offset = year * Names.Length + term;
+    if (date.Day == Days[offset]) return Names[term];
+    return date.Day == Days[offset + 1] ? Names[term + 1] : null;
+  }
 }

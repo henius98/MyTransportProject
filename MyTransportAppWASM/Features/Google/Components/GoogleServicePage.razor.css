@@ -108,16 +108,8 @@
     min-width: 0;
 }
 
-.google-workspace ::deep .google-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1.3fr) minmax(300px, 1fr);
-    gap: 1.25rem;
-    align-items: start;
-}
-
 .google-workspace ::deep .google-service-icon { display: block; font-size: 1.8rem; color: var(--primary-blue); margin-bottom: 1.5rem; }
 
-.google-workspace ::deep .google-toolbar,
 .google-workspace ::deep .google-actions,
 .google-workspace ::deep .google-connection {
     display: flex;
@@ -126,12 +118,10 @@
     gap: .75rem;
 }
 
-.google-workspace ::deep .google-toolbar { margin-bottom: 1.25rem; align-items: end; }
 .google-workspace ::deep .google-connection { justify-content: space-between; }
 .google-workspace ::deep .google-connection p { margin: .4rem 0 0; max-width: 70ch; font-size: .9rem; }
 .google-workspace ::deep .google-field { display: grid; gap: .4rem; margin-bottom: 1rem; }
 .google-workspace ::deep .google-field label { font-size: .9rem; font-weight: 600; }
-.google-workspace ::deep .google-toolbar .google-field { margin-bottom: 0; flex: 1 1 160px; }
 .google-workspace ::deep .google-editor { min-width: 0; }
 .google-workspace ::deep .google-editor label { display: block; margin-bottom: .4rem; }
 .google-workspace ::deep .google-editor input[type="checkbox"] + label { display: inline; }
@@ -157,20 +147,12 @@
 .google-workspace--calendar ::deep .gcal .btn--primary { background: #a8c7fa; color: #062e6f; box-shadow: none; }
 .google-workspace--calendar ::deep .gcal a { color: var(--primary-blue); }
 
-.google-workspace ::deep .google-list { list-style: none; padding: 0; margin: 0; }
-.google-workspace ::deep .google-list-item { padding: 1rem 0; border-bottom: 1px solid var(--border-color); overflow-wrap: anywhere; }
-.google-workspace ::deep .google-list-item:first-child { padding-top: 0; }
-.google-workspace ::deep .google-list-item:last-child { border-bottom: 0; }
 .google-workspace ::deep .google-empty { padding: 3rem 1.5rem; text-align: center; }
 .google-workspace ::deep .google-error { border-left: 3px solid #ef4444; padding: 1rem; background: var(--card-bg); overflow-wrap: anywhere; }
 .google-workspace ::deep .google-status { padding: .75rem 0; color: var(--text-dim); }
 .google-workspace ::deep .btn { height: auto; min-height: 2.75rem; padding: .6rem 1rem; transition: none; }
 .google-workspace ::deep .btn:hover { transform: none; }
 .google-workspace ::deep :focus-visible { outline: 2px solid var(--primary-blue); outline-offset: 3px; }
-
-@media (max-width: 900px) {
-    .google-workspace ::deep .google-grid { grid-template-columns: minmax(0, 1fr); }
-}
 
 @media (max-width: 480px) {
     .google-workspace { padding-top: 1.25rem; }

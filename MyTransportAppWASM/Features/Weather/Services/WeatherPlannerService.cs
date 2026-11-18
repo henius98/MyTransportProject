@@ -41,18 +41,13 @@ namespace MyTransportAppWASM.Features.Weather.Services
         cacheExpiration.Value.Weather.FallbackSeconds,
         $"{nameof(CacheExpirationOptions.Weather)}:{nameof(WeatherCacheExpirationOptions.FallbackSeconds)}");
 
-      var metMalaysia = new MetMalaysiaWeatherAdapter(options.MetMalaysia);
       _openMeteo = new OpenMeteoWeatherAdapter(options.OpenMeteo);
-      var singaporeNea = new SingaporeNeaWeatherAdapter(options.SingaporeNEA);
-      _adapters = [metMalaysia, _openMeteo, singaporeNea];
-    }
-
-    public WeatherPlannerService(
-      HttpClient httpClient,
-      IMemoryCache cache,
-      IOptions<CacheExpirationOptions> cacheExpiration)
-      : this(httpClient, cache, cacheExpiration, Options.Create(new WeatherOptions()), null, null)
-    {
+      _adapters =
+      [
+        new MetMalaysiaWeatherAdapter(options.MetMalaysia),
+        _openMeteo,
+        new SingaporeNeaWeatherAdapter(options.SingaporeNEA)
+      ];
     }
 
     public async Task<WeatherPlanResult> GetPlanAsync(
@@ -115,11 +110,7 @@ namespace MyTransportAppWASM.Features.Weather.Services
           return InvalidPlan(resolvedQuery, error);
         }
 
-        resolvedQuery.PlaceName = chosen.Name;
-        resolvedQuery.Latitude = chosen.Lat;
-        resolvedQuery.Longitude = chosen.Lng;
-        resolvedQuery.PendingSearchText = null;
-        resolvedQuery.LocationId = string.IsNullOrWhiteSpace(chosen.LocationId) ? null : chosen.LocationId.Trim();
+        resolvedQuery.ApplyPlace(chosen);
       }
 
       if (string.IsNullOrWhiteSpace(resolvedQuery.LocationId))
@@ -223,7 +214,11 @@ namespace MyTransportAppWASM.Features.Weather.Services
 
       if (!_openMeteo.TryBuildHourlyEndpoint(query, date, out var uri) || uri is null)
       {
-        return BuildSample(_openMeteo, "Unavailable", Array.Empty<WeatherTimeSlice>());
+        return BuildSample(
+          _openMeteo,
+          "Unavailable",
+          WeatherBadgeTone.Error,
+          Array.Empty<WeatherTimeSlice>());
       }
 
       var result = await FetchProviderDataAsync(_openMeteo, uri, "Outlook", cancellationToken, forceRefresh);
@@ -287,9 +282,6 @@ namespace MyTransportAppWASM.Features.Weather.Services
       return result;
     }
 
-    public static bool IsNearSingapore(double lat, double lon) =>
-      SingaporeNeaWeatherAdapter.IsNearSingapore(lat, lon);
-
     private async Task<WeatherProviderResult> FetchProviderDataAsync(
       IWeatherProviderAdapter adapter,
       Uri endpoint,
@@ -298,7 +290,10 @@ namespace MyTransportAppWASM.Features.Weather.Services
       bool forceRefresh = false)
     {
       var fallback = CreatePlaceholder();
-      if (!adapter.Options.Enabled) return BuildSample(adapter, "Disabled", fallback, endpoint);
+      if (!adapter.Options.Enabled)
+      {
+        return BuildSample(adapter, "Disabled", WeatherBadgeTone.Muted, fallback, endpoint);
+      }
 
       var isOutlook = IsOutlook(label);
       string cacheKey = $"weather_api_{(isOutlook ? "outlook" : "current")}_{endpoint.AbsoluteUri}";
@@ -323,9 +318,8 @@ namespace MyTransportAppWASM.Features.Weather.Services
         })!;
 
         var cachedResult = await lazyTask.Value.WaitAsync(cancellationToken);
-        var labeledResult = RelabelIfRequired(cachedResult, label);
 
-        if (!string.Equals(cachedResult.Status, "LIVE", StringComparison.Ordinal))
+        if (cachedResult.Tone != WeatherBadgeTone.Live)
         {
           // MemoryCacheEntryOptions cannot be changed after the factory returns.
           // Replace the entry explicitly so transient failures use the shorter fallback lifetime.
@@ -335,13 +329,13 @@ namespace MyTransportAppWASM.Features.Weather.Services
             Size = 1
           });
           return wasCached
-            ? labeledResult with { Status = $"{labeledResult.Status} (Cached)", IsCached = true }
-            : labeledResult;
+            ? cachedResult with { Status = $"{cachedResult.Status} (Cached)", IsCached = true }
+            : cachedResult;
         }
 
-        var status = GetStatus(label, endpoint);
+        var status = isOutlook ? "FORECAST" : "LIVE";
         if (wasCached) status += " (Cached)";
-        return labeledResult with { Status = status, IsCached = wasCached };
+        return cachedResult with { Status = status, IsCached = wasCached };
       }
       catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
       {
@@ -352,7 +346,7 @@ namespace MyTransportAppWASM.Features.Weather.Services
       catch (Exception)
       {
         _cache.Remove(cacheKey);
-        return BuildSample(adapter, "Unavailable", fallback, endpoint);
+        return BuildSample(adapter, "Unavailable", WeatherBadgeTone.Error, fallback, endpoint);
       }
     }
 
@@ -391,7 +385,7 @@ namespace MyTransportAppWASM.Features.Weather.Services
 
       if (!response.IsSuccessStatusCode)
       {
-        return BuildSample(adapter, $"HTTP {(int)response.StatusCode}", fallback, endpoint);
+        return BuildSample(adapter, $"HTTP {(int)response.StatusCode}", WeatherBadgeTone.Error, fallback, endpoint);
       }
 
       await using var payload = await response.Content.ReadAsStreamAsync(requestToken);
@@ -402,46 +396,12 @@ namespace MyTransportAppWASM.Features.Weather.Services
         Provider = adapter.Name,
         Source = provider.Source,
         Status = "LIVE",
+        Tone = WeatherBadgeTone.Live,
         RetrievedAt = DateTimeOffset.UtcNow,
-        Periods = WeatherShaper.ShapeSlices(document, fallback, label),
+        Periods = adapter.ParseSlices(document, fallback, label),
         Endpoint = endpoint
       };
     }
-
-    private static string GetStatus(string label, Uri endpoint)
-    {
-      if (IsOutlook(label)) return "FORECAST";
-      if (label.Contains("real", StringComparison.OrdinalIgnoreCase) ||
-          endpoint.AbsoluteUri.Contains("real-time", StringComparison.OrdinalIgnoreCase) ||
-          endpoint.Query.Contains("current_weather", StringComparison.OrdinalIgnoreCase)) return "LIVE";
-      return "TODAY";
-    }
-
-    private static WeatherProviderResult RelabelIfRequired(WeatherProviderResult result, string label)
-    {
-      for (var index = 0; index < result.Periods.Count; index++)
-      {
-        if (IsProviderLabel(result.Periods[index].Label) &&
-            !string.Equals(result.Periods[index].Label, label, StringComparison.Ordinal))
-        {
-          var relabeledPeriods = new List<WeatherTimeSlice>(result.Periods.Count);
-          foreach (var period in result.Periods)
-          {
-            relabeledPeriods.Add(IsProviderLabel(period.Label)
-              ? period with { Label = label }
-              : period);
-          }
-
-          return result with { Periods = relabeledPeriods };
-        }
-      }
-
-      return result;
-    }
-
-    private static bool IsProviderLabel(string label) =>
-      string.Equals(label, "Realtime", StringComparison.OrdinalIgnoreCase) ||
-      string.Equals(label, "Outlook", StringComparison.OrdinalIgnoreCase);
 
     private static IReadOnlyList<WeatherTimeSlice> CreatePlaceholder() =>
     [
@@ -454,14 +414,20 @@ namespace MyTransportAppWASM.Features.Weather.Services
         }
     ];
 
-    private static WeatherProviderResult BuildSample(IWeatherProviderAdapter adapter, string status, IReadOnlyList<WeatherTimeSlice> slices, Uri? endpoint = null) => new()
-    {
-      Provider = adapter.Name,
-      Source = adapter.Options.Source ?? "Unknown",
-      Status = status,
-      RetrievedAt = DateTimeOffset.UtcNow,
-      Periods = slices,
-      Endpoint = endpoint
-    };
+    private static WeatherProviderResult BuildSample(
+      IWeatherProviderAdapter adapter,
+      string status,
+      WeatherBadgeTone tone,
+      IReadOnlyList<WeatherTimeSlice> slices,
+      Uri? endpoint = null) => new()
+      {
+        Provider = adapter.Name,
+        Source = adapter.Options.Source ?? "Unknown",
+        Status = status,
+        Tone = tone,
+        RetrievedAt = DateTimeOffset.UtcNow,
+        Periods = slices,
+        Endpoint = endpoint
+      };
   }
 }

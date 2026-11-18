@@ -4,8 +4,8 @@ using System.Text.Json;
 using Google.Protobuf;
 using MyTransportAppWASM.Gtfs;
 using MyTransportAppWASM.Core.Utils;
-using MyTransportAppWASM.Features.Google.Services;
 using MyTransportAppWASM.Features.Transit.Models;
+using MyTransportAppWASM.Features.Transit.Services;
 using MyTransportAppWASM.Features.Weather.Models;
 using MyTransportAppWASM.Features.Weather.Utils;
 using TransitRealtime;
@@ -24,7 +24,6 @@ var comparableStressVehicles = CreateVehicles(
     vehicleCount: 5_000,
     distinctRoutes: 80,
     useFixedWidthRouteNames: true);
-var routingService = new LiveRoutingService();
 
 using var typicalWeather = CreateWeatherDocument(periodCount: 14);
 using var stressWeather = CreateWeatherDocument(periodCount: 500);
@@ -34,12 +33,12 @@ var protobufPayload = CreateFeedPayload(vehicleCount: 2_000);
 Run(
     "LiveRouting/typical-3x3x1000",
     iterations: 120,
-    () => routingService.EnrichRoutes(typicalRoutes, typicalVehicles).Count);
+    () => LiveRouting.EnrichRoutes(typicalRoutes, typicalVehicles).Count);
 
 Run(
     "LiveRouting/stress-10x6x5000",
     iterations: 30,
-    () => routingService.EnrichRoutes(stressRoutes, stressVehicles).Count);
+    () => LiveRouting.EnrichRoutes(stressRoutes, stressVehicles).Count);
 
 Run(
     "LiveRouting/legacy-compatible-stress",
@@ -49,7 +48,7 @@ Run(
 Run(
     "LiveRouting/indexed-compatible-stress",
     iterations: 20,
-    () => routingService.EnrichRoutes(comparableStressRoutes, comparableStressVehicles).Count);
+    () => LiveRouting.EnrichRoutes(comparableStressRoutes, comparableStressVehicles).Count);
 
 Run(
     "WeatherShaper/generic-14",

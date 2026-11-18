@@ -174,7 +174,7 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
     List<GoogleRoute> googleRoutes,
     CancellationToken cancellationToken = default)
   {
-    var enriched = LiveRouting.EnrichRoutes(googleRoutes, _cachedVehicles);
+    var enriched = LiveRouting.EnrichRoutes(googleRoutes, [.. CachedVehicles]);
 
     try
     {
@@ -196,14 +196,20 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
               });
             }
           }
-          _cachedFortuneDate = todayKey;
+          if (_cachedFortune != null)
+          {
+            _cachedFortuneDate = todayKey;
+          }
         }
         else
         {
           if (_cachedFortuneDate != todayKey)
           {
             _cachedFortune = await _baziFlowService.GetDateFortuneAsync(todayKey, cancellationToken);
-            _cachedFortuneDate = todayKey;
+            if (_cachedFortune != null)
+            {
+              _cachedFortuneDate = todayKey;
+            }
           }
         }
 

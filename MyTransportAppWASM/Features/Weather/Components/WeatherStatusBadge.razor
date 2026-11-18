@@ -1,7 +1,11 @@
+@{
+  var statusClass = GetStatusClass(Tone);
+}
+
 @if (IsCached)
 {
   <button type="button"
-          class="badge badge--action @GetStatusClass(Status)"
+          class="badge badge--action @statusClass"
           disabled="@IsRefreshing"
           title="Refresh latest data from @ProviderName"
           aria-label="Refresh latest data from @ProviderName"
@@ -12,12 +16,15 @@
 }
 else
 {
-  <span class="badge @GetStatusClass(Status)" aria-live="polite">@Status</span>
+  <span class="badge @statusClass" aria-live="polite">@Status</span>
 }
 
 @code {
   [Parameter]
   public string Status { get; set; } = "Loading";
+
+  [Parameter]
+  public WeatherBadgeTone Tone { get; set; } = WeatherBadgeTone.Muted;
 
   [Parameter]
   public string ProviderName { get; set; } = "weather provider";
@@ -31,5 +38,10 @@ else
   [Parameter]
   public EventCallback OnRefresh { get; set; }
 
-  public static string GetStatusClass(string? status) => WeatherUIHelper.GetStatusClass(status);
+  public static string GetStatusClass(WeatherBadgeTone tone) => tone switch
+  {
+    WeatherBadgeTone.Live => "status--live",
+    WeatherBadgeTone.Error => "status--error",
+    _ => "status--muted"
+  };
 }

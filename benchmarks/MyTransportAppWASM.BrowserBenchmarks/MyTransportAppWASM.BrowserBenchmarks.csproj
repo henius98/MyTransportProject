@@ -27,14 +27,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="../../MyTransportAppWASM/Core/Models/PlaceSuggestion.cs"
+             Link="Production/Models/PlaceSuggestion.cs" />
     <Compile Include="../../MyTransportAppWASM/Features/Transit/Models/TransportModels.cs"
              Link="Production/Models/TransportModels.cs" />
     <Compile Include="../../MyTransportAppWASM/Features/Weather/Models/WeatherModels.cs"
              Link="Production/Models/WeatherModels.cs" />
-    <Compile Include="../../MyTransportAppWASM/Features/Google/Services/ILiveRoutingService.cs"
-             Link="Production/Services/Interfaces/ILiveRoutingService.cs" />
-    <Compile Include="../../MyTransportAppWASM/Features/Google/Services/LiveRoutingService.cs"
-             Link="Production/Services/LiveRoutingService.cs" />
+    <Compile Include="../../MyTransportAppWASM/Features/Transit/Services/LiveRouting.cs"
+             Link="Production/Services/LiveRouting.cs" />
     <Compile Include="../../MyTransportAppWASM/Core/Utils/GeoMath.cs"
              Link="Production/Utils/GeoMath.cs" />
     <Compile Include="../../MyTransportAppWASM/Features/Weather/Utils/WeatherShaper.cs"

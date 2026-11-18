@@ -1,39 +1,50 @@
 @using Microsoft.AspNetCore.Components.WebAssembly.Services
 @inject LazyAssemblyLoader LazyAssemblyLoader
 
-<Router AppAssembly="@typeof(App).Assembly" OnNavigateAsync="PrepareRouteAsync">
-    <Found Context="routeData">
-        <!-- All routes are public, so no Authorizing message is shown; Firebase sign-in stays in the account UI. -->
-        <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
-        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
-    </Found>
-    <NotFound>
-        <LayoutView Layout="@typeof(MainLayout)">
-            <MyTransportAppWASM.Core.Pages.NotFound />
-        </LayoutView>
-    </NotFound>
+<Router AppAssembly="@typeof(App).Assembly" OnNavigateAsync="PrepareRouteAsync"
+        NotFoundPage="@typeof(MyTransportAppWASM.Core.Pages.NotFound)">
+  <Found Context="routeData">
+    <!-- All routes are public, so no Authorizing message is shown; Firebase sign-in stays in the account UI. -->
+    <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+    <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+  </Found>
 </Router>
 
 @code {
-    private bool _gtfsAssemblyLoaded;
+  private bool _gtfsAssemblyLoaded;
 
-    private async Task PrepareRouteAsync(NavigationContext navigation)
+  internal static bool ShouldLoadGtfsAssembly(string? navigationPath, bool alreadyLoaded)
+  {
+    if (alreadyLoaded || string.IsNullOrEmpty(navigationPath))
     {
-        var route = navigation.Path.Trim('/').Split('?', '#')[0];
-        if (_gtfsAssemblyLoaded ||
-            !string.Equals(route, "map", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        try
-        {
-            await LazyAssemblyLoader.LoadAssembliesAsync(["MyTransportAppWASM.Gtfs.dll"]);
-            _gtfsAssemblyLoaded = true;
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"Failed to load GTFS assembly: {ex.Message}");
-        }
+      return false;
     }
+
+    var route = navigationPath.AsSpan().Trim('/');
+    var queryOrHash = route.IndexOfAny('?', '#');
+    if (queryOrHash >= 0)
+    {
+      route = route[..queryOrHash];
+    }
+
+    return route.Equals("map", StringComparison.OrdinalIgnoreCase);
+  }
+
+  private async Task PrepareRouteAsync(NavigationContext navigation)
+  {
+    if (!ShouldLoadGtfsAssembly(navigation.Path, _gtfsAssemblyLoaded))
+    {
+      return;
+    }
+
+    try
+    {
+      await LazyAssemblyLoader.LoadAssembliesAsync(["MyTransportAppWASM.Gtfs.dll"]);
+      _gtfsAssemblyLoaded = true;
+    }
+    catch (Exception ex)
+    {
+      Console.Error.WriteLine($"Failed to load GTFS assembly: {ex.Message}");
+    }
+  }
 }

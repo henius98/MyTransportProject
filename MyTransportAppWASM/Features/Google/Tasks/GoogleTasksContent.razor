@@ -1,7 +1,7 @@
 @namespace MyTransportAppWASM.Features.Google.Tasks
 @using System.Globalization
 @implements IDisposable
-@inject IGoogleTasksWorkflowService WorkflowService
+@inject GoogleTasksWorkflowService WorkflowService
 
 <div class="google-tasks-dashboard" aria-busy="@busy">
     <header class="tasks-topbar">

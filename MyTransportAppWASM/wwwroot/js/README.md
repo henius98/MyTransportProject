@@ -9,7 +9,7 @@ This directory contains browser-side JavaScript modules and interop bridges. Fil
 | `google-services.js` | Google Workspace | `Features/Google/Services/GoogleWorkspaceService.cs` | Google Calendar & Google Tasks REST API client |
 | `google-authorization.js` | Google Workspace / Identity | `Features/Google/Services/GoogleWorkspaceService.cs` | Google Identity Services OAuth 2.0 authorization code flow |
 | `google-token-store.js` | Google Workspace | `Features/Google/Services/GoogleWorkspaceService.cs` | Client token caching with session/local storage fallback |
-| `googleMap.js` | Google Maps Platform | `Features/Google/Services/PlaceResolutionService.cs`, `Features/Transit/Services/TransitMapSession.cs`, `Features/Transit/Services/LiveRouting.cs`, `Features/Transit/Map.razor.cs` | Maps JS API, Places AutocompleteElement, Geocoding, markers, routes, polyline decoding |
+| `googleMap.js` | Google Maps Platform | `Core/Services/PlaceResolutionService.cs`, `Features/Transit/Services/TransitMapSession.cs`, `Features/Transit/Services/LiveRouting.cs`, `Features/Transit/Map.razor.cs` | Maps JS API, Places AutocompleteElement, Geocoding, markers, routes, polyline decoding |
 
 ## 2. Firebase Services
 

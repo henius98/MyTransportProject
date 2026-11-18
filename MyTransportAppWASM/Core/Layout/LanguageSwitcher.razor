@@ -18,7 +18,7 @@
             <ul class="dropdown-menu dropdown-menu-end lang-switcher__menu show" role="menu">
                 @foreach (var lang in LanguageService.SupportedLanguages)
                 {
-                    <li role="presentation">
+                    <li @key="lang.Code" role="presentation">
                         <button class="dropdown-item" type="button" role="menuitem" @onclick='() => ChangeLanguage(lang.Code)'>
                             @lang.FullName
                         </button>

@@ -3,10 +3,14 @@ let storedApiKey = null;
 let cachedGeocoder = null;
 let map, userMarker, infoWindow;
 let currentInfoWindowAnchor = null;
+let selectedVehicleKey = null;
 let activeDotNetHelper = null;
-let mapAuthFailed = false;
+let gmAuthFailure = null;
+let mapInitSeq = 0;
 const activeMarkers = Object.create(null);
 const autocompletes = Object.create(null);
+const autocompleteConfigs = Object.create(null);
+const autocompleteInitSeq = Object.create(null);
 const pendingAutocompleteValues = Object.create(null);
 const selectedPlaceLocations = Object.create(null);
 const advancedMarkerEventHandlers = new WeakMap();
@@ -173,18 +177,36 @@ export async function reverseGeocode(lat, lng, apiKey) {
   return match?.formatted_address || null;
 }
 
+function notifyMapAuthError() {
+  if (!activeDotNetHelper) return;
+  activeDotNetHelper
+    .invokeMethodAsync(
+      "OnMapAuthError",
+      "Google Maps authorization failed: please verify your API key and allowed referers.",
+    )
+    ?.catch?.(() => {});
+}
+
+function hasAuthFailureForKey(apiKey) {
+  if (!gmAuthFailure) return false;
+  const effectiveKey = apiKey || storedApiKey || null;
+  return gmAuthFailure.key === effectiveKey;
+}
+
 // Global auth failure handler for Google Maps JS API
 window.gm_authFailure = function () {
-  mapAuthFailed = true;
+  gmAuthFailure = { key: storedApiKey || null };
   console.warn("Google Maps authentication failed (gm_authFailure triggered).");
-  if (activeDotNetHelper) {
-    activeDotNetHelper
-      .invokeMethodAsync(
-        "OnMapAuthError",
-        "Google Maps authorization failed: please verify your API key and allowed referers.",
-      )
-      .catch(() => {});
+  for (const [elementId, config] of Object.entries(autocompleteConfigs)) {
+    if (config) {
+      mountFallbackAutocompleteInput(
+        elementId,
+        config.dotNetHelper,
+        config.methodName,
+      );
+    }
   }
+  notifyMapAuthError();
 };
 const transportMarkerTypes = {
   bus: { icon: "🚌", className: "bus-marker", label: "Bus", sideFacing: true },
@@ -224,6 +246,8 @@ let isRouteSelectionAnimated = false;
 let staticRouteLayer = null;
 let staticRoutePolylines = [];
 let staticRouteDotNetRef = null;
+let staticRouteSeq = 0;
+let hasStaticRouteOverlay = false;
 let transitLayer = null;
 let routeArrowAnimationTimer = null;
 let routeArrowAnimationFrameId = null;
@@ -542,27 +566,34 @@ function extractGeoJsonLinePaths(geometry) {
   return [];
 }
 
-export function clearStaticRoute() {
+export function clearStaticRoute(preserveVehicleSelection = false) {
+  staticRouteSeq++;
+  hasStaticRouteOverlay = false;
   staticRoutePolylines.forEach((p) => {
     animatedDirectionPolylines.delete(p);
     p.setMap(null);
   });
   staticRoutePolylines = [];
   syncRouteArrowAnimationTimer();
-  if (!staticRouteLayer) return;
-  const features = [];
-  staticRouteLayer.forEach((feature) => features.push(feature));
-  features.forEach((feature) => staticRouteLayer.remove(feature));
+  if (staticRouteLayer) {
+    const features = [];
+    staticRouteLayer.forEach((feature) => features.push(feature));
+    features.forEach((feature) => staticRouteLayer.remove(feature));
+  }
+  if (!preserveVehicleSelection) {
+    clearSelectedVehicle();
+  }
 }
 
 export async function showStaticRoute(geoJson, dotNetRef) {
   if (!map) return;
+  const seq = ++staticRouteSeq;
   const collection = JSON.parse(geoJson);
   const [{ Polyline }, { LatLngBounds }] = await Promise.all([
     google.maps.importLibrary("maps"),
     google.maps.importLibrary("core"),
   ]);
-  if (!map) return;
+  if (!map || seq !== staticRouteSeq) return;
 
   if (!staticRouteLayer && google.maps?.Data) {
     staticRouteLayer = new google.maps.Data({ map });
@@ -603,7 +634,7 @@ export async function showStaticRoute(geoJson, dotNetRef) {
     });
   }
 
-  clearStaticRoute();
+  clearStaticRoute(true);
   staticRouteDotNetRef = dotNetRef;
 
   const rawFeatures = Array.isArray(collection?.features)
@@ -661,6 +692,9 @@ export async function showStaticRoute(geoJson, dotNetRef) {
     }
   }
 
+  hasStaticRouteOverlay =
+    staticRoutePolylines.length > 0 || remainingFeatures.length > 0;
+
   if (!bounds.isEmpty()) map.fitBounds(bounds);
 }
 
@@ -708,11 +742,20 @@ export async function initGoogleMaps(
   theme = "DARK",
   timeZone,
 ) {
-  mapAuthFailed = false;
+  const currentMapInitSeq = ++mapInitSeq;
   activeDotNetHelper = dotNetHelper;
   pendingUserPosition = null;
+  selectedVehicleKey = null;
+  hasStaticRouteOverlay = false;
   currentColorScheme = (theme || "DARK").toUpperCase();
+  if (hasAuthFailureForKey(apiKey)) {
+    notifyMapAuthError();
+    return null;
+  }
   await loadGoogleMaps(apiKey);
+  if (currentMapInitSeq !== mapInitSeq) {
+    return null;
+  }
   if (!timeZone) throw new Error("Display time zone not provided.");
   displayTimeZone = timeZone;
 
@@ -725,6 +768,14 @@ export async function initGoogleMaps(
       google.maps.importLibrary("maps"),
       google.maps.importLibrary("marker"),
     ]);
+
+  if (
+    currentMapInitSeq !== mapInitSeq ||
+    hasAuthFailureForKey(apiKey) ||
+    (typeof el.isConnected === "boolean" && !el.isConnected)
+  ) {
+    return null;
+  }
 
   if (pendingUserPosition) {
     lat = pendingUserPosition.lat;
@@ -753,10 +804,13 @@ export async function initGoogleMaps(
 
   infoWindow = new InfoWindow({ disableAutoPan: true, headerDisabled: true });
 
-  // Close infoWindow when clicking anywhere else on the map
+  // Close infoWindow when clicking anywhere else on the map; keep vehicle emphasis while a static route is shown.
   map.addListener("click", () => {
     infoWindow.close();
     currentInfoWindowAnchor = null;
+    if (!hasStaticRouteOverlay) {
+      clearSelectedVehicle();
+    }
   });
 
   const pin = document.createElement("div");
@@ -767,7 +821,9 @@ export async function initGoogleMaps(
 
   async function handleUserMarkerDragEnd(rawPos) {
     const coords = toLatLngLiteral(rawPos);
-    if (!coords) return;
+    if (!coords || !map || currentMapInitSeq !== mapInitSeq) {
+      return;
+    }
     const dragSeq = ++latestDragSeq;
     try {
       if (dotNetHelper) {
@@ -780,7 +836,9 @@ export async function initGoogleMaps(
       const address =
         (await reverseGeocode(coords.lat, coords.lng)) ||
         `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
-      if (dragSeq !== latestDragSeq) return;
+      if (dragSeq !== latestDragSeq || !map || currentMapInitSeq !== mapInitSeq) {
+        return;
+      }
       if (dotNetHelper) {
         await dotNetHelper.invokeMethodAsync("UpdateOrigin", address);
 
@@ -871,7 +929,11 @@ function attachAutocompleteWidget(container, elementId, methodName, widget) {
     methodName === "UpdateOrigin" ? "Origin" : "Destination",
   );
   widget.setAttribute("aria-labelledby", `${elementId}-label`);
-  widget.setAttribute("placeholder", placeholderText);
+  if ("placeholder" in widget) {
+    widget.placeholder = placeholderText;
+  } else {
+    widget.setAttribute("placeholder", placeholderText);
+  }
 
   container.innerHTML = "";
   container.appendChild(widget);
@@ -883,6 +945,50 @@ function attachAutocompleteWidget(container, elementId, methodName, widget) {
       selectedPlaceLocations[elementId]?.location ?? null,
     );
   }
+}
+
+function syncAutocompleteText(elementId, dotNetHelper, methodName, value) {
+  pendingAutocompleteValues[elementId] = value;
+  if (selectedPlaceLocations[elementId]?.text !== value) {
+    delete selectedPlaceLocations[elementId];
+  }
+  return dotNetHelper?.invokeMethodAsync(methodName, value)?.catch?.(() => {});
+}
+
+function mountFallbackAutocompleteInput(elementId, dotNetHelper, methodName) {
+  const container = document.getElementById(elementId);
+  if (!container) return;
+  const existingWidget = autocompletes[elementId];
+  if (existingWidget && String(existingWidget.tagName).toLowerCase() === "input") {
+    return;
+  }
+
+  const current = getAutocompleteValueAndLocation(elementId);
+  const fallbackInput = document.createElement("input");
+  fallbackInput.type = "text";
+  fallbackInput.className = "w-100";
+  fallbackInput.style.border = "none";
+  fallbackInput.style.background = "transparent";
+  fallbackInput.style.outline = "none";
+  fallbackInput.style.color = "inherit";
+  fallbackInput.style.font = "inherit";
+  fallbackInput.style.padding = "0 12px";
+  fallbackInput.style.height = "100%";
+  fallbackInput.style.minHeight = "44px";
+  fallbackInput.addEventListener("input", async (e) => {
+    if (autocompletes[elementId] === fallbackInput) {
+      await syncAutocompleteText(
+        elementId,
+        dotNetHelper,
+        methodName,
+        e?.target?.value ?? "",
+      );
+    }
+  });
+  if (current.text && !Object.hasOwn(pendingAutocompleteValues, elementId)) {
+    pendingAutocompleteValues[elementId] = current.text;
+  }
+  attachAutocompleteWidget(container, elementId, methodName, fallbackInput);
 }
 
 /**
@@ -897,11 +1003,20 @@ export async function initAutocomplete(
 ) {
   const container = document.getElementById(elementId);
   if (!container) return;
+  const reqSeq = (autocompleteInitSeq[elementId] =
+    (autocompleteInitSeq[elementId] || 0) + 1);
+  const isStale = () =>
+    autocompleteInitSeq[elementId] !== reqSeq ||
+    (typeof container.isConnected === "boolean" && !container.isConnected);
+  autocompleteConfigs[elementId] = { dotNetHelper, methodName };
 
   try {
+    if (hasAuthFailureForKey(apiKey)) throw new Error("Google Maps authentication failed.");
     await loadGoogleMaps(apiKey);
     const { PlaceAutocompleteElement } =
       await google.maps.importLibrary("places");
+    if (isStale()) return;
+    if (hasAuthFailureForKey(apiKey)) throw new Error("Google Maps authentication failed.");
 
     // Create the new PlaceAutocompleteElement widget
     const placeAutocomplete = new PlaceAutocompleteElement({
@@ -919,6 +1034,43 @@ export async function initAutocomplete(
       methodName,
       placeAutocomplete,
     );
+
+    const handlePlacesWidgetError = (err) => {
+      if (autocompletes[elementId] !== placeAutocomplete) return;
+      console.debug(
+        `PlaceAutocompleteElement error on ${elementId}, switching to text input:`,
+        err,
+      );
+      mountFallbackAutocompleteInput(elementId, dotNetHelper, methodName);
+    };
+    placeAutocomplete.addEventListener("gmp-error", handlePlacesWidgetError);
+    placeAutocomplete.addEventListener("error", handlePlacesWidgetError);
+
+    placeAutocomplete.addEventListener("input", (e) => {
+      if (autocompletes[elementId] !== placeAutocomplete) return;
+      const val =
+        typeof e?.target?.value === "string"
+          ? e.target.value
+          : typeof placeAutocomplete.value === "string"
+            ? placeAutocomplete.value
+            : null;
+      if (val !== null) {
+        syncAutocompleteText(elementId, dotNetHelper, methodName, val);
+      }
+    });
+
+    // Google PlaceAutocompleteElement clears value via its internal clear button without firing "input".
+    placeAutocomplete.addEventListener("click", () => {
+      Promise.resolve().then(() => {
+        if (
+          autocompletes[elementId] === placeAutocomplete &&
+          placeAutocomplete.value === "" &&
+          pendingAutocompleteValues[elementId]
+        ) {
+          syncAutocompleteText(elementId, dotNetHelper, methodName, "");
+        }
+      });
+    });
 
     // Listen for place selection via the new gmp-select event
     placeAutocomplete.addEventListener(
@@ -944,9 +1096,10 @@ export async function initAutocomplete(
           } else {
             delete selectedPlaceLocations[elementId];
           }
+          pendingAutocompleteValues[elementId] = displayText;
 
-          if (dotNetHelper) {
-            dotNetHelper.invokeMethodAsync(methodName, displayText);
+          if (dotNetHelper && autocompletes[elementId] === placeAutocomplete) {
+            dotNetHelper.invokeMethodAsync(methodName, displayText)?.catch?.(() => {});
 
             if (methodName === "UpdateOrigin" && selectedLoc) {
               updateUserMarker(selectedLoc.lat, selectedLoc.lng);
@@ -954,7 +1107,7 @@ export async function initAutocomplete(
                 "UpdateUserPosition",
                 selectedLoc.lat,
                 selectedLoc.lng,
-              );
+              )?.catch?.(() => {});
             }
           }
         } catch (err) {
@@ -963,24 +1116,12 @@ export async function initAutocomplete(
       },
     );
   } catch (err) {
+    if (isStale()) return;
     console.debug(
       `PlaceAutocompleteElement unavailable for ${elementId}, falling back to text input:`,
       err,
     );
-    const fallbackInput = document.createElement("input");
-    fallbackInput.type = "text";
-    fallbackInput.className = "w-100";
-    fallbackInput.style.border = "none";
-    fallbackInput.style.background = "transparent";
-    fallbackInput.style.outline = "none";
-    fallbackInput.style.color = "inherit";
-    fallbackInput.style.font = "inherit";
-    fallbackInput.addEventListener("input", async (e) => {
-      if (dotNetHelper) {
-        await dotNetHelper.invokeMethodAsync(methodName, e.target.value);
-      }
-    });
-    attachAutocompleteWidget(container, elementId, methodName, fallbackInput);
+    mountFallbackAutocompleteInput(elementId, dotNetHelper, methodName);
   }
 }
 
@@ -1045,7 +1186,7 @@ export async function updateUserMarker(lat, lng) {
   pendingUserPosition = { lat, lng };
   try {
     await loadGoogleMaps();
-    if (mapAuthFailed || !map || !userMarker) return;
+    if (hasAuthFailureForKey() || !map || !userMarker) return;
     pendingUserPosition = null;
     try {
       if (typeof userMarker.setPosition === "function") {
@@ -2120,7 +2261,68 @@ export function isPageHidden() {
   return typeof document !== "undefined" && document.hidden === true;
 }
 
-function updateTransportMarkerElement(element, location, heading) {
+const SELECTED_VEHICLE_Z_INDEX = 1000;
+
+function getVehicleMarkerKey(location) {
+  const id = location?.vehicleId;
+  if (id == null) return null;
+  return location.providerName
+    ? `${location.providerName}:${id}`
+    : String(id);
+}
+
+function applyMarkerSelection(marker, isSelected) {
+  if (!marker) return;
+  if (typeof marker.setZIndex === "function") {
+    marker.setZIndex(isSelected ? SELECTED_VEHICLE_Z_INDEX : undefined);
+  } else {
+    marker.zIndex = isSelected ? SELECTED_VEHICLE_Z_INDEX : null;
+  }
+  if (marker.content && marker.busData) {
+    const heading = marker.headingState ? marker.headingState.heading : null;
+    updateTransportMarkerElement(
+      marker.content,
+      marker.busData,
+      heading,
+      isSelected,
+    );
+  } else if (typeof marker.setLabel === "function" && marker.busData) {
+    const markerType = getTransportMarker(marker.busData);
+    marker.setLabel({
+      text: marker.busData.icon || markerType.icon,
+      fontSize: isSelected ? "28px" : "20px",
+    });
+  }
+}
+
+function selectVehicleMarker(markerKey, marker) {
+  if (selectedVehicleKey && selectedVehicleKey !== markerKey) {
+    applyMarkerSelection(activeMarkers[selectedVehicleKey], false);
+  }
+  selectedVehicleKey = markerKey;
+  applyMarkerSelection(marker, true);
+}
+
+function clearSelectedVehicle() {
+  const previousKey = selectedVehicleKey;
+  selectedVehicleKey = null;
+  if (!previousKey) return;
+  const previousMarker = activeMarkers[previousKey];
+  if (previousMarker) {
+    applyMarkerSelection(previousMarker, false);
+    if (currentInfoWindowAnchor === previousMarker) {
+      infoWindow?.close();
+      currentInfoWindowAnchor = null;
+    }
+  }
+}
+
+function updateTransportMarkerElement(
+  element,
+  location,
+  heading,
+  isSelected = false,
+) {
   const markerType = getTransportMarker(location);
   const nextClassName = `transport-marker ${markerType.className}`;
   const nextIconText = location.icon || markerType.icon;
@@ -2131,6 +2333,7 @@ function updateTransportMarkerElement(element, location, heading) {
     transform && markerType.sideFacing ? `${transform.tilt}deg` : null;
   const nextScaleX =
     transform && markerType.sideFacing ? String(transform.scaleX) : null;
+  const selected = Boolean(isSelected);
 
   const cache = element._renderCache;
   if (
@@ -2138,6 +2341,7 @@ function updateTransportMarkerElement(element, location, heading) {
     cache.className === nextClassName &&
     cache.iconText === nextIconText &&
     cache.hasHeading === hasHeading &&
+    cache.isSelected === selected &&
     cache.heading === nextHeading &&
     cache.tilt === nextTilt &&
     cache.scaleX === nextScaleX
@@ -2155,14 +2359,18 @@ function updateTransportMarkerElement(element, location, heading) {
   }
   element._iconEl = icon;
 
-  if (!cache || cache.className !== nextClassName) {
+  const classChanged = !cache || cache.className !== nextClassName;
+  if (classChanged) {
     element.className = nextClassName;
   }
   if (!cache || cache.iconText !== nextIconText) {
     icon.textContent = nextIconText;
   }
-  if (!cache || cache.hasHeading !== hasHeading) {
+  if (classChanged || cache.hasHeading !== hasHeading) {
     element.classList.toggle("has-heading", hasHeading);
+  }
+  if (classChanged || cache.isSelected !== selected) {
+    element.classList.toggle("transport-marker--selected", selected);
   }
 
   if (!cache || cache.heading !== nextHeading) {
@@ -2184,6 +2392,7 @@ function updateTransportMarkerElement(element, location, heading) {
     className: nextClassName,
     iconText: nextIconText,
     hasHeading,
+    isSelected: selected,
     heading: nextHeading,
     tilt: nextTilt,
     scaleX: nextScaleX,
@@ -2206,7 +2415,7 @@ function isSameVehicleSnapshot(previous, current) {
 }
 
 export async function syncMarkers(locations) {
-  if (!map || !infoWindow || mapAuthFailed) return;
+  if (!map || !infoWindow || hasAuthFailureForKey()) return;
 
   // Safety check for Blazor interop
   if (!locations || !Array.isArray(locations)) {
@@ -2229,10 +2438,9 @@ export async function syncMarkers(locations) {
         console.debug("syncMarkers: skipping invalid vehicle location", loc);
         continue;
       }
-      const markerKey = loc.providerName
-        ? `${loc.providerName}:${id}`
-        : String(id);
+      const markerKey = getVehicleMarkerKey(loc);
       currentIds.add(markerKey);
+      const isSelected = markerKey === selectedVehicleKey;
 
       const speedKmh = (loc.speed || 0) * 3.6;
       loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
@@ -2267,6 +2475,7 @@ export async function syncMarkers(locations) {
                   marker.content,
                   loc,
                   marker.headingState.heading,
+                  isSelected,
                 );
               }
             }
@@ -2283,29 +2492,41 @@ export async function syncMarkers(locations) {
         const pos = { lat: loc.lat, lng: loc.lng };
         let marker = null;
         const toggleInfoWindow = () => {
-          if (currentInfoWindowAnchor === marker) {
+          const currentKey = getVehicleMarkerKey(marker.busData);
+          if (
+            currentInfoWindowAnchor === marker ||
+            (currentKey !== null && selectedVehicleKey === currentKey)
+          ) {
             infoWindow.close();
             currentInfoWindowAnchor = null;
+            clearSelectedVehicle();
             notifyVehicleDeselected(marker.busData);
             return;
           }
+          selectVehicleMarker(currentKey, marker);
           infoWindow.setContent(buildVehicleInfoContent(id, marker.busData));
           infoWindow.open({ anchor: marker, map });
           currentInfoWindowAnchor = marker;
           notifyVehicleSelected(marker.busData);
         };
 
+        const baseMarkerOpts = { position: pos, map, title };
+        if (isSelected) baseMarkerOpts.zIndex = SELECTED_VEHICLE_Z_INDEX;
+
         marker = createMarkerWithFallback(
           () => {
             const headingState = resolveVehicleHeading(null, loc);
             const el = document.createElement("div");
-            updateTransportMarkerElement(el, loc, headingState.heading);
+            updateTransportMarkerElement(
+              el,
+              loc,
+              headingState.heading,
+              isSelected,
+            );
             el.style.fontSize = "28px";
 
             const advanced = new AdvancedMarkerElement({
-              position: pos,
-              map,
-              title,
+              ...baseMarkerOpts,
               content: el,
               gmpClickable: true,
             });
@@ -2323,12 +2544,10 @@ export async function syncMarkers(locations) {
           () => {
             const markerType = getTransportMarker(loc);
             const legacy = new google.maps.Marker({
-              position: pos,
-              map,
-              title,
+              ...baseMarkerOpts,
               label: {
                 text: loc.icon || markerType.icon,
-                fontSize: "20px",
+                fontSize: isSelected ? "28px" : "20px",
               },
             });
             legacy.busData = loc;
@@ -2431,10 +2650,14 @@ function appendBusInfoRow(container, label, value) {
   container.appendChild(row);
 }
 export function cleanupMap() {
+  mapInitSeq++;
   clearStaticRoute();
   clearRoute();
   activeDotNetHelper = null;
   if (staticRouteLayer) {
+    try {
+      window.google?.maps?.event?.clearInstanceListeners?.(staticRouteLayer);
+    } catch (_) {}
     staticRouteLayer.setMap(null);
     staticRouteLayer = null;
     staticRouteDotNetRef = null;
@@ -2452,15 +2675,24 @@ export function cleanupMap() {
     infoWindow.close();
     infoWindow = null;
   }
+  currentInfoWindowAnchor = null;
   if (userMarker) {
     removeAdvancedMarker(userMarker);
     userMarker = null;
   }
   pendingUserPosition = null;
-  map = null;
+  if (map) {
+    try {
+      window.google?.maps?.event?.clearInstanceListeners?.(map);
+    } catch (_) {}
+    map = null;
+  }
 
   // Fallback clear all autocompletes
-  for (const id in autocompletes) {
+  for (const id of new Set([
+    ...Object.keys(autocompletes),
+    ...Object.keys(autocompleteConfigs),
+  ])) {
     disposeAutocomplete(id);
   }
 }
@@ -2470,6 +2702,8 @@ export function cleanupMap() {
  * to prevent detached DOM memory leaks.
  */
 export function disposeAutocomplete(elementId) {
+  delete autocompleteInitSeq[elementId];
+  delete autocompleteConfigs[elementId];
   delete pendingAutocompleteValues[elementId];
   delete selectedPlaceLocations[elementId];
   if (autocompletes[elementId]) {

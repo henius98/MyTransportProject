@@ -21,7 +21,7 @@
                 <option value="">@(Language?["AllRoutesOption"] ?? "All routes")</option>
                 @foreach (var route in Routes)
                 {
-                    <option value="@route.Id">@route.Name (@route.Id)</option>
+                    <option @key="route.Id" value="@route.Id">@route.Name (@route.Id)</option>
                 }
             </select>
             <div class="@(IsErrorStatus ? "tracker-status tracker-status--error mt-2" : "small mt-2")"

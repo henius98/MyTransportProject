@@ -14,6 +14,7 @@ async function setup({ oldToken = null, oldUid = null, incomingToken = "new-fcm-
     functionsRegion: null,
     registrationCalls: [],
     registeredWorkerUrls: [],
+    firebaseAppCalls: 0,
     listenedInForeground: false,
     deletedTokens: 0,
     unsubscribed: 0,
@@ -112,7 +113,10 @@ async function setup({ oldToken = null, oldUid = null, incomingToken = "new-fcm-
   await messagingSdk.evaluate();
 
   const configModule = new SyntheticModule(["getFirebaseApp", "firebaseSdkBase"], function () {
-    this.setExport("getFirebaseApp", async () => app);
+    this.setExport("getFirebaseApp", async () => {
+      state.firebaseAppCalls += 1;
+      return app;
+    });
     this.setExport("firebaseSdkBase", "https://cdn.example.com/firebase/10.14.1");
   }, { context });
   await configModule.link(() => {});
@@ -256,4 +260,14 @@ test("status(uid) returns disabled when subscription exists but server registrat
   assert.equal(state.registrationCalls.length, 1);
   assert.equal(storage.get("push-token"), undefined);
   assert.equal(storage.get("push-uid"), undefined);
+});
+
+test("ensureForegroundListener defers Firebase app access until explicitly invoked", async () => {
+  const { state, pushNotifications } = await setup({ oldToken: "existing-token", oldUid: "user-123" });
+  assert.equal(state.firebaseAppCalls, 0);
+  assert.equal(state.listenedInForeground, false);
+
+  await pushNotifications.ensureForegroundListener();
+  assert.equal(state.firebaseAppCalls, 1);
+  assert.equal(state.listenedInForeground, true);
 });

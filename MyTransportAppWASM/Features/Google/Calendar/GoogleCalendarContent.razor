@@ -58,7 +58,7 @@
 
                 @{
                   RenderFragment<MyTransportAppWASM.Features.Google.Models.GoogleCalendar> calendarChoice = calendar =>
-                    @<label class="gcal-calendar-choice" style="--calendar-color: @Calendar.CalendarColor(calendar.Id)">
+                    @<label @key="calendar.Id" class="gcal-calendar-choice" style="--calendar-color: @Calendar.CalendarColor(calendar.Id)">
                       <input type="checkbox" checked="@Calendar.EnabledCalendars.Contains(calendar.Id)"
                              @onchange="() => Calendar.ToggleCalendarAsync(UserId, calendar.Id, lifetime.Token)" disabled="@Calendar.Busy" />
                       <span>@calendar.Summary</span>
@@ -129,9 +129,9 @@
                                   style="--calendar-color: @Calendar.CalendarColor(entry.CalendarId); --calendar-text-color: @Calendar.CalendarTextColor(entry.CalendarId)"
                                   @key="(entry.CalendarId, entry.Id)" title="@($"{entry.Summary} · {GoogleCalendarWorkflowService.EventWhen(entry)}")"
                                   @onclick="() => SelectEvent(entry)" disabled="@Calendar.Busy">
-                            @if (string.IsNullOrEmpty(entry.Start.Date) && GoogleCalendarWorkflowService.EventDate(entry.Start).Date == day.Date)
+                            @if (string.IsNullOrEmpty(entry.Start.Date) && entry.Start.ParsedEventDate.Date == day.Date)
                             {
-                              <span class="gcal-event-time">@GoogleCalendarWorkflowService.EventDate(entry.Start).ToString("t", CultureInfo.CurrentCulture)</span>
+                              <span class="gcal-event-time">@entry.Start.ParsedEventDate.ToString("t", CultureInfo.CurrentCulture)</span>
                             }
                             <span class="gcal-event-title">@(string.IsNullOrWhiteSpace(entry.Summary) ? "(No title)" :
                                                                                                                                                                       entry.Summary)</span>
@@ -165,7 +165,7 @@
                       </div>
                       @foreach (var entry in Calendar.EventsOn(detailsDay))
                       {
-                        <button type="button" class="gcal-day-event" style="--calendar-color: @Calendar.CalendarColor(entry.CalendarId)"
+                        <button @key="(entry.CalendarId, entry.Id)" type="button" class="gcal-day-event" style="--calendar-color: @Calendar.CalendarColor(entry.CalendarId)"
                                 @onclick="() => SelectEvent(entry)"><span class="gcal-event-dot"
                                                                     aria-hidden="true"></span><span><strong>@(string.IsNullOrWhiteSpace(entry.Summary) ? "(No title)" :
                                                                     entry.Summary)</strong><small>@GoogleCalendarWorkflowService.EventWhen(entry)</small></span></button>
@@ -214,7 +214,7 @@
                                         disabled="@(selectedEvent != null)">
                                   @foreach (var calendar in Calendar.Calendars.Where(calendar => GoogleCalendarWorkflowService.IsWritable(calendar) || calendar.Id == calendarId))
                                   {
-                                    <option value="@calendar.Id">@calendar.Summary</option>
+                                    <option @key="calendar.Id" value="@calendar.Id">@calendar.Summary</option>
                                   }
                                 </select>
                               </div>
@@ -384,10 +384,10 @@
     description = entry.Description ?? string.Empty;
     location = entry.Location ?? string.Empty;
     allDay = !string.IsNullOrEmpty(entry.Start.Date);
-    startsAt = GoogleCalendarWorkflowService.EventDate(entry.Start);
+    startsAt = entry.Start.ParsedEventDate;
     endsAt = allDay
-      ? GoogleCalendarWorkflowService.EventDate(entry.End).AddDays(-1)
-      : GoogleCalendarWorkflowService.EventDate(entry.End);
+      ? entry.End.ParsedEventDate.AddDays(-1)
+      : entry.End.ParsedEventDate;
     confirmDelete = false;
     dayDetails = null;
     showEditor = true;

@@ -5,157 +5,157 @@ using Xunit;
 
 namespace MyTransportAppWASM.Tests
 {
-    public class WeatherRateLimitingHandlerTests
+  public class WeatherRateLimitingHandlerTests
+  {
+    public WeatherRateLimitingHandlerTests()
     {
-        public WeatherRateLimitingHandlerTests()
-        {
-            WeatherRateLimitingHandler.ResetForTesting();
-        }
-
-        [Fact]
-        public async Task SendAsync_ThrottlesRequests_ToSameHost()
-        {
-            // Arrange
-            var handler = new WeatherRateLimitingHandler()
-            {
-                InnerHandler = new Mock<HttpMessageHandler>().Object
-            };
-
-            var mockInnerHandler = Mock.Get(handler.InnerHandler);
-            mockInnerHandler.Protected()
-                .Setup<Task<HttpResponseMessage>>(
-                    "SendAsync",
-                    ItExpr.IsAny<HttpRequestMessage>(),
-                    ItExpr.IsAny<CancellationToken>()
-                )
-                .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
-
-            var client = new HttpClient(handler);
-            var request1 = new HttpRequestMessage(HttpMethod.Get, "https://api.met.gov.my/data");
-            var request2 = new HttpRequestMessage(HttpMethod.Get, "https://api.met.gov.my/other");
-
-            // Act
-            // First request should pass immediately
-            var response1 = await client.SendAsync(request1);
-            
-            // Second request to same host within 500ms might be queued or delayed.
-            // Since we use a rate limiter with 1 per 500ms, the second call will take ~500ms
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-            var response2 = await client.SendAsync(request2);
-            watch.Stop();
-
-            // Assert
-            Assert.Equal(HttpStatusCode.OK, response1.StatusCode);
-            Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
-            
-            // Should have waited roughly 500ms (allow some tolerance for test runner)
-            Assert.True(watch.ElapsedMilliseconds >= 400, $"Elapsed was {watch.ElapsedMilliseconds}ms, expected >= 400ms");
-            
-            mockInnerHandler.Verify();
-        }
-
-        [Fact]
-        public async Task SendAsync_DoesNotThrottle_DifferentHosts()
-        {
-            // Arrange
-            var handler = new WeatherRateLimitingHandler()
-            {
-                InnerHandler = new Mock<HttpMessageHandler>().Object
-            };
-
-            var mockInnerHandler = Mock.Get(handler.InnerHandler);
-            mockInnerHandler.Protected()
-                .Setup<Task<HttpResponseMessage>>(
-                    "SendAsync",
-                    ItExpr.IsAny<HttpRequestMessage>(),
-                    ItExpr.IsAny<CancellationToken>()
-                )
-                .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
-
-            var client = new HttpClient(handler);
-            var request1 = new HttpRequestMessage(HttpMethod.Get, "https://api.met.gov.my/data");
-            var request2 = new HttpRequestMessage(HttpMethod.Get, "https://api.open-meteo.com/v1");
-
-            // Act
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-            var task1 = client.SendAsync(request1);
-            var task2 = client.SendAsync(request2);
-            await Task.WhenAll(task1, task2);
-            watch.Stop();
-
-            var response1 = await task1;
-            var response2 = await task2;
-            Assert.Equal(HttpStatusCode.OK, response1.StatusCode);
-            Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
-            
-            // Should be very fast (less than 500ms delay) because different hosts
-            Assert.True(watch.ElapsedMilliseconds < 400, $"Elapsed was {watch.ElapsedMilliseconds}ms, expected < 400ms");
-            
-            mockInnerHandler.Verify();
-        }
-
-        [Fact]
-        public async Task SendAsync_ThrottlesAcrossMultipleInstances_ToSameHost()
-        {
-            var handler1 = new WeatherRateLimitingHandler
-            {
-                InnerHandler = new Mock<HttpMessageHandler>().Object
-            };
-            var handler2 = new WeatherRateLimitingHandler
-            {
-                InnerHandler = new Mock<HttpMessageHandler>().Object
-            };
-
-            var mock1 = Mock.Get(handler1.InnerHandler);
-            mock1.Protected()
-                .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-                .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
-
-            var mock2 = Mock.Get(handler2.InnerHandler);
-            mock2.Protected()
-                .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-                .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
-
-            var client1 = new HttpClient(handler1);
-            var client2 = new HttpClient(handler2);
-
-            var response1 = await client1.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://api.shared-host.test/weather"));
-
-            var watch = System.Diagnostics.Stopwatch.StartNew();
-            var response2 = await client2.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://api.shared-host.test/forecast"));
-            watch.Stop();
-
-            Assert.Equal(HttpStatusCode.OK, response1.StatusCode);
-            Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
-            Assert.True(watch.ElapsedMilliseconds >= 400, $"Elapsed across instances was {watch.ElapsedMilliseconds}ms, expected >= 400ms");
-        }
-
-        [Fact]
-        public async Task SendAsync_ThrowsTimeoutException_WhenQueueIsSaturated()
-        {
-            var handler = new WeatherRateLimitingHandler
-            {
-                InnerHandler = new Mock<HttpMessageHandler>().Object
-            };
-
-            var mock = Mock.Get(handler.InnerHandler);
-            mock.Protected()
-                .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-                .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
-
-            var client = new HttpClient(handler);
-
-            // Queue requests to simulate saturation exceeding 10 seconds (each adds 500ms)
-            // 21 requests * 500ms = 10.5s delay for the 22nd request
-            Task? lastTask = null;
-            for (int i = 0; i < 21; i++)
-            {
-                lastTask = client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://api.saturated-host.test/data"));
-            }
-
-            // 22nd request exceeds the 10-second queue threshold and should immediately throw TimeoutException
-            await Assert.ThrowsAsync<TimeoutException>(() =>
-                client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://api.saturated-host.test/data")));
-        }
+      WeatherRateLimitingHandler.ResetForTesting();
     }
+
+    [Fact]
+    public async Task SendAsync_ThrottlesRequests_ToSameHost()
+    {
+      // Arrange
+      var handler = new WeatherRateLimitingHandler()
+      {
+        InnerHandler = new Mock<HttpMessageHandler>().Object
+      };
+
+      var mockInnerHandler = Mock.Get(handler.InnerHandler);
+      mockInnerHandler.Protected()
+          .Setup<Task<HttpResponseMessage>>(
+              "SendAsync",
+              ItExpr.IsAny<HttpRequestMessage>(),
+              ItExpr.IsAny<CancellationToken>()
+          )
+          .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
+
+      var client = new HttpClient(handler);
+      var request1 = new HttpRequestMessage(HttpMethod.Get, "https://api.met.gov.my/data");
+      var request2 = new HttpRequestMessage(HttpMethod.Get, "https://api.met.gov.my/other");
+
+      // Act
+      // First request should pass immediately
+      var response1 = await client.SendAsync(request1);
+
+      // Second request to same host within 500ms might be queued or delayed.
+      // Since we use a rate limiter with 1 per 500ms, the second call will take ~500ms
+      var watch = System.Diagnostics.Stopwatch.StartNew();
+      var response2 = await client.SendAsync(request2);
+      watch.Stop();
+
+      // Assert
+      Assert.Equal(HttpStatusCode.OK, response1.StatusCode);
+      Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
+
+      // Should have waited roughly 500ms (allow some tolerance for test runner)
+      Assert.True(watch.ElapsedMilliseconds >= 400, $"Elapsed was {watch.ElapsedMilliseconds}ms, expected >= 400ms");
+
+      mockInnerHandler.Verify();
+    }
+
+    [Fact]
+    public async Task SendAsync_DoesNotThrottle_DifferentHosts()
+    {
+      // Arrange
+      var handler = new WeatherRateLimitingHandler()
+      {
+        InnerHandler = new Mock<HttpMessageHandler>().Object
+      };
+
+      var mockInnerHandler = Mock.Get(handler.InnerHandler);
+      mockInnerHandler.Protected()
+          .Setup<Task<HttpResponseMessage>>(
+              "SendAsync",
+              ItExpr.IsAny<HttpRequestMessage>(),
+              ItExpr.IsAny<CancellationToken>()
+          )
+          .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
+
+      var client = new HttpClient(handler);
+      var request1 = new HttpRequestMessage(HttpMethod.Get, "https://api.met.gov.my/data");
+      var request2 = new HttpRequestMessage(HttpMethod.Get, "https://api.open-meteo.com/v1");
+
+      // Act
+      var watch = System.Diagnostics.Stopwatch.StartNew();
+      var task1 = client.SendAsync(request1);
+      var task2 = client.SendAsync(request2);
+      await Task.WhenAll(task1, task2);
+      watch.Stop();
+
+      var response1 = await task1;
+      var response2 = await task2;
+      Assert.Equal(HttpStatusCode.OK, response1.StatusCode);
+      Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
+
+      // Should be very fast (less than 500ms delay) because different hosts
+      Assert.True(watch.ElapsedMilliseconds < 400, $"Elapsed was {watch.ElapsedMilliseconds}ms, expected < 400ms");
+
+      mockInnerHandler.Verify();
+    }
+
+    [Fact]
+    public async Task SendAsync_ThrottlesAcrossMultipleInstances_ToSameHost()
+    {
+      var handler1 = new WeatherRateLimitingHandler
+      {
+        InnerHandler = new Mock<HttpMessageHandler>().Object
+      };
+      var handler2 = new WeatherRateLimitingHandler
+      {
+        InnerHandler = new Mock<HttpMessageHandler>().Object
+      };
+
+      var mock1 = Mock.Get(handler1.InnerHandler);
+      mock1.Protected()
+          .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+          .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
+
+      var mock2 = Mock.Get(handler2.InnerHandler);
+      mock2.Protected()
+          .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+          .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
+
+      var client1 = new HttpClient(handler1);
+      var client2 = new HttpClient(handler2);
+
+      var response1 = await client1.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://api.shared-host.test/weather"));
+
+      var watch = System.Diagnostics.Stopwatch.StartNew();
+      var response2 = await client2.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://api.shared-host.test/forecast"));
+      watch.Stop();
+
+      Assert.Equal(HttpStatusCode.OK, response1.StatusCode);
+      Assert.Equal(HttpStatusCode.OK, response2.StatusCode);
+      Assert.True(watch.ElapsedMilliseconds >= 400, $"Elapsed across instances was {watch.ElapsedMilliseconds}ms, expected >= 400ms");
+    }
+
+    [Fact]
+    public async Task SendAsync_ThrowsTimeoutException_WhenQueueIsSaturated()
+    {
+      var handler = new WeatherRateLimitingHandler
+      {
+        InnerHandler = new Mock<HttpMessageHandler>().Object
+      };
+
+      var mock = Mock.Get(handler.InnerHandler);
+      mock.Protected()
+          .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
+          .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
+
+      var client = new HttpClient(handler);
+
+      // Queue requests to simulate saturation exceeding 10 seconds (each adds 500ms)
+      // 21 requests * 500ms = 10.5s delay for the 22nd request
+      Task? lastTask = null;
+      for (int i = 0; i < 21; i++)
+      {
+        lastTask = client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://api.saturated-host.test/data"));
+      }
+
+      // 22nd request exceeds the 10-second queue threshold and should immediately throw TimeoutException
+      await Assert.ThrowsAsync<TimeoutException>(() =>
+          client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://api.saturated-host.test/data")));
+    }
+  }
 }
