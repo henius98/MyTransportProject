@@ -67,7 +67,7 @@
   "RoutePlannerTab": "路线规划",
   "MapStatusReady": "就绪",
   "MyLocationBtn": "我的位置",
-  "UpdateBusesBtn": "刷新公交",
+  "RefreshBusesBtn": "刷新公交",
   "OriginLabel": "起点",
   "DestinationLabel": "终点",
   "TravelModeLabel": "出行方式",

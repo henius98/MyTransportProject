@@ -21,6 +21,9 @@ window.themeManager = {
         if (document.body.classList.contains('theme-light') !== shouldBeLight) {
             document.body.classList.toggle('theme-light', shouldBeLight);
         }
+        if (document.body.classList.contains('theme-dark') !== !!isDarkMode) {
+            document.body.classList.toggle('theme-dark', !!isDarkMode);
+        }
         if (document.documentElement.getAttribute('data-bs-theme') !== nextTheme) {
             document.documentElement.setAttribute('data-bs-theme', nextTheme);
         }

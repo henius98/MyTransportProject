@@ -67,7 +67,7 @@
   "RoutePlannerTab": "Route Planner",
   "MapStatusReady": "Ready",
   "MyLocationBtn": "My Location",
-  "UpdateBusesBtn": "Update Buses",
+  "RefreshBusesBtn": "Refresh Buses",
   "OriginLabel": "Origin",
   "DestinationLabel": "Destination",
   "TravelModeLabel": "Travel Mode",

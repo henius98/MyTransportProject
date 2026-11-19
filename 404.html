@@ -9,35 +9,75 @@
       content="Real-time public transit tracking and weather-aware trip planning for Malaysia. Track buses, plan routes, and check weather forecasts."
     />
     <base href="/MyTransportProject/" />
-    <link href="_framework/dotnet.a5cvw2yd10.js" rel="preload" as="script" fetchpriority="high" crossorigin="anonymous" integrity="sha256-Pheaw8yxgJJwsbdzglF5G1HBX/Nb0bGXtGEY5HXOq3I=" />
+    <link href="_framework/dotnet.8dk4u4k0fk.js" rel="preload" as="script" fetchpriority="high" crossorigin="anonymous" integrity="sha256-HO7akYPOlHpH0BAGLp3pdAOEmtLZr2hgWwGASTAfs+w=" />
+    <link
+      rel="preload"
+      as="script"
+      href="_framework/blazor.webassembly.zxhwjtv6sc.js"
+    />
     <link rel="preconnect" href="https://www.gstatic.com" crossorigin />
 
     <!-- The splash is fully inlined below, so app styles can download without blocking FCP. -->
-    <link rel="preload" as="style" href="css/app.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <link rel="preload" as="style" href="MyTransportAppWASM.styles.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <link
+      rel="preload"
+      as="style"
+      href="css/app.css"
+      onload="
+        this.onload = null;
+        this.rel = 'stylesheet';
+      "
+    />
+    <link
+      rel="preload"
+      as="style"
+      href="MyTransportAppWASM.styles.css"
+      onload="
+        this.onload = null;
+        this.rel = 'stylesheet';
+      "
+    />
     <noscript>
       <link rel="stylesheet" href="css/app.css" />
       <link rel="stylesheet" href="MyTransportAppWASM.styles.css" />
     </noscript>
 
     <!-- Non-critical CSS loaded asynchronously -->
-    <link rel="preload" as="style" href="css/bootstrap-subset.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <noscript><link rel="stylesheet" href="css/bootstrap-subset.css" /></noscript>
+    <link
+      rel="preload"
+      as="style"
+      href="css/bootstrap-subset.css"
+      onload="
+        this.onload = null;
+        this.rel = 'stylesheet';
+      "
+    />
+    <noscript>
+      <link rel="stylesheet" href="css/bootstrap-subset.css" />
+    </noscript>
 
-    <link rel="preload" as="style" href="css/icons.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <noscript><link rel="stylesheet" href="css/icons.css" /></noscript>
+    <link
+      rel="preload"
+      as="style"
+      href="css/icons.css"
+      onload="
+        this.onload = null;
+        this.rel = 'stylesheet';
+      "
+    />
+    <noscript>
+      <link rel="stylesheet" href="css/icons.css" />
+    </noscript>
 
     <link rel="icon" type="image/svg+xml" href="myTransport.svg" />
-    <link rel="preload" href="i18n/en-US.json" as="fetch" crossorigin="anonymous" />
     <link href="manifest.webmanifest" rel="manifest" />
     <meta
       name="theme-color"
-      content="#ffffff"
+      content="#FAF7F2"
       media="(prefers-color-scheme: light)"
     />
     <meta
       name="theme-color"
-      content="#000000"
+      content="#1E1E1C"
       media="(prefers-color-scheme: dark)"
     />
     <link rel="apple-touch-icon" href="myTransport.svg" />
@@ -51,51 +91,89 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        background: rgba(0, 0, 0, 1); /* fallback dark */
+        background: rgba(0, 0, 0, 0.8);
+        /* fallback dark */
         z-index: 9999;
       }
+
       .splash-logo {
         width: 120px;
         height: 120px;
         animation: pulseLogo 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         filter: drop-shadow(0 0 20px rgba(56, 189, 248, 0.5));
       }
+
       .splash-text {
         margin-top: 24px;
-        font-family: system-ui, -apple-system, sans-serif;
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
         font-size: 1.25rem;
         font-weight: 600;
         color: #f8fafc;
         letter-spacing: 0.05em;
+        font-variant-numeric: tabular-nums;
         animation: fadeText 2s ease-in-out infinite alternate;
       }
+
+      .splash-text::after {
+        content: " " var(--blazor-load-percentage-text, "");
+      }
+
+      .splash-progress {
+        width: min(240px, 70vw);
+        height: 6px;
+        margin-top: 16px;
+        border-radius: 9999px;
+        background: rgba(248, 250, 252, 0.16);
+        overflow: hidden;
+      }
+
+      .splash-progress-bar {
+        width: var(--blazor-load-percentage, 0%);
+        height: 100%;
+        border-radius: inherit;
+        background: #38bdf8;
+        transition: width 0.2s ease-out;
+      }
+
       @keyframes pulseLogo {
         0%,
         100% {
           opacity: 1;
           transform: scale(1);
         }
+
         50% {
           opacity: 0.7;
           transform: scale(0.95);
         }
       }
+
       @keyframes fadeText {
         0% {
           opacity: 0.5;
         }
+
         100% {
           opacity: 1;
         }
       }
+
       /* Respect user's motion preference — disable infinite splash animations */
       @media (prefers-reduced-motion: reduce) {
         .splash-logo {
           animation: none;
         }
+
         .splash-text {
           animation: none;
           opacity: 1;
+        }
+
+        .splash-progress-bar {
+          transition: none;
         }
       }
     </style>
@@ -107,13 +185,21 @@
     <script>
       // Pre-apply saved theme to avoid flash before Blazor and theme-manager load
       (function () {
-        var saved = localStorage.getItem("theme-mode-global");
-        var isDark = saved !== "light"; // Default to dark
+        var saved = null;
+        try {
+          saved = localStorage.getItem("theme-mode-global");
+          if (!saved) {
+            localStorage.setItem("theme-mode-global", "light");
+          }
+        } catch {}
+        var isDark = saved === "dark"; // Default to Warm Technical Editorial light
         if (isDark) {
           document.body.classList.remove("theme-light");
+          document.body.classList.add("theme-dark");
           document.documentElement.setAttribute("data-bs-theme", "dark");
         } else {
           document.body.classList.add("theme-light");
+          document.body.classList.remove("theme-dark");
           document.documentElement.setAttribute("data-bs-theme", "light");
         }
       })();
@@ -129,6 +215,9 @@
           fetchpriority="high"
         />
         <div class="splash-text">Loading...</div>
+        <div class="splash-progress">
+          <div class="splash-progress-bar"></div>
+        </div>
       </div>
     </div>
 
@@ -142,36 +231,86 @@
     <script type="importmap">{
   "imports": {
     "./_framework/blazor.webassembly.js": "./_framework/blazor.webassembly.zxhwjtv6sc.js",
-    "./_framework/dotnet.js": "./_framework/dotnet.a5cvw2yd10.js",
-    "./_framework/dotnet.native.js": "./_framework/dotnet.native.0iaz1bt1xv.js",
+    "./_framework/dotnet.js": "./_framework/dotnet.8dk4u4k0fk.js",
+    "./_framework/dotnet.native.js": "./_framework/dotnet.native.yo2kiusye5.js",
     "./_framework/dotnet.runtime.js": "./_framework/dotnet.runtime.v2rwe8u38b.js"
   },
   "scopes": {},
   "integrity": {
     "./_framework/blazor.webassembly.js": "sha256-1xlHuu1iNOJiMMz2BCq95uekwHf6pdpTcgVNKVBboPs=",
     "./_framework/blazor.webassembly.zxhwjtv6sc.js": "sha256-1xlHuu1iNOJiMMz2BCq95uekwHf6pdpTcgVNKVBboPs=",
-    "./_framework/dotnet.a5cvw2yd10.js": "sha256-Pheaw8yxgJJwsbdzglF5G1HBX/Nb0bGXtGEY5HXOq3I=",
-    "./_framework/dotnet.js": "sha256-Pheaw8yxgJJwsbdzglF5G1HBX/Nb0bGXtGEY5HXOq3I=",
-    "./_framework/dotnet.native.0iaz1bt1xv.js": "sha256-6NwnWSZzaEN32FIB1ODakhoUE02O0oV0FsKukuhjcdA=",
-    "./_framework/dotnet.native.js": "sha256-6NwnWSZzaEN32FIB1ODakhoUE02O0oV0FsKukuhjcdA=",
+    "./_framework/dotnet.8dk4u4k0fk.js": "sha256-HO7akYPOlHpH0BAGLp3pdAOEmtLZr2hgWwGASTAfs+w=",
+    "./_framework/dotnet.js": "sha256-HO7akYPOlHpH0BAGLp3pdAOEmtLZr2hgWwGASTAfs+w=",
+    "./_framework/dotnet.native.js": "sha256-ohQHKVbf5Ucso3uNGAOBQBb2zqKum4XTeLOzCF3/Agw=",
+    "./_framework/dotnet.native.yo2kiusye5.js": "sha256-ohQHKVbf5Ucso3uNGAOBQBb2zqKum4XTeLOzCF3/Agw=",
     "./_framework/dotnet.runtime.js": "sha256-6SBqDbLLy460Bxd7wMZoiO97hZfLTuF+HRhWT3elS7U=",
     "./_framework/dotnet.runtime.v2rwe8u38b.js": "sha256-6SBqDbLLy460Bxd7wMZoiO97hZfLTuF+HRhWT3elS7U="
   }
 }</script>
-    <script src="js/theme-manager.js"></script>
-    <script src="_framework/blazor.webassembly.zxhwjtv6sc.js"></script>
+    <script src="js/theme-manager.js" defer></script>
+    <script src="js/wasm-gzip.js" defer></script>
+    <script
+      src="_framework/blazor.webassembly.zxhwjtv6sc.js"
+      autostart="false"
+      defer
+    ></script>
     <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function () {
-          var register = function () {
-            navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });
-          };
-          if ('requestIdleCallback' in window) {
-            requestIdleCallback(register, { timeout: 2500 });
-          } else {
-            setTimeout(register, 1000);
-          }
-        }, { once: true });
+      (function () {
+        function startBlazor() {
+          Blazor.start({
+            loadBootResource: function (type, name, defaultUri, integrity) {
+              if (
+                (type !== "dotnetwasm" && type !== "assembly") ||
+                typeof DecompressionStream !== "function" ||
+                !window.wasmGzip ||
+                !window.wasmGzip.canVerifyIntegrity(integrity) ||
+                (navigator.serviceWorker && navigator.serviceWorker.controller)
+              ) {
+                return undefined;
+              }
+              var fallbackFetch = function () {
+                return fetch(
+                  defaultUri,
+                  integrity ? { integrity: integrity } : undefined,
+                );
+              };
+              var gzUri = new URL(defaultUri, document.baseURI);
+              gzUri.pathname += ".gz";
+              return window.wasmGzip
+                .fetchDecompressedWasm(gzUri.href, integrity)
+                .then(function (decompressed) {
+                  return decompressed || fallbackFetch();
+                });
+            },
+          });
+        }
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", startBlazor, {
+            once: true,
+          });
+        } else {
+          startBlazor();
+        }
+      })();
+    </script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener(
+          "load",
+          function () {
+            var register = function () {
+              navigator.serviceWorker.register("service-worker.js", {
+                updateViaCache: "none",
+              });
+            };
+            if ("requestIdleCallback" in window) {
+              requestIdleCallback(register, { timeout: 2500 });
+            } else {
+              setTimeout(register, 1000);
+            }
+          },
+          { once: true },
+        );
       }
     </script>
 
