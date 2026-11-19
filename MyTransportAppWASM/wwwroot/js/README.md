@@ -16,7 +16,7 @@ This directory contains browser-side JavaScript modules and interop bridges. Fil
 | Script | Provider / Subsystem | Companion C# Service / Component | Purpose |
 |---|---|---|---|
 | `firebase-config.js` | Firebase Core | `Core/Auth/FirebaseClientService.cs`, `wwwroot/index.html` | Firebase App initialization with multi-environment appsettings merge |
-| `firebase-auth.js` | Firebase Authentication | `Core/Auth/FirebaseClientService.cs`, `Core/Auth/FirebaseAuthenticationStateProvider.cs` | Google Sign-In with popup and One Tap credential exchange |
+| `firebase-auth.js` | Firebase Authentication | `MyTransportAppWASM.Core/Auth/FirebaseClientService.cs`, `MyTransportAppWASM.Core/Auth/FirebaseAuthSessionService.cs` | Google Sign-In with popup and One Tap credential exchange |
 | `firebase-firestore.js` | Cloud Firestore | `Core/Auth/FirebaseClientService.cs`, `Core/Auth/UserSettingsService.cs` | User profile & application settings document persistence |
 | `firebase-task-extensions.js` | Cloud Firestore | `Features/Google/Services/GoogleTasksWorkflowService.cs` | Task metadata, recurrence, and dependency tracking in Firestore |
 | `push-notifications.js` | Firebase Cloud Messaging | `Core/Auth/FirebaseClientService.cs`, `Core/Layout/MainLayout.razor`, `Core/Layout/NavMenu.razor`, `wwwroot/firebase-messaging-sw.js` | Push notification permission, FCM token registration, and notification routing |
@@ -27,4 +27,5 @@ This directory contains browser-side JavaScript modules and interop bridges. Fil
 |---|---|---|---|
 | `geolocation.js` | Browser Geolocation API | `Core/Services/LocationService.cs` | GPS coordinate retrieval with fast network fallback and localStorage caching |
 | `locationPicker.js` | Station Map Dialog | `Features/Weather/Components/LocationSearchAutocomplete.razor` | Interactive SVG Malaysia weather station map dialog (zoom, pan, tooltips) |
-| `theme-manager.js` | Theme Management | `Core/Services/ThemeService.cs` | Pre-Blazor theme flash prevention and body class synchronization |
+| `theme-manager.js` | Theme Management | `MyTransportAppWASM.Core/Services/ThemeService.cs` | Pre-Blazor theme flash prevention and body class synchronization |
+| `wasm-gzip.js` | Compressed WASM Loader | `wwwroot/index.html`, `wwwroot/service-worker.published.js` | Gzip decompression (`DecompressionStream`), WebAssembly header validation, and SHA-256 integrity verification for `.wasm.gz` assets |

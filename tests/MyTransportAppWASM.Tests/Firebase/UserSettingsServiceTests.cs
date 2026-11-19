@@ -144,7 +144,7 @@ public class UserSettingsServiceTests
   private sealed class SettingsHarness : IAsyncDisposable
   {
     private readonly FirebaseClientService _firebase;
-    private readonly FirebaseAuthenticationStateProvider _auth;
+    private readonly FirebaseAuthSessionService _auth;
     public SettingsJsRuntime Js { get; }
     public UserSettingsService Settings { get; }
 
@@ -158,7 +158,7 @@ public class UserSettingsServiceTests
       Js = new SettingsJsRuntime { FailReads = failReads, FailWrites = failWrites };
       foreach (var (k, v) in cloud ?? []) Js.Cloud[k] = v;
       _firebase = new FirebaseClientService(Js);
-      _auth = new FirebaseAuthenticationStateProvider(_firebase);
+      _auth = new FirebaseAuthSessionService(_firebase);
       if (startUser) SetUser(uid);
       Settings = new UserSettingsService(new BrowserStorageService(Js), _auth, _firebase);
     }

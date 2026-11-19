@@ -1,0 +1,428 @@
+@namespace MyTransportAppWASM.Features.Google.Calendar
+@inherits FeatureComponentBase
+@using System.Globalization
+@implements IDisposable
+
+<div class="gcal" aria-busy="@Calendar.Busy">
+  <header class="gcal-topbar">
+    <div class="gcal-brand" aria-label="Calendar">
+      <button type="button" class="gcal-icon-button" aria-label="Toggle calendar sidebar" aria-expanded="@sidebarOpen"
+              @onclick="() => sidebarOpen = !sidebarOpen"><span class="bi bi-list" aria-hidden="true"></span></button>
+      <span class="gcal-brand-icon" aria-hidden="true"><span>@MalaysiaTime.Today.Day</span></span>
+      <span>Calendar</span>
+    </div>
+    <div class="gcal-navigation">
+      <button type="button" class="gcal-today" @onclick="GoToTodayAsync" disabled="@Calendar.Busy">Today</button>
+      <button type="button" class="gcal-icon-button" aria-label="Previous month" title="Previous month"
+              @onclick="() => MoveMonthAsync(-1)"
+              disabled="@(Calendar.Busy || Calendar.DisplayMonth.Year == 1 && Calendar.DisplayMonth.Month == 1)"><span class="bi bi-chevron-left"
+                                                                                      aria-hidden="true"></span></button>
+        <button type="button" class="gcal-icon-button" aria-label="Next month" title="Next month"
+                @onclick="() => MoveMonthAsync(1)"
+                disabled="@(Calendar.Busy || Calendar.DisplayMonth.Year == 9999 && Calendar.DisplayMonth.Month == 12)"><span class="bi bi-chevron-right"
+                                                                                            aria-hidden="true"></span></button>
+          <div class="gcal-month-heading">
+            <h2>@Calendar.DisplayMonth.ToString("MMMM yyyy", CultureInfo.CurrentCulture)</h2>
+            @if (showLunar)
+            {
+              <span lang="zh-Hans">@CalendarDateLabels.LunarMonthRange(Calendar.DisplayMonth)</span>
+            }
+          </div>
+        </div>
+        <div class="gcal-top-actions">
+          <button type="button" class="gcal-icon-button" aria-label="Refresh events and tasks"
+                  title="Refresh events and tasks" @onclick="RefreshAsync" disabled="@Calendar.Busy"><span class="bi bi-arrow-clockwise"
+                                                                                             aria-hidden="true"></span></button>
+        </div>
+        </header>
+
+        @if (!string.IsNullOrEmpty(Calendar.Error))
+        {
+          <p class="google-error gcal-message" role="alert">@Calendar.Error</p>
+        }
+        @if (!string.IsNullOrEmpty(Calendar.Status))
+        {
+          <p class="google-status gcal-message" role="status">@Calendar.Status</p>
+        }
+
+        <div class="gcal-body">
+          @if (sidebarOpen)
+          {
+            <aside class="gcal-sidebar" aria-label="Calendar navigation">
+              <button type="button" class="gcal-create" @onclick="() => OpenNewEvent()" disabled="@(Calendar.Busy || !Calendar.CanCreate)"><span
+                class="bi bi-plus-lg" aria-hidden="true"></span> Create</button>
+
+                <div class="gcal-task-countdown">
+                  <GoogleTaskCountdown UserId="@UserId" RefreshVersion="@Calendar.TaskRefreshVersion" />
+                </div>
+
+                @{
+                  RenderFragment<MyTransportAppWASM.Features.Google.Models.GoogleCalendar> calendarChoice = calendar =>
+                    @<label @key="calendar.Id" class="gcal-calendar-choice" style="--calendar-color: @Calendar.CalendarColor(calendar.Id)">
+                      <input type="checkbox" checked="@Calendar.EnabledCalendars.Contains(calendar.Id)"
+                             @onchange="() => Calendar.ToggleCalendarAsync(UserId, calendar.Id, lifetime.Token)" disabled="@Calendar.Busy" />
+                      <span>@calendar.Summary</span>
+                    </label>;
+                }
+                <div class="gcal-calendar-list">
+                  <h3>My calendars</h3>
+                  @if (Calendar.Calendars.Count == 0)
+                  {
+                    <p class="gcal-sidebar-note">@(Calendar.Busy ? "Loading calendars…" : "No calendars available")</p>
+                  }
+                  else
+                  {
+                    @foreach (var calendar in Calendar.Calendars.Where(calendar => !GoogleCalendarWorkflowService.IsHolidayCalendar(calendar)))
+                    {
+                      @calendarChoice(calendar)
+                    }
+                  }
+                </div>
+                <div class="gcal-calendar-list">
+                  <h3>Other calendars</h3>
+                  @foreach (var calendar in Calendar.Calendars.Where(GoogleCalendarWorkflowService.IsHolidayCalendar))
+                  {
+                    @calendarChoice(calendar)
+                  }
+                  <label class="gcal-calendar-choice gcal-lunar-choice">
+                    <input type="checkbox" @bind="showLunar" />
+                    <span lang="zh-Hans">农历</span>
+                  </label>
+                </div>
+              </aside>
+            }
+
+            <section class="gcal-main" aria-label="Month calendar">
+              @if (Calendar.Busy && Calendar.Events.Count == 0)
+              {
+                <p class="gcal-loading" role="status">Loading your events…</p>
+              }
+              <div class="gcal-month-grid" style="--gcal-rows: @Calendar.GridWeekCount">
+                @foreach (var day in Calendar.GridDays)
+                {
+                  var dayEvents = Calendar.EventsOn(day).ToList();
+                  @if (day.DayOfWeek == DayOfWeek.Monday)
+                  {
+                    <div class="gcal-week-number" aria-label="Week @ISOWeek.GetWeekOfYear(day)">@ISOWeek.GetWeekOfYear(day)</div>
+                  }
+                  <div class="gcal-day @(day.Month != Calendar.DisplayMonth.Month ? "gcal-day-outside" : "")" @key="day">
+                    @if (day < Calendar.GridStart.AddDays(7))
+                    {
+                      <span class="gcal-weekday">@WeekDays[((int)day.DayOfWeek + 6) % 7]</span>
+                    }
+                    <div class="gcal-date-label">
+                      <button type="button" class="gcal-day-number @(day.Date == MalaysiaTime.Today ? "gcal-day-today" : "")"
+                              aria-label="@day.ToString("D", CultureInfo.CurrentCulture)"
+                              aria-current="@(day.Date == MalaysiaTime.Today ? "date" : null)" @onclick="() => ChooseDayAsync(day)"
+                              disabled="@Calendar.Busy">@(day.Day == 1 ? day.ToString("MMM d", CultureInfo.CurrentCulture) :
+                              day.Day.ToString(CultureInfo.InvariantCulture))</button>
+                        @if (showLunar && CalendarDateLabels.SecondaryDateLabel(day) is { Length: > 0 } lunarDay)
+                        {
+                          <span class="gcal-lunar-day" lang="zh-Hans">(@lunarDay)</span>
+                        }
+                      </div>
+                      <div class="gcal-day-events">
+                        @foreach (var entry in dayEvents.Take(4))
+                        {
+                          <button type="button"
+                                  class="gcal-event @(string.IsNullOrEmpty(entry.Start.Date) ? "gcal-event-timed" : "gcal-event-all-day")"
+                                  style="--calendar-color: @Calendar.CalendarColor(entry.CalendarId); --calendar-text-color: @Calendar.CalendarTextColor(entry.CalendarId)"
+                                  @key="(entry.CalendarId, entry.Id)" title="@($"{entry.Summary} · {GoogleCalendarWorkflowService.EventWhen(entry)}")"
+                                  @onclick="() => SelectEvent(entry)" disabled="@Calendar.Busy">
+                            @if (string.IsNullOrEmpty(entry.Start.Date) && entry.Start.ParsedEventDate.Date == day.Date)
+                            {
+                              <span class="gcal-event-time">@entry.Start.ParsedEventDate.ToString("t", CultureInfo.CurrentCulture)</span>
+                            }
+                            <span class="gcal-event-title">@(string.IsNullOrWhiteSpace(entry.Summary) ? "(No title)" :
+                                                                                                                                                                      entry.Summary)</span>
+                            </button>
+                          }
+                          @if (dayEvents.Count > 4)
+                          {
+                            <button type="button" class="gcal-more" @onclick="() => ShowDayEvents(day)"
+                                    disabled="@Calendar.Busy">@($"{dayEvents.Count - 4} more")</button>
+                          }
+                        </div>
+                        <button type="button" class="gcal-add-day"
+                                aria-label="Create event on @day.ToString("D", CultureInfo.CurrentCulture)" title="Create event"
+                                @onclick="() => OpenNewEvent(day)" disabled="@(Calendar.Busy || !Calendar.CanCreate)"><span class="bi bi-plus"
+                                                                                                    aria-hidden="true"></span></button>
+                        </div>
+                      }
+                    </div>
+                  </section>
+                </div>
+
+                @if (dayDetails is { } detailsDay)
+                {
+                  <div class="gcal-overlay" @onclick="() => dayDetails = null">
+                    <section class="gcal-day-dialog" role="dialog" aria-modal="true"
+                             aria-label="Events on @detailsDay.ToString("D", CultureInfo.CurrentCulture)" @onclick:stopPropagation>
+                      <div class="gcal-dialog-heading">
+                        <h2>@detailsDay.ToString("dddd, MMMM d", CultureInfo.CurrentCulture)</h2><button type="button"
+                                                                                                       class="gcal-icon-button" aria-label="Close" @onclick="() => dayDetails = null"><span class="bi bi-x-lg"
+                                                                                                             aria-hidden="true"></span></button>
+                      </div>
+                      @foreach (var entry in Calendar.EventsOn(detailsDay))
+                      {
+                        <button @key="(entry.CalendarId, entry.Id)" type="button" class="gcal-day-event" style="--calendar-color: @Calendar.CalendarColor(entry.CalendarId)"
+                                @onclick="() => SelectEvent(entry)"><span class="gcal-event-dot"
+                                                                    aria-hidden="true"></span><span><strong>@(string.IsNullOrWhiteSpace(entry.Summary) ? "(No title)" :
+                                                                    entry.Summary)</strong><small>@GoogleCalendarWorkflowService.EventWhen(entry)</small></span></button>
+                        }
+                        <button type="button" class="gcal-day-create" @onclick="() => OpenNewEvent(detailsDay)"
+                                disabled="@(!Calendar.CanCreate)">Create event</button>
+                      </section>
+                    </div>
+                  }
+
+                  @if (showEditor)
+                  {
+                    <div class="gcal-overlay" @onclick="CloseEditor">
+                      <section class="gcal-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="google-event-editor-title"
+                               @onclick:stopPropagation>
+                        <div class="gcal-dialog-heading">
+                          <h2 id="google-event-editor-title">@(selectedEvent == null ? "Create event" : "Event details")</h2>
+                          <button type="button" class="gcal-icon-button" aria-label="Close" @onclick="CloseEditor"><span
+                            class="bi bi-x-lg" aria-hidden="true"></span></button>
+                          </div>
+                          @if (!string.IsNullOrEmpty(Calendar.Error))
+                          {
+                            <p class="google-error" role="alert">@Calendar.Error</p>
+                          }
+                          @if (!CanWrite)
+                          {
+                            <p class="google-muted">This calendar is read-only. You can view events here.</p>
+                          }
+                          else if (selectedEvent != null && !CanEdit)
+                          {
+                            <p class="google-muted">Manage this special or locked event in Google Calendar.</p>
+                          }
+                          @if (!string.IsNullOrEmpty(selectedEvent?.RecurringEventId))
+                          {
+                            <p class="google-muted">Changes here affect only this occurrence of the recurring event.</p>
+                          }
+                          @if (!string.IsNullOrEmpty(selectedEvent?.HtmlLink))
+                          {
+                            <p><a href="@selectedEvent.HtmlLink" target="_blank" rel="noopener noreferrer">Open in Google Calendar ↗</a></p>
+                          }
+                          <form @onsubmit="SaveAsync" @onsubmit:preventDefault>
+                            <fieldset class="google-editor" disabled="@(Calendar.Busy || !CanEdit)">
+                              <div class="google-field">
+                                <label for="google-event-calendar">Calendar</label>
+                                <select id="google-event-calendar" class="form-select" @bind="calendarId"
+                                        disabled="@(selectedEvent != null)">
+                                  @foreach (var calendar in Calendar.Calendars.Where(calendar => GoogleCalendarWorkflowService.IsWritable(calendar) || calendar.Id == calendarId))
+                                  {
+                                    <option @key="calendar.Id" value="@calendar.Id">@calendar.Summary</option>
+                                  }
+                                </select>
+                              </div>
+                              <div class="google-field"><label for="google-event-title">Title</label><input id="google-event-title"
+                                                                                                              class="form-control" @bind="title" required /></div>
+                                <label class="gcal-all-day"><input type="checkbox" @bind="allDay" /> All day</label>
+                                @if (allDay)
+                                {
+                                  <div class="gcal-form-row">
+                                    <div class="google-field"><label for="google-event-start-date">First day</label><input
+                                      id="google-event-start-date" class="form-control" type="date" @bind="startsAt" required /></div>
+                                      <div class="google-field"><label for="google-event-end-date">Last day</label><input
+                                        id="google-event-end-date" class="form-control" type="date" @bind="endsAt" required /></div>
+                                      </div>
+                                    }
+                        else
+                                    {
+                                      <div class="gcal-form-row">
+                                        <div class="google-field"><label for="google-event-start-time">Starts</label><input
+                                          id="google-event-start-time" class="form-control" type="datetime-local" @bind="startsAt" required />
+                                        </div>
+                                        <div class="google-field"><label for="google-event-end-time">Ends</label><input id="google-event-end-time"
+                                                                                                                          class="form-control" type="datetime-local" @bind="endsAt" required /></div>
+                                        </div>
+                                      }
+                                      <div class="google-field"><label for="google-event-location">Location</label><input id="google-event-location"
+                                                                                                                            class="form-control" @bind="location" /></div>
+                                        <div class="google-field"><label for="google-event-description">Description</label><textarea
+                                          id="google-event-description" class="form-control" rows="3" @bind="description"></textarea></div>
+                                          <div class="google-actions">
+                                            <button type="submit" class="btn btn--primary">@(Calendar.Busy ? "Please wait…" : selectedEvent == null ? "Save" :
+                                                                                                                                                                                                                                             "Save changes")</button>
+                                              @if (selectedEvent != null)
+                                              {
+                                                <button type="button" class="btn btn--secondary" @onclick="() => confirmDelete = true">Delete</button>
+                                              }
+                                            </div>
+                                            @if (confirmDelete)
+                                            {
+                                              <div class="google-status" role="alert">
+                                                <p>Delete @(string.IsNullOrEmpty(selectedEvent?.RecurringEventId) ? "this event" : "this occurrence") from
+                                                  your Google calendar?</p>
+                                                  <div class="google-actions"><button type="button" class="btn btn--secondary" @onclick="DeleteAsync">Yes,
+                                                    delete</button><button type="button" class="btn btn--secondary"
+                                                                           @onclick="() => confirmDelete = false">Keep event</button></div>
+                                                  </div>
+                                                }
+                                              </fieldset>
+                                            </form>
+                                          </section>
+                                        </div>
+                                      }
+                                    </div>
+
+@code {
+  private GoogleCalendarWorkflowService Calendar => GetFeatureService<GoogleCalendarWorkflowService>();
+
+  [Parameter, EditorRequired] public string UserId { get; set; } = string.Empty;
+
+  private static readonly string[] WeekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  private readonly CancellationTokenSource lifetime = new();
+  private string calendarId = string.Empty;
+  private DateTime? dayDetails;
+  private GoogleCalendarEvent? selectedEvent;
+  private string title = string.Empty;
+  private string description = string.Empty;
+  private string location = string.Empty;
+  private DateTime startsAt;
+  private DateTime endsAt;
+  private bool allDay;
+  private bool confirmDelete;
+  private bool showEditor;
+  private bool showLunar = true;
+  private bool sidebarOpen = true;
+
+  private bool CanWrite => Calendar.CanWrite(calendarId);
+  private bool CanEdit => Calendar.CanEdit(calendarId, selectedEvent);
+
+  protected override async Task OnInitializedAsync()
+  {
+    NewEvent();
+    await Calendar.InitializeAsync(UserId, lifetime.Token);
+    calendarId = Calendar.DefaultWritableCalendarId();
+  }
+
+  private Task MoveMonthAsync(int months) => SwitchMonthAsync(Calendar.DisplayMonth.AddMonths(months));
+
+  private Task GoToTodayAsync() => ChooseDayAsync(MalaysiaTime.Today);
+
+  private async Task ChooseDayAsync(DateTime day)
+  {
+    Calendar.SelectDay(day);
+    if (day.Month == Calendar.DisplayMonth.Month && day.Year == Calendar.DisplayMonth.Year) return;
+    await SwitchMonthAsync(day);
+  }
+
+  private async Task SwitchMonthAsync(DateTime targetDay)
+  {
+    if (Calendar.Busy || lifetime.IsCancellationRequested) return;
+    NewEvent(targetDay);
+    showEditor = false;
+    await Calendar.SwitchMonthAsync(UserId, targetDay, lifetime.Token);
+  }
+
+  private void ShowDayEvents(DateTime day) => dayDetails = day;
+
+  private void OpenNewEvent(DateTime? day = null)
+  {
+    NewEvent(day ?? Calendar.SelectedDay);
+    dayDetails = null;
+    showEditor = true;
+  }
+
+  private void CloseEditor()
+  {
+    if (Calendar.Busy) return;
+    showEditor = false;
+    confirmDelete = false;
+    selectedEvent = null;
+    Calendar.ClearError();
+  }
+
+  private async Task RefreshAsync()
+  {
+    await Calendar.RefreshAsync(UserId, incrementTasks: true, lifetime.Token);
+    if (lifetime.IsCancellationRequested) return;
+
+    if (string.IsNullOrEmpty(calendarId))
+      calendarId = Calendar.DefaultWritableCalendarId();
+
+    if (selectedEvent != null)
+    {
+      var refreshed = Calendar.FindEvent(selectedEvent.CalendarId, selectedEvent.Id);
+      if (refreshed == null)
+      {
+        selectedEvent = null;
+        showEditor = false;
+      }
+      else
+      {
+        SelectEvent(refreshed, clearMessages: false);
+      }
+    }
+  }
+
+  private void ResetEditorFields(DateTime? day = null)
+  {
+    selectedEvent = null;
+    if (!CanWrite)
+      calendarId = Calendar.DefaultWritableCalendarId();
+    title = description = location = string.Empty;
+    allDay = confirmDelete = false;
+    var date = day ?? MalaysiaTime.Today;
+    startsAt = date.Date.AddHours(Math.Min(MalaysiaTime.Now.Hour + 1, 23));
+    endsAt = startsAt.AddHours(1);
+  }
+
+  private void NewEvent(DateTime? day = null)
+  {
+    ResetEditorFields(day);
+    Calendar.ClearMessages();
+  }
+
+  private void SelectEvent(GoogleCalendarEvent entry, bool clearMessages = true)
+  {
+    selectedEvent = entry;
+    calendarId = entry.CalendarId;
+    title = entry.Summary;
+    description = entry.Description ?? string.Empty;
+    location = entry.Location ?? string.Empty;
+    allDay = !string.IsNullOrEmpty(entry.Start.Date);
+    startsAt = entry.Start.ParsedEventDate;
+    endsAt = allDay
+      ? entry.End.ParsedEventDate.AddDays(-1)
+      : entry.End.ParsedEventDate;
+    confirmDelete = false;
+    dayDetails = null;
+    showEditor = true;
+    if (clearMessages)
+    {
+      Calendar.ClearMessages();
+    }
+  }
+
+  private async Task SaveAsync()
+  {
+    var saved = await Calendar.SaveEventAsync(
+      UserId, calendarId, selectedEvent, title, description, location, allDay, startsAt, endsAt, lifetime.Token);
+    if (saved == null || lifetime.IsCancellationRequested) return;
+
+    showEditor = false;
+    selectedEvent = null;
+    confirmDelete = false;
+  }
+
+  private async Task DeleteAsync()
+  {
+    if (selectedEvent == null || !confirmDelete) return;
+    if (!await Calendar.DeleteEventAsync(UserId, selectedEvent, lifetime.Token) || lifetime.IsCancellationRequested)
+      return;
+
+    ResetEditorFields();
+    showEditor = false;
+  }
+
+  public void Dispose()
+  {
+    lifetime.Cancel();
+    lifetime.Dispose();
+  }
+}

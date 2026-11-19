@@ -1,17 +1,89 @@
+@using System.Reflection
 @using Microsoft.AspNetCore.Components.WebAssembly.Services
 @inject LazyAssemblyLoader LazyAssemblyLoader
 
-<Router AppAssembly="@typeof(App).Assembly" OnNavigateAsync="PrepareRouteAsync"
-        NotFoundPage="@typeof(MyTransportAppWASM.Core.Pages.NotFound)">
+<Router AppAssembly="@typeof(App).Assembly" AdditionalAssemblies="@_additionalAssemblies"
+        OnNavigateAsync="PrepareRouteAsync">
   <Found Context="routeData">
-    <!-- All routes are public, so no Authorizing message is shown; Firebase sign-in stays in the account UI. -->
-    <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
-    <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    @if (_routeLoadFailed)
+    {
+      <LayoutView Layout="@typeof(MainLayout)">
+        @RenderRouteLoadError
+      </LayoutView>
+    }
+    else
+    {
+      <!-- All routes are public, so no Authorizing message is shown; Firebase sign-in stays in the account UI. -->
+      <RouteView RouteData="@routeData" DefaultLayout="@typeof(MainLayout)" />
+      <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    }
   </Found>
+  <NotFound>
+    <LayoutView Layout="@typeof(MainLayout)">
+      @if (_routeLoadFailed)
+      {
+        @RenderRouteLoadError
+      }
+      else
+      {
+        <MyTransportAppWASM.Core.Pages.NotFound />
+      }
+    </LayoutView>
+  </NotFound>
 </Router>
 
 @code {
+  private const string FeaturesAssemblyFileName = "MyTransportAppWASM.Features.dll";
+  private const string GtfsAssemblyFileName = "MyTransportAppWASM.Gtfs.dll";
+
+  private List<Assembly> _additionalAssemblies = [];
+  private Assembly? _loadedFeaturesAssembly;
+  private bool _featuresAssemblyLoaded;
   private bool _gtfsAssemblyLoaded;
+  private bool _routeLoadFailed;
+  private bool _isRetryingRouteLoad;
+  private string? _failedRoutePath;
+  private int _routeLoadSeq;
+
+  internal Func<IEnumerable<string>, Task<IEnumerable<Assembly>>>? LoadAssembliesOverride { get; set; }
+  internal Func<string, Assembly?>? FindLoadedAssemblyOverride { get; set; }
+
+  private RenderFragment RenderRouteLoadError => @<div class="card p-4 text-center route-load-error" role="alert">
+    <h1 class="h3 mb-2">Unable to load page</h1>
+    <p class="text-dim mb-4">This page could not be downloaded. Check your connection and try again.</p>
+    <div class="d-flex justify-content-center gap-2 flex-wrap">
+      <button type="button" class="btn btn--primary" @onclick="RetryRouteLoadAsync" disabled="@_isRetryingRouteLoad">
+        @(_isRetryingRouteLoad ? "Retrying..." : "Retry")
+      </button>
+      <a class="btn" href="">Return to Home</a>
+    </div>
+  </div>;
+
+  internal static ReadOnlySpan<char> TrimRoutePath(string navigationPath)
+  {
+    var route = navigationPath.AsSpan();
+    var queryOrHash = route.IndexOfAny('?', '#');
+    if (queryOrHash >= 0)
+    {
+      route = route[..queryOrHash];
+    }
+
+    return route.Trim('/');
+  }
+
+  internal static bool ShouldLoadFeaturesAssembly(string? navigationPath, bool alreadyLoaded)
+  {
+    if (alreadyLoaded || string.IsNullOrEmpty(navigationPath))
+    {
+      return false;
+    }
+
+    var route = TrimRoutePath(navigationPath);
+    return route.Equals("map", StringComparison.OrdinalIgnoreCase)
+      || route.Equals("weather", StringComparison.OrdinalIgnoreCase)
+      || route.Equals("fortune", StringComparison.OrdinalIgnoreCase)
+      || route.StartsWith("google/", StringComparison.OrdinalIgnoreCase);
+  }
 
   internal static bool ShouldLoadGtfsAssembly(string? navigationPath, bool alreadyLoaded)
   {
@@ -20,31 +92,124 @@
       return false;
     }
 
-    var route = navigationPath.AsSpan().Trim('/');
-    var queryOrHash = route.IndexOfAny('?', '#');
-    if (queryOrHash >= 0)
-    {
-      route = route[..queryOrHash];
-    }
-
-    return route.Equals("map", StringComparison.OrdinalIgnoreCase);
+    return TrimRoutePath(navigationPath).Equals("map", StringComparison.OrdinalIgnoreCase);
   }
 
   private async Task PrepareRouteAsync(NavigationContext navigation)
   {
-    if (!ShouldLoadGtfsAssembly(navigation.Path, _gtfsAssemblyLoaded))
+    var loadSeq = ++_routeLoadSeq;
+    _isRetryingRouteLoad = false;
+    _routeLoadFailed = false;
+    _failedRoutePath = null;
+    await LoadRouteAssembliesAsync(navigation.Path, loadSeq, navigation.CancellationToken);
+  }
+
+  private async Task RetryRouteLoadAsync()
+  {
+    if (_isRetryingRouteLoad)
     {
+      return;
+    }
+
+    var loadSeq = ++_routeLoadSeq;
+    _isRetryingRouteLoad = true;
+    try
+    {
+      await LoadRouteAssembliesAsync(_failedRoutePath, loadSeq, CancellationToken.None);
+    }
+    finally
+    {
+      if (loadSeq == _routeLoadSeq)
+      {
+        _isRetryingRouteLoad = false;
+      }
+    }
+  }
+
+  private async Task LoadRouteAssembliesAsync(string? navigationPath, int loadSeq, CancellationToken cancellationToken)
+  {
+    var loadFeatures = ShouldLoadFeaturesAssembly(navigationPath, _featuresAssemblyLoaded);
+    var loadGtfs = ShouldLoadGtfsAssembly(navigationPath, _gtfsAssemblyLoaded);
+    if (!loadFeatures && !loadGtfs)
+    {
+      CompleteRouteLoad(loadSeq);
       return;
     }
 
     try
     {
-      await LazyAssemblyLoader.LoadAssembliesAsync(["MyTransportAppWASM.Gtfs.dll"]);
-      _gtfsAssemblyLoaded = true;
+      if (loadFeatures && loadGtfs)
+      {
+        await Task.WhenAll(LoadFeaturesAssemblyAsync(), LoadGtfsAssemblyAsync());
+      }
+      else if (loadFeatures)
+      {
+        await LoadFeaturesAssemblyAsync();
+      }
+      else
+      {
+        await LoadGtfsAssemblyAsync();
+      }
+
+      CompleteRouteLoad(loadSeq);
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || loadSeq != _routeLoadSeq)
+    {
     }
     catch (Exception ex)
     {
-      Console.Error.WriteLine($"Failed to load GTFS assembly: {ex.Message}");
+      if (cancellationToken.IsCancellationRequested || loadSeq != _routeLoadSeq)
+      {
+        return;
+      }
+      Console.Error.WriteLine($"Failed to load route assemblies: {ex.Message}");
+      _routeLoadFailed = true;
+      _failedRoutePath = navigationPath;
     }
+  }
+
+  private Task<IEnumerable<Assembly>> LoadAssemblyFileAsync(string assemblyFileName) =>
+    LoadAssembliesOverride is not null
+      ? LoadAssembliesOverride([assemblyFileName])
+      : LazyAssemblyLoader.LoadAssembliesAsync([assemblyFileName]);
+
+  private async Task LoadFeaturesAssemblyAsync()
+  {
+    var loaded = await LoadAssemblyFileAsync(FeaturesAssemblyFileName);
+    var featuresAssembly = loaded.FirstOrDefault()
+      ?? (FindLoadedAssemblyOverride is not null
+        ? FindLoadedAssemblyOverride(FeaturesAssemblyFileName)
+        : FindLoadedAssembly(FeaturesAssemblyFileName))
+      ?? throw new InvalidOperationException($"Route assembly '{FeaturesAssemblyFileName}' could not be resolved after loading.");
+
+    _loadedFeaturesAssembly = featuresAssembly;
+    _featuresAssemblyLoaded = true;
+  }
+
+  private async Task LoadGtfsAssemblyAsync()
+  {
+    await LoadAssemblyFileAsync(GtfsAssemblyFileName);
+    _gtfsAssemblyLoaded = true;
+  }
+
+  private void CompleteRouteLoad(int loadSeq)
+  {
+    if (_loadedFeaturesAssembly is not null && !_additionalAssemblies.Contains(_loadedFeaturesAssembly))
+    {
+      _additionalAssemblies = [.. _additionalAssemblies, _loadedFeaturesAssembly];
+    }
+
+    if (loadSeq == _routeLoadSeq)
+    {
+      _routeLoadFailed = false;
+      _failedRoutePath = null;
+    }
+  }
+
+  private static Assembly? FindLoadedAssembly(string assemblyFileName)
+  {
+    var simpleName = Path.GetFileNameWithoutExtension(assemblyFileName);
+    return AppDomain.CurrentDomain.GetAssemblies()
+      .FirstOrDefault(assembly => string.Equals(assembly.GetName().Name, simpleName, StringComparison.OrdinalIgnoreCase));
   }
 }

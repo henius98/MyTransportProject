@@ -3,7 +3,6 @@ using System.Reflection;
 using System.Text;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -246,7 +245,7 @@ public class WeatherLocationInputTests
       IPlaceResolutionService placeResolution,
       IWeatherStationCatalogService stationCatalog)
   {
-    var cache = new MemoryCache(new MemoryCacheOptions());
+    var cache = new AppMemoryCache();
     return new WeatherPlannerService(
         new HttpClient(new StubHandler()),
         cache,

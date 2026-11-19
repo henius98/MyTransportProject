@@ -1,0 +1,46 @@
+@inject AppStateService AppState
+@inject NavigationManager Navigation
+
+<PageTitle>@(Language?[Title] ?? Title) · MyTransportApp</PageTitle>
+
+<section class="google-workspace @(IsTasksDashboard ? "google-workspace--tasks" : IsCalendarDashboard ? "google-workspace--calendar" : "")">
+  @if (AuthState is null || !AuthState.IsInitialized)
+  {
+    <p class="google-status" role="status" aria-live="polite">@(Language?["CheckingGoogleSignIn"] ?? "Checking your Google sign-in…")</p>
+  }
+  else if (AuthState.IsAuthenticated && AuthState.UserId is { Length: > 0 } uid)
+  {
+    @if (string.IsNullOrEmpty(Service))
+    {
+      <div @key="uid">@ChildContent(uid)</div>
+    }
+    else
+    {
+      <GoogleConnection @key="(uid, Service)" UserId="@uid" Service="@Service">
+        @ChildContent(uid)
+      </GoogleConnection>
+    }
+  }
+  else
+  {
+    <div class="google-panel google-empty">
+      <span class="bi @(IsCalendarDashboard ? "bi-calendar3" : IsTasksDashboard ? "bi-check2-square" : "bi-google") google-service-icon" aria-hidden="true"></span>
+      <h1 class="h2">@(Language?["GoogleSignInPromptTitle"] ?? "Sign in to use your Google services")</h1>
+      <p class="google-muted">@(Language?["GoogleSignInPromptSubtitle"] ?? "View your events and manage your tasks from one place.")</p>
+      <button type="button" class="btn btn--primary" @onclick="SignIn">@(Language?["SignInWithGoogle"] ?? "Sign in with Google")</button>
+    </div>
+  }
+</section>
+
+@code {
+  [CascadingParameter] private LanguageService? Language { get; set; }
+  [CascadingParameter] private AuthSessionState? AuthState { get; set; }
+  [Parameter, EditorRequired] public string Title { get; set; } = "";
+  [Parameter] public string? Service { get; set; }
+  [Parameter, EditorRequired] public RenderFragment<string> ChildContent { get; set; } = default!;
+
+  private bool IsTasksDashboard => Service == "tasks";
+  private bool IsCalendarDashboard => Service == "calendar";
+
+  private void SignIn() => AppState.RequestShowLogin(Navigation.Uri);
+}

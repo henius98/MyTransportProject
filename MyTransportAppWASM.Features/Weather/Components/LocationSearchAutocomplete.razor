@@ -1,0 +1,393 @@
+@inherits FeatureComponentBase
+@inject IJSRuntime JSRuntime
+@implements IAsyncDisposable
+
+<div class="d-flex gap-2 align-items-center w-100">
+  <div class="position-relative flex-grow-1">
+    <input class="form-input w-100" id="@Id" @bind="_searchText" @bind:event="oninput" @bind:after="TriggerSearch"
+           @onkeyup="HandleKeyUp" @onkeydown="HandleKeyDown" role="combobox"
+           aria-expanded="@(_showSuggestions ? "true" : "false")" aria-controls="@ListboxId" aria-autocomplete="list"
+           title="Try Langkawi, Ds001, or 6.37, 99.79. Coordinates use decimal degrees, latitude first."
+           aria-activedescendant="@(_activeIndex >= 0 && _suggestions.Count > _activeIndex ? $"suggestion-{_activeIndex}" : null)"
+           placeholder="Name, ID, or latitude, longitude" />
+
+    @if (_showSuggestions)
+    {
+      <div class="position-absolute w-100 mt-1 p-0"
+           style="z-index: 1000; max-height: 250px; overflow-y: auto; background: var(--card-bg); border-radius: var(--radius-panel); border: var(--border-crisp); box-shadow: var(--shadow-container); overflow-x: hidden;">
+        <ul id="@ListboxId" class="list-unstyled m-0" role="listbox">
+          @if (_isSearchingSuggestions && _suggestions.Count == 0)
+          {
+            <li class="p-2 text-muted" role="option" aria-disabled="true">Searching...</li>
+          }
+          else if (!_isSearchingSuggestions && _suggestions.Count == 0)
+          {
+            <li class="p-2 text-muted" role="option" aria-disabled="true">No matching location. Use a forecast name or ID,
+              or valid latitude, longitude.</li>
+            }
+                else
+            {
+              @for (int i = 0; i < _suggestions.Count; i++)
+              {
+                var suggestion = _suggestions[i];
+                int currentIndex = i;
+                bool isActive = currentIndex == _activeIndex;
+
+                <li @key="(suggestion.LocationId, suggestion.Name, suggestion.Lat, suggestion.Lng)"
+                    id="suggestion-@currentIndex" class="p-2 autocomplete-suggestion @(isActive ? "autocomplete-suggestion--active" : "")"
+                    role="option" aria-selected="@(isActive ? "true" : "false")"
+                    @onclick="() => SelectSuggestion(suggestion)" @onmouseover="() => _activeIndex = currentIndex">
+                  <strong>@suggestion.Name</strong><br />
+                  <small class="autocomplete-suggestion__meta @(isActive ? "" : "text-dim")">@(string.IsNullOrWhiteSpace(suggestion.LocationId) ? suggestion.FormattedAddress : $"MET ID: {suggestion.LocationId}")</small>
+                </li>
+              }
+            }
+          </ul>
+        </div>
+      }
+    </div>
+
+    <button type="button" class="btn btn--secondary btn--icon" @onclick="OpenMapModal" title="Select on Map"
+            aria-label="Select on Map">
+      <i class="bi bi-map" aria-hidden="true"></i>
+    </button>
+  </div>
+
+  <dialog id="location-picker-modal" @ref="_mapDialog" @onclose="HandleDialogClosedAsync" aria-labelledby="map-modal-title" class="location-picker-dialog">
+    <div class="d-flex flex-column h-100">
+      <div class="p-3 d-flex justify-content-between align-items-center" style="border-bottom: var(--hairline-dashed);">
+        <h5 id="map-modal-title" class="m-0" style="font-family: var(--font-display); font-size: 1.25rem; font-weight: 800; text-transform: none; letter-spacing: -0.02em; color: var(--text-color);">Select a Location</h5>
+        <form method="dialog">
+          <button class="btn-close" aria-label="Close" @onclick="CloseMapModal"></button>
+        </form>
+      </div>
+
+      <!-- Static map with selectable forecast locations -->
+      <div class="location-picker-content">
+        <label class="form-label" for="location-picker-search">Find a forecast location by name or ID</label>
+        <input id="location-picker-search" class="form-input w-100" placeholder="e.g., Langkawi or Ds001"
+               @bind="_mapSearch" @bind:event="oninput" />
+        @if (_isMapModalOpen && _isLoadingMap)
+        {
+          <!-- Blazor loading status -->
+          <div class="location-picker-status" role="status">Loading locations...</div>
+        }
+        else if (_isMapModalOpen && _mapLocations.Count == 0)
+        {
+          <div class="location-picker-status">No forecast locations are available.</div>
+        }
+        else if (_isMapModalOpen)
+        {
+          var filteredLocations = FilteredMapLocations;
+          <p class="location-picker-hint">Select a dot or search for a location. Zoom with the buttons or mouse wheel, then
+            drag to move the map.</p>
+            <div class="location-picker-map" @ref="_mapViewport">
+              <svg viewBox="0 0 1000 332" role="img" aria-label="Map of Malaysia showing forecast locations" @ref="_mapSvg">
+                <image href="maps/malaysia-static-map.svg" width="1000" height="332" />
+                <!-- Project forecast markers onto the SimpleMaps map -->
+                @foreach (var location in filteredLocations)
+                {
+                  <circle @key="location.LocationId" class="location-picker-dot" cx="@MapX(location.Longitude)" cy="@MapY(location.Latitude)" r="4.5"
+                          data-location-name="@location.LocationName" @onclick="() => SelectMapLocation(location)" />
+                }
+              </svg>
+              <div class="location-picker-zoom-controls" aria-label="Map zoom controls">
+                <button type="button" aria-label="Zoom in" title="Zoom in" @onclick="() => ZoomMap(1.5)">+</button>
+                <button type="button" aria-label="Zoom out" title="Zoom out" @onclick="() => ZoomMap(1 / 1.5)">−</button>
+              </div>
+              <div class="location-picker-tooltip" role="tooltip" hidden @ref="_mapTooltip"></div>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_mapSearch))
+            {
+              <ul class="location-picker-results" aria-label="Matching forecast locations">
+                @foreach (var location in filteredLocations.Take(15))
+                {
+                  <li @key="location.LocationId"><button type="button" @onclick="() => SelectMapLocation(location)">@location.LocationName
+                    (@location.LocationId)</button></li>
+                  }
+                </ul>
+                @if (filteredLocations.Count == 0)
+                {
+                  <p class="location-picker-hint">No locations found.</p>
+                }
+              }
+            }
+          </div>
+        </div>
+      </dialog>
+
+@code {
+  private IPlaceResolutionService PlaceResolutionService => GetFeatureService<IPlaceResolutionService>();
+  private IWeatherStationCatalogService StationCatalog => GetFeatureService<IWeatherStationCatalogService>();
+
+  [Parameter] public string? Id { get; set; }
+  [Parameter] public string Value { get; set; } = string.Empty;
+  [Parameter] public EventCallback<string> ValueChanged { get; set; }
+  [Parameter]
+  public EventCallback<PlaceSuggestion> OnSuggestionSelected
+  {
+    get; set;
+  }
+
+  private string _searchText = string.Empty;
+  private CancellationTokenSource? _debounceCts;
+  private List<PlaceSuggestion> _suggestions = new();
+  private bool _showSuggestions = false;
+  private bool _isSearchingSuggestions = false;
+
+  private ElementReference _mapDialog;
+  private ElementReference _mapViewport;
+  private ElementReference _mapSvg;
+  private ElementReference _mapTooltip;
+  private bool _isMapModalOpen;
+  private bool _isLoadingMap = false;
+  private bool _initializeMap;
+  private IReadOnlyList<MetLocation> _mapLocations = Array.Empty<MetLocation>();
+  private string _mapSearch = string.Empty;
+  private JsModuleLoader? _mapModule;
+  private bool _disposed;
+  private string ListboxId => $"{Id ?? "location-search"}-listbox";
+  // The source SVG's embedded calibration points map longitude and latitude to its 1000 x 332 viewBox.
+  private static double MapX(double longitude) => 90.9 + (longitude - 100.62687099273207) * 46.30559021697878;
+  private static double MapY(double latitude) => 302.2 - (latitude - 1.176590816028057) * 46.44711959017247;
+  private IReadOnlyList<MetLocation> FilteredMapLocations
+  {
+    get
+    {
+      var query = _mapSearch.Trim();
+      return string.IsNullOrEmpty(query)
+        ? _mapLocations
+        : _mapLocations.Where(location => location.LocationName?.Contains(query, StringComparison.OrdinalIgnoreCase) == true
+            || location.LocationId?.Contains(query, StringComparison.OrdinalIgnoreCase) == true).ToList();
+    }
+  }
+
+  protected override void OnInitialized()
+  {
+    _searchText = Value;
+  }
+
+  protected override void OnParametersSet()
+  {
+    if (Value != _searchText)
+    {
+      ResetDebounceCts();
+      _showSuggestions = false;
+      _searchText = Value;
+    }
+  }
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (_initializeMap && _mapModule?.LoadedModule is { } mapModule)
+    {
+      _initializeMap = false;
+      await mapModule.InvokeVoidAsync("initializeMap", _mapSvg, _mapViewport, _mapTooltip);
+    }
+  }
+
+  private async Task TriggerSearch()
+  {
+    await ValueChanged.InvokeAsync(_searchText);
+    if (_disposed) return;
+
+    ResetDebounceCts();
+    _suggestions.Clear();
+    _activeIndex = -1;
+
+    if (string.IsNullOrWhiteSpace(_searchText))
+    {
+      _isSearchingSuggestions = false;
+      _showSuggestions = false;
+      return;
+    }
+
+    _debounceCts = new CancellationTokenSource();
+    _isSearchingSuggestions = true;
+    _showSuggestions = true;
+
+    _ = DebounceSearchAsync(_searchText, _debounceCts.Token);
+  }
+
+  private async Task DebounceSearchAsync(string searchText, CancellationToken cancellationToken)
+  {
+    try
+    {
+      await Task.Delay(400, cancellationToken);
+
+      if (string.IsNullOrWhiteSpace(searchText))
+      {
+        _suggestions.Clear();
+        _isSearchingSuggestions = false;
+        if (!_disposed)
+        {
+          await InvokeAsync(StateHasChanged);
+        }
+        return;
+      }
+
+      var results = await PlaceResolutionService.GetSuggestionsAsync(searchText, cancellationToken);
+      cancellationToken.ThrowIfCancellationRequested();
+
+      if (!_disposed)
+      {
+        await InvokeAsync(() =>
+        {
+          _suggestions = results;
+          _activeIndex = -1;
+          _isSearchingSuggestions = false;
+          StateHasChanged();
+        });
+      }
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+      // A newer keystroke superseded this search.
+    }
+    catch (Exception ex)
+    {
+      if (_disposed) return;
+
+      Console.Error.WriteLine($"Location search failed: {ex.Message}");
+      await InvokeAsync(() =>
+      {
+        _suggestions.Clear();
+        _isSearchingSuggestions = false;
+        StateHasChanged();
+      });
+    }
+  }
+
+  private int _activeIndex = -1;
+
+  private async Task HandleKeyDown(KeyboardEventArgs e)
+  {
+    if (!_showSuggestions || _suggestions.Count == 0) return;
+
+    if (e.Key == "ArrowDown")
+    {
+      _activeIndex = (_activeIndex + 1) % _suggestions.Count;
+    }
+    else if (e.Key == "ArrowUp")
+    {
+      _activeIndex = _activeIndex <= 0 ? _suggestions.Count - 1 : _activeIndex - 1;
+    }
+    else if (e.Key == "Enter" && _activeIndex >= 0 && _activeIndex < _suggestions.Count)
+    {
+      await SelectSuggestion(_suggestions[_activeIndex]);
+    }
+  }
+
+  private async Task HandleKeyUp(KeyboardEventArgs e)
+  {
+    if (e.Key == "Enter" || e.Key == "Escape")
+    {
+      _showSuggestions = false;
+    }
+  }
+
+  private async Task SelectSuggestion(PlaceSuggestion suggestion)
+  {
+    ResetDebounceCts();
+    _searchText = suggestion.Name;
+    _showSuggestions = false;
+    await ValueChanged.InvokeAsync(_searchText);
+    await OnSuggestionSelected.InvokeAsync(suggestion);
+  }
+
+  private JsModuleLoader MapModuleLoader =>
+    _mapModule ??= new JsModuleLoader(JSRuntime, "./js/locationPicker.js");
+
+  private async Task OpenMapModal()
+  {
+    _isMapModalOpen = true;
+    _isLoadingMap = true;
+    _mapSearch = string.Empty;
+
+    try
+    {
+      var mapModule = await MapModuleLoader.TryGetAsync();
+      if (mapModule == null) return;
+
+      await mapModule.InvokeVoidAsync("showDialog", _mapDialog);
+      StateHasChanged();
+
+      // Map the forecast coordinates directly onto the static SVG.
+      _mapLocations = await StationCatalog.GetAllStationsAsync();
+    }
+    catch (Exception ex)
+    {
+      Console.Error.WriteLine($"Failed to load locations: {ex.Message}");
+    }
+    finally
+    {
+      _isLoadingMap = false;
+      if (!_disposed)
+      {
+        _initializeMap = _isMapModalOpen && _mapLocations.Count > 0;
+        StateHasChanged();
+      }
+    }
+  }
+
+  private async Task ZoomMap(double factor)
+  {
+    if (_mapModule?.LoadedModule is { } mapModule)
+    {
+      await mapModule.InvokeVoidAsync("zoomMap", factor);
+    }
+  }
+
+  private Task HandleDialogClosedAsync()
+  {
+    _isMapModalOpen = false;
+    return _mapModule?.LoadedModule is { } mapModule
+      ? mapModule.TryInvokeVoidSafeAsync("disposeMap")
+      : Task.CompletedTask;
+  }
+
+  private async Task CloseMapModal()
+  {
+    _isMapModalOpen = false;
+    if (_mapModule?.LoadedModule is { } mapModule)
+    {
+      await mapModule.TryInvokeVoidSafeAsync("disposeMap");
+      await mapModule.TryInvokeVoidSafeAsync("closeDialog", _mapDialog);
+    }
+  }
+
+  private async Task SelectMapLocation(MetLocation location)
+  {
+    await CloseMapModal();
+    await SelectSuggestion(new PlaceSuggestion(
+      location.Latitude,
+      location.Longitude,
+      location.LocationName ?? string.Empty,
+      location.LocationName ?? string.Empty,
+      location.LocationId));
+  }
+
+  private void ResetDebounceCts()
+  {
+    var cts = _debounceCts;
+    _debounceCts = null;
+    if (cts is null) return;
+    cts.Cancel();
+    cts.Dispose();
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    _disposed = true;
+    ResetDebounceCts();
+    if (_mapModule is not null)
+    {
+      if (_mapModule.LoadedModule is { } loaded)
+      {
+        await loaded.TryInvokeVoidSafeAsync("disposeMap");
+      }
+
+      await _mapModule.DisposeAsync();
+    }
+  }
+}

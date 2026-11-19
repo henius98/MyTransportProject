@@ -106,27 +106,21 @@
 
 @code {
     [CascadingParameter] private LanguageService Language { get; set; } = default!;
-    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    [CascadingParameter] private AuthSessionState? AuthState { get; set; }
 
     private bool showWelcome;
     private int welcomeVersion;
-    private Task<AuthenticationState>? _lastAuthState;
-    private bool _initialized;
+    private AuthSessionState? _lastAuthState = AuthSessionState.Pending;
 
     protected override async Task OnParametersSetAsync()
     {
-        if (_initialized && ReferenceEquals(AuthState, _lastAuthState))
+        if (AuthState is { IsInitialized: false } || ReferenceEquals(AuthState, _lastAuthState))
         {
             return;
         }
 
-        _initialized = true;
         _lastAuthState = AuthState;
         var version = ++welcomeVersion;
-        if (AuthState is not null)
-        {
-            await AuthState;
-        }
         var settings = await UserSettings.GetSettingsAsync();
         if (version != welcomeVersion) return;
         showWelcome = settings.HasSeenWelcome != true;

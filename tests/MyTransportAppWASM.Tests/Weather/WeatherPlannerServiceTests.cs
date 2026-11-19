@@ -1,7 +1,5 @@
 using System.Net;
 using System.Text;
-using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Internal;
 using Microsoft.Extensions.Options;
 
 namespace MyTransportAppWASM.Tests;
@@ -125,7 +123,7 @@ public class WeatherPlannerServiceTests
   public async Task GetHourlyForecastAsync_ExpiresOutlookAfterThreeHours()
   {
     var clock = new TestClock();
-    var (service, handler, cache) = CreateHarness(cacheOptions: new MemoryCacheOptions { Clock = clock });
+    var (service, handler, cache) = CreateHarness(cache: new AppMemoryCache(utcNow: () => clock.UtcNow));
     using var _ = cache;
     var query = KlQuery();
     var date = new DateTime(2026, 8, 26);
@@ -180,7 +178,7 @@ public class WeatherPlannerServiceTests
   [Fact]
   public async Task GetPlanAsync_TimesOutWhileReadingResponseBody()
   {
-    using var cache = new MemoryCache(new MemoryCacheOptions());
+    using var cache = new AppMemoryCache();
     using var client = new HttpClient(new HangingContentHandler())
     {
       Timeout = TimeSpan.FromMilliseconds(50)
@@ -286,7 +284,7 @@ public class WeatherPlannerServiceTests
   {
     var (service, handler, cache) = CreateHarness(
         BuildTestWeatherOptions(),
-        cacheOptions: new MemoryCacheOptions { SizeLimit = 10 });
+        cache: new AppMemoryCache(sizeLimit: 10));
     using var _ = cache;
     var query = KlQuery();
 
@@ -331,15 +329,15 @@ public class WeatherPlannerServiceTests
     }
   };
 
-  private static (WeatherPlannerService Service, CountingHandler Handler, MemoryCache Cache) CreateHarness(
+  private static (WeatherPlannerService Service, CountingHandler Handler, AppMemoryCache Cache) CreateHarness(
       WeatherOptions? weatherOptions = null,
       string json = WeatherJson,
       HttpStatusCode status = HttpStatusCode.OK,
       TimeSpan delay = default,
-      MemoryCacheOptions? cacheOptions = null)
+      AppMemoryCache? cache = null)
   {
     var handler = new CountingHandler(status, json, delay);
-    var cache = new MemoryCache(cacheOptions ?? new MemoryCacheOptions());
+    cache ??= new AppMemoryCache();
     var service = CreateService(new HttpClient(handler), cache, weatherOptions ?? BuildSingleProviderOptions());
     return (service, handler, cache);
   }
@@ -400,7 +398,7 @@ public class WeatherPlannerServiceTests
 
   private static WeatherPlannerService CreateService(
       HttpClient client,
-      IMemoryCache cache,
+      IAppCache cache,
       WeatherOptions? weatherOptions = null) =>
       new(client, cache, Options.Create(new CacheExpirationOptions
       {
@@ -449,7 +447,7 @@ public class WeatherPlannerServiceTests
     }
   }
 
-  private sealed class TestClock : ISystemClock
+  private sealed class TestClock
   {
     public DateTimeOffset UtcNow { get; private set; } =
         new(2026, 9, 20, 0, 0, 0, TimeSpan.Zero);

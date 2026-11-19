@@ -236,6 +236,16 @@ h1:focus-visible,
   outline: none !important;
 }
 
+.text-dim {
+  color: var(--text-dim);
+  --bs-table-color: var(--text-dim);
+}
+
+.route-load-error {
+  max-width: 480px;
+  margin: 2rem auto;
+}
+
 .section-subtitle {
   font-family: var(--font-sans);
   color: var(--text-dim);
@@ -461,6 +471,13 @@ body .form-select {
 }
 
 body .btn-close {
+  --btn-close-icon: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath d='M.293.293a1 1 0 0 1 1.414 0L8 6.586 14.293.293a1 1 0 1 1 1.414 1.414L9.414 8l6.293 6.293a1 1 0 0 1-1.414 1.414L8 9.414l-6.293 6.293a1 1 0 0 1-1.414-1.414L6.586 8 .293 1.707a1 1 0 0 1 0-1.414'/%3e%3c/svg%3e");
+  --btn-close-icon-color: var(--text-color);
+  --bs-btn-close-bg: none;
+  --bs-btn-close-filter: none;
+  filter: none;
+  display: inline-grid;
+  place-items: center;
   border: var(--border-crisp);
   border-radius: var(--radius-pill);
   background-color: var(--surface-subtle);
@@ -468,7 +485,17 @@ body .btn-close {
   opacity: 1;
 }
 
+body .btn-close::before {
+  content: "";
+  width: 1em;
+  height: 1em;
+  background-color: var(--btn-close-icon-color);
+  -webkit-mask: var(--btn-close-icon) center / contain no-repeat;
+  mask: var(--btn-close-icon) center / contain no-repeat;
+}
+
 body .btn-close:hover {
+  --btn-close-icon-color: var(--btn-primary-color);
   background-color: var(--accent-coral);
   opacity: 1;
 }

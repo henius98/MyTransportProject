@@ -1,7 +1,7 @@
 // Caution! Be sure you understand the caveats before publishing an application with
 // offline support. See https://aka.ms/blazor-offline-considerations
 
-self.importScripts('./service-worker-assets.js');
+self.importScripts('./service-worker-assets.js', './js/wasm-gzip.js');
 self.addEventListener('install', event => event.waitUntil(onInstall(event)));
 self.addEventListener('activate', event => event.waitUntil(onActivate(event)));
 self.addEventListener('fetch', event => event.respondWith(onFetch(event)));
@@ -30,18 +30,71 @@ function isGtfsStaticRequest(url) {
   );
 }
 
+function createAssetRequest(asset) {
+  return new Request(asset.url, {
+    integrity: asset.hash,
+    cache: asset.url.startsWith('_framework/') && !/^_framework\/(blazor\.webassembly|dotnet)\.js$/.test(asset.url)
+      ? 'force-cache'
+      : 'no-cache'
+  });
+}
+
+const maxConcurrentWasmCaches = 6;
+
+async function cacheCompressedWasm(cache, asset) {
+  try {
+    const wasmGzip = globalThis.wasmGzip || self.wasmGzip;
+    if (!wasmGzip) {
+      return false;
+    }
+    const decompressed = await wasmGzip.fetchDecompressedWasm(
+      `${asset.url}.gz`,
+      asset.hash,
+      { cache: 'force-cache' }
+    );
+    if (!decompressed) {
+      return false;
+    }
+    await cache.put(new Request(asset.url), decompressed);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function onInstall(event) {
   // Pre-cache published assets from manifest (including data/recreation_centres.json, i18n, etc.)
-  const assetsRequests = self.assetsManifest.assets
+  const matchingAssets = self.assetsManifest.assets
     .filter(asset => offlineAssetsInclude.some(pattern => pattern.test(asset.url)))
-    .filter(asset => !offlineAssetsExclude.some(pattern => pattern.test(asset.url)))
-    .map(asset => new Request(asset.url, {
-      integrity: asset.hash,
-      cache: asset.url.startsWith('_framework/') && !/^_framework\/(blazor\.webassembly|dotnet)\.js$/.test(asset.url)
-        ? 'force-cache'
-        : 'no-cache'
+    .filter(asset => !offlineAssetsExclude.some(pattern => pattern.test(asset.url)));
+
+  const cache = await caches.open(cacheName);
+  const canDecompressGzip = typeof DecompressionStream === 'function';
+  const wasmAssets = canDecompressGzip
+    ? matchingAssets.filter(asset => asset.url.startsWith('_framework/') && asset.url.endsWith('.wasm'))
+    : [];
+  const standardAssets = canDecompressGzip
+    ? matchingAssets.filter(asset => !(asset.url.startsWith('_framework/') && asset.url.endsWith('.wasm')))
+    : matchingAssets;
+
+  const fallbackAssets = [];
+  if (wasmAssets.length > 0) {
+    let nextIndex = 0;
+    const workerCount = Math.min(maxConcurrentWasmCaches, wasmAssets.length);
+    await Promise.all(Array.from({ length: workerCount }, async () => {
+      while (nextIndex < wasmAssets.length) {
+        const asset = wasmAssets[nextIndex++];
+        if (!(await cacheCompressedWasm(cache, asset))) {
+          fallbackAssets.push(asset);
+        }
+      }
     }));
-  await caches.open(cacheName).then(cache => cache.addAll(assetsRequests));
+  }
+
+  const assetsRequests = standardAssets.concat(fallbackAssets).map(createAssetRequest);
+  if (assetsRequests.length > 0) {
+    await cache.addAll(assetsRequests);
+  }
 }
 
 async function onActivate(event) {

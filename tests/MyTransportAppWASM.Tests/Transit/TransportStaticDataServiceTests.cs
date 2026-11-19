@@ -158,8 +158,7 @@ public sealed class TransportStaticDataServiceTests
       "/rapid-bus-kl/map" => mapPayload,
       _ => throw new InvalidOperationException(request.RequestUri.ToString())
     });
-    using var cache = new Microsoft.Extensions.Caching.Memory.MemoryCache(
-      new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 10 });
+    using var cache = new AppMemoryCache(sizeLimit: 10);
     var service = new TransportStaticDataService(new HttpClient(handler), cache);
 
     var routesTask = service.GetRoutesAsync(Source);

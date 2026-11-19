@@ -4,7 +4,6 @@ using System.Text;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.Web.HtmlRendering;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -40,7 +39,7 @@ public class OpenMeteoWeatherCardTests
 
     var options = LoadOpenMeteoOptions();
     Uri? outlookUri = null;
-    using var cache = new MemoryCache(new MemoryCacheOptions());
+    using var cache = new AppMemoryCache();
     var realPlanner = new WeatherPlannerService(
         new HttpClient(new CapturingHandler(uri => outlookUri = uri)),
         cache,
@@ -106,7 +105,7 @@ public class OpenMeteoWeatherCardTests
               }
             }
             """;
-    using var cache = new MemoryCache(new MemoryCacheOptions());
+    using var cache = new AppMemoryCache();
     var realPlanner = new WeatherPlannerService(
         new HttpClient(new CapturingHandler(uri => hourlyUri = uri, rawHourlyJson)),
         cache,

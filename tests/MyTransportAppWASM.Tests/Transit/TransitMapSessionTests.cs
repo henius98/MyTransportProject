@@ -452,4 +452,81 @@ public class TransitMapSessionTests
     mapGate.TrySetResult("""{"route":"U4200"}""");
     Assert.Null(await selectTask);
   }
+
+  [Fact]
+  public async Task ClearAllRoutes_ResetsStaticAndPlannedRoutesToDefault()
+  {
+    var allVehicles = new List<BusLocation>
+    {
+      new() { VehicleId = "kl-401", ProviderName = "Rapid KL", RouteId = "30000019", RouteShortName = "401", TransportType = "Bus" },
+      new() { VehicleId = "kl-420", ProviderName = "Rapid KL", RouteId = "U4200", RouteShortName = "420", TransportType = "Bus" }
+    };
+
+    var staticData = new Mock<ITransportStaticDataService>();
+    staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
+      .ReturnsAsync([new StaticRoute("30000019", "401"), new StaticRoute("U4200", "420")]);
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "U4200", It.IsAny<CancellationToken>()))
+      .ReturnsAsync("""{"route":"U4200"}""");
+    staticData.Setup(s => s.GetDeparturesAsync(StaticSource, "U4200", "stop-1", It.IsAny<CancellationToken>()))
+      .ReturnsAsync([new StaticDeparture("U4200", "KLCC", DateTimeOffset.UtcNow.AddMinutes(5))]);
+
+    var route = new EnrichedRoute
+    {
+      OriginalRoute = new GoogleRoute
+      {
+        RouteId = 2,
+        Segments = [new RouteSegment { TravelMode = "TRANSIT", LineShortName = "401" }]
+      }
+    };
+
+    var tracking = new Mock<ITransitTrackingService>();
+    tracking.Setup(t => t.CachedVehicles).Returns(allVehicles);
+    tracking.Setup(t => t.EnrichRoutesAsync(It.IsAny<List<GoogleRoute>>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync([route]);
+
+    using var session = CreateSession(tracking: tracking, staticData: staticData);
+
+    await session.EnrichTransitRoutesAsync([route.OriginalRoute]);
+    await session.SelectStaticProviderAsync(0);
+    await session.SelectStaticRouteAsync("U4200");
+    await session.LoadStaticDeparturesAsync("stop-1", "Stop 1");
+
+    Assert.Equal(0, session.SelectedStaticProviderIndex);
+    Assert.Equal("U4200", session.SelectedStaticRouteId);
+    Assert.NotEmpty(session.StaticRoutes);
+    Assert.NotEmpty(session.StaticDepartures);
+    Assert.True(session.IsStaticRouteVehicleFilterActive);
+    Assert.Single(session.GetDisplayedVehicles());
+
+    session.ClearAllRoutes();
+
+    Assert.Equal(-1, session.SelectedStaticProviderIndex);
+    Assert.Equal(string.Empty, session.SelectedStaticRouteId);
+    Assert.Empty(session.StaticRoutes);
+    Assert.Empty(session.StaticDepartures);
+    Assert.Equal(string.Empty, session.SelectedStaticStopId);
+    Assert.Equal(string.Empty, session.StaticStopName);
+    Assert.Equal(string.Empty, session.StaticStatus);
+    Assert.False(session.IsStaticErrorStatus);
+    Assert.False(session.IsStaticRouteVehicleFilterActive);
+    Assert.Empty(session.RouteOptions);
+    Assert.Equal(-1, session.ActiveRouteId);
+    Assert.False(session.IsRouteVehicleFilterActive);
+    Assert.Equal("Route cleared.", session.LocationStatus);
+    Assert.Equal(2, session.GetDisplayedVehicles().Count);
+  }
+
+  [Fact]
+  public void ClearAllRoutes_WithoutAnnounce_PreservesLocationStatus()
+  {
+    using var session = CreateSession();
+    session.ReportLiveLocation();
+
+    session.ClearAllRoutes(announce: false);
+
+    Assert.Equal("Live", session.LocationStatus);
+    Assert.False(session.IsErrorStatus);
+    Assert.Equal(-1, session.SelectedStaticProviderIndex);
+    Assert.Empty(session.RouteOptions);
+  }
 }

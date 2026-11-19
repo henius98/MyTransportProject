@@ -38,6 +38,49 @@ public class LanguageServiceTests
     Assert.Equal("Home", language["Home"]);
   }
 
+  [Fact]
+  public void LoadDefaultLanguage_LoadsEmbeddedTranslationsSynchronously()
+  {
+    var language = new LanguageService(new HttpClient());
+
+    language.LoadDefaultLanguage();
+
+    Assert.Equal("en-US", language.CurrentLanguageName);
+    Assert.Equal("Home", language["Home"]);
+    Assert.NotEqual("HomeHeroTitle", language["HomeHeroTitle"]);
+  }
+
+  [Fact]
+  public async Task SwitchingBackToEnglishOfflineFallsBackToEmbeddedDefault()
+  {
+    using var client = new HttpClient(new FailEnglishHandler()) { BaseAddress = new Uri("https://app.example/") };
+    var language = new LanguageService(client);
+
+    await language.LoadLanguageAsync("ms-MY");
+    Assert.Equal("ms-MY", language.CurrentLanguageName);
+    Assert.Equal("Utama", language["Home"]);
+
+    await language.LoadLanguageAsync("en-US");
+    Assert.Equal("en-US", language.CurrentLanguageName);
+    Assert.Equal("Home", language["Home"]);
+    Assert.NotEqual("HomeHeroTitle", language["HomeHeroTitle"]);
+  }
+
+  private sealed class FailEnglishHandler : HttpMessageHandler
+  {
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+      if (request.RequestUri!.AbsolutePath.Contains("ms-MY"))
+      {
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+          Content = new StringContent("{\"Home\":\"Utama\"}")
+        });
+      }
+      throw new HttpRequestException("Offline");
+    }
+  }
+
   private sealed class WeatherLanguageHandler : HttpMessageHandler
   {
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)

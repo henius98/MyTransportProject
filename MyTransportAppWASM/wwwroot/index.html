@@ -10,25 +10,65 @@
     />
     <base href="/" />
     <link rel="preload" id="webassembly" />
+    <link
+      rel="preload"
+      as="script"
+      href="_framework/blazor.webassembly#[.{fingerprint}].js"
+    />
     <link rel="preconnect" href="https://www.gstatic.com" crossorigin />
 
     <!-- The splash is fully inlined below, so app styles can download without blocking FCP. -->
-    <link rel="preload" as="style" href="css/app.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <link rel="preload" as="style" href="MyTransportAppWASM.styles.css" onload="this.onload=null;this.rel='stylesheet'" />
+    <link
+      rel="preload"
+      as="style"
+      href="css/app.css"
+      onload="
+        this.onload = null;
+        this.rel = 'stylesheet';
+      "
+    />
+    <link
+      rel="preload"
+      as="style"
+      href="MyTransportAppWASM.styles.css"
+      onload="
+        this.onload = null;
+        this.rel = 'stylesheet';
+      "
+    />
     <noscript>
       <link rel="stylesheet" href="css/app.css" />
       <link rel="stylesheet" href="MyTransportAppWASM.styles.css" />
     </noscript>
 
     <!-- Non-critical CSS loaded asynchronously -->
-    <link rel="preload" as="style" href="css/bootstrap-subset.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <noscript><link rel="stylesheet" href="css/bootstrap-subset.css" /></noscript>
+    <link
+      rel="preload"
+      as="style"
+      href="css/bootstrap-subset.css"
+      onload="
+        this.onload = null;
+        this.rel = 'stylesheet';
+      "
+    />
+    <noscript>
+      <link rel="stylesheet" href="css/bootstrap-subset.css" />
+    </noscript>
 
-    <link rel="preload" as="style" href="css/icons.css" onload="this.onload=null;this.rel='stylesheet'" />
-    <noscript><link rel="stylesheet" href="css/icons.css" /></noscript>
+    <link
+      rel="preload"
+      as="style"
+      href="css/icons.css"
+      onload="
+        this.onload = null;
+        this.rel = 'stylesheet';
+      "
+    />
+    <noscript>
+      <link rel="stylesheet" href="css/icons.css" />
+    </noscript>
 
     <link rel="icon" type="image/svg+xml" href="myTransport.svg" />
-    <link rel="preload" href="i18n/en-US.json" as="fetch" crossorigin="anonymous" />
     <link href="manifest.webmanifest" rel="manifest" />
     <meta
       name="theme-color"
@@ -43,7 +83,7 @@
     <link rel="apple-touch-icon" href="myTransport.svg" />
 
     <style>
-      /* Soft Neo-Brutalist & Warm Technical Editorial Splash Screen */
+      /* Glassmorphism Splash Screen */
       #app-splash {
         position: fixed;
         inset: 0;
@@ -51,61 +91,89 @@
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        background: #FAF7F2; /* warm cream paper */
+        background: rgba(0, 0, 0, 0.8);
+        /* fallback dark */
         z-index: 9999;
       }
+
       .splash-logo {
-        width: 112px;
-        height: 112px;
-        padding: 16px;
-        background: #F2ECE1;
-        border: 1.5px solid #1E1E1C;
-        border-radius: 8px;
-        box-shadow: 0 4px 0 #1E1E1C;
+        width: 120px;
+        height: 120px;
         animation: pulseLogo 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        filter: drop-shadow(0 0 20px rgba(56, 189, 248, 0.5));
       }
+
       .splash-text {
         margin-top: 24px;
-        font-family: "JetBrains Mono", "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas, monospace;
-        font-size: 0.9rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        color: #1E1E1C;
-        letter-spacing: 0.1em;
-        padding: 6px 14px;
-        background: #F5D5B8;
-        border: 1.5px solid #1E1E1C;
-        border-radius: 9999px;
-        box-shadow: 0 2px 0 #1E1E1C;
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #f8fafc;
+        letter-spacing: 0.05em;
+        font-variant-numeric: tabular-nums;
         animation: fadeText 2s ease-in-out infinite alternate;
       }
+
+      .splash-text::after {
+        content: " " var(--blazor-load-percentage-text, "");
+      }
+
+      .splash-progress {
+        width: min(240px, 70vw);
+        height: 6px;
+        margin-top: 16px;
+        border-radius: 9999px;
+        background: rgba(248, 250, 252, 0.16);
+        overflow: hidden;
+      }
+
+      .splash-progress-bar {
+        width: var(--blazor-load-percentage, 0%);
+        height: 100%;
+        border-radius: inherit;
+        background: #38bdf8;
+        transition: width 0.2s ease-out;
+      }
+
       @keyframes pulseLogo {
         0%,
         100% {
           opacity: 1;
-          transform: translateY(0);
+          transform: scale(1);
         }
+
         50% {
-          opacity: 0.92;
-          transform: translateY(1px);
+          opacity: 0.7;
+          transform: scale(0.95);
         }
       }
+
       @keyframes fadeText {
         0% {
-          opacity: 0.7;
+          opacity: 0.5;
         }
+
         100% {
           opacity: 1;
         }
       }
+
       /* Respect user's motion preference — disable infinite splash animations */
       @media (prefers-reduced-motion: reduce) {
         .splash-logo {
           animation: none;
         }
+
         .splash-text {
           animation: none;
           opacity: 1;
+        }
+
+        .splash-progress-bar {
+          transition: none;
         }
       }
     </style>
@@ -147,6 +215,9 @@
           fetchpriority="high"
         />
         <div class="splash-text">Loading...</div>
+        <div class="splash-progress">
+          <div class="splash-progress-bar"></div>
+        </div>
       </div>
     </div>
 
@@ -158,20 +229,70 @@
     <!-- Firebase manages popup completion and auth state natively, without a delayed opener reload. -->
     <!-- Populated by MSBuild OverrideHtmlAssetPlaceholders with fingerprinted .NET module mappings -->
     <script type="importmap"></script>
-    <script src="js/theme-manager.js"></script>
-    <script src="_framework/blazor.webassembly#[.{fingerprint}].js"></script>
+    <script src="js/theme-manager.js" defer></script>
+    <script src="js/wasm-gzip.js" defer></script>
+    <script
+      src="_framework/blazor.webassembly#[.{fingerprint}].js"
+      autostart="false"
+      defer
+    ></script>
     <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', function () {
-          var register = function () {
-            navigator.serviceWorker.register('service-worker.js', { updateViaCache: 'none' });
-          };
-          if ('requestIdleCallback' in window) {
-            requestIdleCallback(register, { timeout: 2500 });
-          } else {
-            setTimeout(register, 1000);
-          }
-        }, { once: true });
+      (function () {
+        function startBlazor() {
+          Blazor.start({
+            loadBootResource: function (type, name, defaultUri, integrity) {
+              if (
+                (type !== "dotnetwasm" && type !== "assembly") ||
+                typeof DecompressionStream !== "function" ||
+                !window.wasmGzip ||
+                !window.wasmGzip.canVerifyIntegrity(integrity) ||
+                (navigator.serviceWorker && navigator.serviceWorker.controller)
+              ) {
+                return undefined;
+              }
+              var fallbackFetch = function () {
+                return fetch(
+                  defaultUri,
+                  integrity ? { integrity: integrity } : undefined,
+                );
+              };
+              var gzUri = new URL(defaultUri, document.baseURI);
+              gzUri.pathname += ".gz";
+              return window.wasmGzip
+                .fetchDecompressedWasm(gzUri.href, integrity)
+                .then(function (decompressed) {
+                  return decompressed || fallbackFetch();
+                });
+            },
+          });
+        }
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", startBlazor, {
+            once: true,
+          });
+        } else {
+          startBlazor();
+        }
+      })();
+    </script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener(
+          "load",
+          function () {
+            var register = function () {
+              navigator.serviceWorker.register("service-worker.js", {
+                updateViaCache: "none",
+              });
+            };
+            if ("requestIdleCallback" in window) {
+              requestIdleCallback(register, { timeout: 2500 });
+            } else {
+              setTimeout(register, 1000);
+            }
+          },
+          { once: true },
+        );
       }
     </script>
 

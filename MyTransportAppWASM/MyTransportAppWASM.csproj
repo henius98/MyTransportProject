@@ -24,6 +24,7 @@
          and the smaller build also reached the rendered Home page sooner. -->
     <RunAOTCompilation>false</RunAOTCompilation>
     <EmccLinkOptimizationFlag>-Oz</EmccLinkOptimizationFlag>
+    <EmccEnvironment>web</EmccEnvironment>
     <DebuggerSupport>false</DebuggerSupport>
     <DynamicCodeSupport>false</DynamicCodeSupport>
     <EventSourceSupport>false</EventSourceSupport>
@@ -39,17 +40,17 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.7" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.Authorization" Version="10.0.7" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.7" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="10.0.7" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.7" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\MyTransportAppWASM.Core\MyTransportAppWASM.Core.csproj" />
+    <ProjectReference Include="..\MyTransportAppWASM.Features\MyTransportAppWASM.Features.csproj" />
     <ProjectReference Include="..\MyTransportAppWASM.Gtfs\MyTransportAppWASM.Gtfs.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <BlazorWebAssemblyLazyLoad Include="MyTransportAppWASM.Features.dll" />
     <BlazorWebAssemblyLazyLoad Include="MyTransportAppWASM.Gtfs.dll" />
   </ItemGroup>
 

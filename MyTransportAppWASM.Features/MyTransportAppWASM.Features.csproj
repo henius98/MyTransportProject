@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MyTransportAppWASM" />
+    <InternalsVisibleTo Include="MyTransportAppWASM.Tests" />
+    <InternalsVisibleTo Include="MyTransportAppWASM.PerformanceBenchmarks" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.0.7" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.7" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.7" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MyTransportAppWASM.Core\MyTransportAppWASM.Core.csproj" />
+    <ProjectReference Include="..\MyTransportAppWASM.Gtfs\MyTransportAppWASM.Gtfs.csproj" />
+  </ItemGroup>
+
+</Project>

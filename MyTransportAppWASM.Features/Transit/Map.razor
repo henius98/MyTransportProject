@@ -1,0 +1,194 @@
+@page "/map"
+@inherits FeatureComponentBase
+
+<PageTitle>@Language["MapPageTitle"]</PageTitle>
+
+<div id="map-container" class="@MapContainerClass">
+    <div id="map"></div>
+
+    <div class="@MapOverlayClass glass-panel">
+        <button type="button" class="overlay-header"
+             @onclick="ToggleCollapse" 
+             aria-expanded="@((!isCollapsed).ToString().ToLower())"
+             aria-controls="map-overlay-body"
+             aria-label="@(isCollapsed ? Language["ExpandTrackerPanel"] : Language["CollapseTrackerPanel"])"
+             title="@(isCollapsed ? Language["ExpandTrackerPanel"] : Language["CollapseTrackerPanel"])">
+            <div class="d-flex align-items-center gap-2">
+                <span class="collapsed-icon" aria-hidden="true">📍</span>
+                <h1 class="overlay-title m-0 fs-5">@Language["TransitMapTitle"]</h1>
+            </div>
+            <span class="collapse-chevron" aria-hidden="true">
+                <i class="bi @(isCollapsed ? "bi-chevron-up" : "bi-chevron-down")"></i>
+            </span>
+        </button>
+
+        <div id="map-overlay-body" class="overlay-body" hidden="@isCollapsed">
+            <div class="overlay-tabs" role="tablist" aria-label="@Language["MapOverlayTabsLabel"]">
+                <button type="button"
+                        id="tab-tracker"
+                        role="tab"
+                        class="overlay-tab @(activeTab == "tracker" ? "overlay-tab--active" : "")"
+                        aria-selected="@(activeTab == "tracker" ? "true" : "false")"
+                        aria-controls="panel-tracker"
+                        @onclick='() => SelectTab("tracker")'>
+                    <span aria-hidden="true">📡</span>
+                    <span>@Language["LiveTrackerTab"]</span>
+                </button>
+                <button type="button"
+                        id="tab-planner"
+                        role="tab"
+                        class="overlay-tab @(activeTab == "planner" ? "overlay-tab--active" : "")"
+                        aria-selected="@(activeTab == "planner" ? "true" : "false")"
+                        aria-controls="panel-planner"
+                        @onclick='() => SelectTab("planner")'>
+                    <span aria-hidden="true">🗺️</span>
+                    <span>@Language["RoutePlannerTab"]</span>
+                </button>
+            </div>
+
+            <div id="panel-tracker"
+                 class="overlay-tab-panel"
+                 role="tabpanel"
+                 aria-labelledby="tab-tracker"
+                 hidden="@(activeTab != "tracker")">
+                <div class="tracker-status @(Session.IsErrorStatus ? "tracker-status--error" : "")" role="status" aria-live="polite">
+                    <span class="pulse-dot @(Session.IsErrorStatus ? "pulse-dot--error" : "")" aria-hidden="true"></span>
+                    <span>@(string.IsNullOrEmpty(Session.LocationStatus) ? Language["MapStatusReady"] : Language[Session.LocationStatus])</span>
+                </div>
+
+                <div class="d-flex gap-2 mt-3 mb-3">
+                    <button type="button" @onclick="() => RequestManualLocationUpdate()"
+                            class="btn btn--secondary btn--sm flex-grow-1">
+                        🎯 @Language["MyLocationBtn"]
+                    </button>
+                    <button type="button" @onclick="ResetRoutesAndRefreshBusesAsync" class="btn btn--secondary btn--sm flex-grow-1">
+                        🔄 @Language["RefreshBusesBtn"]
+                    </button>
+                </div>
+
+                <StaticRoutePanel TransportProviders="Session.Providers"
+                                  SelectedProviderIndex="Session.SelectedStaticProviderIndex"
+                                  HasSelectedStaticData="@(Session.SelectedStaticData != null)"
+                                  SelectedRouteId="@Session.SelectedStaticRouteId"
+                                  Routes="Session.StaticRoutes"
+                                  Status="@Session.StaticStatus"
+                                  IsErrorStatus="Session.IsStaticErrorStatus"
+                                  StopName="@Session.StaticStopName"
+                                  Departures="Session.StaticDepartures"
+                                  OnProviderChanged="SelectStaticProvider"
+                                  OnRouteChanged="SelectStaticRoute" />
+            </div>
+
+            <div id="panel-planner"
+                 class="overlay-tab-panel @(isSearchPanelCollapsed ? "planner-search-collapsed" : "")"
+                 role="tabpanel"
+                 aria-labelledby="tab-planner"
+                 hidden="@(activeTab != "planner")">
+                @if (isSearchPanelCollapsed)
+                {
+                    <div class="planner-search-summary mb-2">
+                        <button type="button"
+                                class="planner-search-summary__expand"
+                                @onclick="ExpandSearchPanel"
+                                aria-expanded="false"
+                                aria-controls="planner-search-panel"
+                                aria-label="@Language["ExpandSearchPanel"]"
+                                title="@Language["ExpandSearchPanel"]">
+                            <i class="bi bi-search planner-search-summary__icon" aria-hidden="true"></i>
+                            <span class="planner-search-summary__text">@SearchSummaryText</span>
+                            <i class="bi bi-chevron-down planner-search-summary__chevron" aria-hidden="true"></i>
+                        </button>
+                        <button type="button"
+                                class="btn btn--secondary btn--sm planner-search-summary__clear"
+                                @onclick="ClearRoute"
+                                aria-label="@Language["ClearBtn"]"
+                                title="@Language["ClearBtn"]">
+                            🗑️ @Language["ClearBtn"]
+                        </button>
+                    </div>
+                }
+
+                <div id="planner-search-panel" class="planner-search-panel" hidden="@isSearchPanelCollapsed">
+                    <div class="travel-mode-strip mb-2" role="radiogroup" aria-label="@Language["TravelModeLabel"]">
+                        @foreach (var travelOption in TravelModeOptions)
+                        {
+                            var isSelected = string.Equals(mode, travelOption.Value, StringComparison.Ordinal);
+                            <button @key="travelOption.Value"
+                                    type="button"
+                                    role="radio"
+                                    aria-checked="@(isSelected ? "true" : "false")"
+                                    class="travel-mode-btn @(isSelected ? "travel-mode-btn--active" : "")"
+                                    title="@Language[travelOption.LabelKey]"
+                                    aria-label="@Language[travelOption.LabelKey]"
+                                    @onclick="() => SelectTravelMode(travelOption.Value)">
+                                <span aria-hidden="true">@travelOption.Icon</span>
+                                <span class="travel-mode-btn__label">@Language[travelOption.LabelKey]</span>
+                            </button>
+                        }
+                    </div>
+
+                    <div class="directions-inputs-card mb-2">
+                        <div class="directions-track" aria-hidden="true">
+                            <span class="directions-track__origin"></span>
+                            <span class="directions-track__dots">⋮</span>
+                            <i class="bi bi-geo-alt-fill directions-track__dest"></i>
+                        </div>
+
+                        <div class="directions-fields">
+                            <span id="origin-input-label" class="visually-hidden">@Language["OriginLabel"]</span>
+                            <div id="origin-input" class="form-input autocomplete-container directions-input-box"></div>
+                            <span id="destination-input-label" class="visually-hidden">@Language["DestinationLabel"]</span>
+                            <div id="destination-input" class="form-input autocomplete-container directions-input-box"></div>
+                        </div>
+
+                        <button type="button"
+                                class="directions-swap-btn"
+                                @onclick="SwapOriginAndDestination"
+                                aria-label="@Language["SwapOriginDestination"]"
+                                title="@Language["SwapOriginDestination"]">
+                            <i class="bi bi-arrow-down-up" aria-hidden="true"></i>
+                        </button>
+                    </div>
+
+                    @if (string.Equals(mode, "TRANSIT", StringComparison.Ordinal))
+                    {
+                        <div class="directions-time-row mb-2">
+                            <label class="visually-hidden" for="departure-mode-select">@Language["LeaveNowOption"]</label>
+                            <select id="departure-mode-select" @bind="departureMode" class="directions-time-select">
+                                <option value="now">🕒 @Language["LeaveNowOption"]</option>
+                                <option value="depart">🕒 @Language["DepartAtOption"]</option>
+                                <option value="arrive">🕒 @Language["ArriveByOption"]</option>
+                            </select>
+                            @if (!string.Equals(departureMode, "now", StringComparison.Ordinal))
+                            {
+                                <input type="datetime-local"
+                                       id="departure-datetime-input"
+                                       class="directions-datetime-input"
+                                       aria-label="@Language[departureMode == "arrive" ? "ArriveByOption" : "DepartAtOption"]"
+                                       @bind="departureDateTime" />
+                            }
+                        </div>
+                    }
+
+                    <div class="d-flex gap-2 mb-3">
+                        <button type="button" @onclick="ShowRoute" class="btn btn--primary flex-grow-1 shadow-sm">
+                            🗺️ @Language["RouteBtn"]
+                        </button>
+                        <button type="button" @onclick="ClearRoute" class="btn btn--secondary btn--sm">
+                            🗑️ @Language["ClearBtn"]
+                        </button>
+                    </div>
+                </div>
+
+                <div class="tracker-status @(Session.IsErrorStatus ? "tracker-status--error" : "")" role="status" aria-live="polite">
+                    <span class="pulse-dot @(Session.IsErrorStatus ? "pulse-dot--error" : "")" aria-hidden="true"></span>
+                    <span>@(string.IsNullOrEmpty(Session.LocationStatus) ? Language["MapStatusReady"] : Language[Session.LocationStatus])</span>
+                </div>
+
+                <LiveRouteOptionsList RouteOptions="Session.RouteOptions"
+                                      ActiveRouteId="Session.ActiveRouteId"
+                                      OnSelectRoute="SelectRoute" />
+            </div>
+        </div>
+    </div>
+</div>

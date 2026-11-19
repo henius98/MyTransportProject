@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Caching.Memory;
 using Moq;
 
 namespace MyTransportAppWASM.Tests;
@@ -167,7 +166,7 @@ public class TransitTrackingServiceTests
     Assert.Empty(farResult.Vehicles);
     // Crucial: CachedVehicles must be empty, not returning stale cached vehicles
     Assert.Empty(service.CachedVehicles);
-    Assert.False(cache.TryGetValue("transit_cached_vehicles", out _));
+    Assert.False(cache.TryGetValue<object>("transit_cached_vehicles", out _));
   }
 
   [Fact]
@@ -183,14 +182,14 @@ public class TransitTrackingServiceTests
 
     Assert.Single(service.CachedVehicles);
     var todayKey = MalaysiaTime.Now.ToString("yyyy-MM-dd");
-    Assert.True(cache.TryGetValue("transit_cached_vehicles", out _));
-    Assert.True(cache.TryGetValue($"transit_fortune_{todayKey}", out _));
+    Assert.True(cache.TryGetValue<object>("transit_cached_vehicles", out _));
+    Assert.True(cache.TryGetValue<object>($"transit_fortune_{todayKey}", out _));
 
     service.Reset();
 
     Assert.Empty(service.CachedVehicles);
-    Assert.False(cache.TryGetValue("transit_cached_vehicles", out _));
-    Assert.False(cache.TryGetValue($"transit_fortune_{todayKey}", out _));
+    Assert.False(cache.TryGetValue<object>("transit_cached_vehicles", out _));
+    Assert.False(cache.TryGetValue<object>($"transit_fortune_{todayKey}", out _));
   }
 
   [Fact]
@@ -309,12 +308,12 @@ public class TransitTrackingServiceTests
     bazi.Verify(b => b.GetDateFortuneAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
   }
 
-  private static MemoryCache CreateBoundedCache() =>
-      new(new MemoryCacheOptions { SizeLimit = 10 });
+  private static AppMemoryCache CreateBoundedCache() =>
+      new(sizeLimit: 10);
 
   private static (TransitTrackingService Service, Mock<IGtfsService> Gtfs, Mock<IBaziFlowService> Bazi) CreateService(
       IReadOnlyList<TransportProvider>? providers = null,
-      IMemoryCache? cache = null)
+      IAppCache? cache = null)
   {
     var gtfs = new Mock<IGtfsService>();
     var bazi = new Mock<IBaziFlowService>();

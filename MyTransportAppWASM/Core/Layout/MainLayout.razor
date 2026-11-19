@@ -36,13 +36,13 @@
 </div>
 
 @code {
-    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    [CascadingParameter] private AuthSessionState? AuthState { get; set; }
     [CascadingParameter] private LanguageService Language { get; set; } = default!;
 
     private bool isCollapsed = false;
     private bool isHovered = false;
     private int preferenceVersion;
-    private Task<AuthenticationState>? _lastAuthState;
+    private AuthSessionState? _lastAuthState = AuthSessionState.Pending;
 
     private bool EffectiveIsCollapsed => isCollapsed && !isHovered;
 
@@ -51,20 +51,21 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        if (!ReferenceEquals(AuthState, _lastAuthState))
+        if (AuthState is { IsInitialized: false } || ReferenceEquals(AuthState, _lastAuthState))
         {
-            _lastAuthState = AuthState;
-            var authState = AuthState is not null ? await AuthState : null;
-            await ApplyPreferencesAsync();
-            if (authState?.User.Identity?.IsAuthenticated == true)
+            return;
+        }
+
+        _lastAuthState = AuthState;
+        await ApplyPreferencesAsync();
+        if (AuthState?.IsAuthenticated == true)
+        {
+            try
             {
-                try
-                {
-                    await Firebase.EnsurePushForegroundListenerAsync();
-                }
-                catch (JSException)
-                {
-                }
+                await Firebase.EnsurePushForegroundListenerAsync();
+            }
+            catch (JSException)
+            {
             }
         }
     }

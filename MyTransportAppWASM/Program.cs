@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
-using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.Options;
 
 namespace MyTransportAppWASM
@@ -19,50 +18,13 @@ namespace MyTransportAppWASM
       builder.Services.AddScoped<IBrowserStorageService, BrowserStorageService>();
 
       var cacheExpiration = AppOptionsBinder.BindCacheExpirationOptions(builder.Configuration.GetSection(CacheExpirationOptions.SectionName));
-      builder.Services.AddSingleton(Options.Create(AppOptionsBinder.BindWeatherOptions(builder.Configuration.GetSection("WeatherProviders"))));
       builder.Services.AddSingleton(Options.Create(cacheExpiration));
       builder.Services.AddSingleton(Options.Create(AppOptionsBinder.BindDefaultLocationOptions(builder.Configuration.GetSection(DefaultLocationOptions.SectionName))));
-      var transitOptions = AppOptionsBinder.BindTransitOptions(builder.Configuration);
-      builder.Services.AddSingleton(Options.Create(transitOptions.Polling));
-      builder.Services.AddSingleton(Options.Create(transitOptions));
-      builder.Services.AddMemoryCache(options =>
-      {
-        options.SizeLimit = cacheExpiration.SizeLimit > 0 ? cacheExpiration.SizeLimit : 200;
-      });
-
 
       // Browser requests already share the browser's connection pool. Keep failures
       // bounded without pulling a server-oriented retry/circuit-breaker stack into WASM.
-      static void ConfigureExternalApiClient(HttpClient client) =>
-        client.Timeout = TimeSpan.FromSeconds(15);
-
-      builder.Services.AddHttpClient<IGtfsService, GtfsService>(ConfigureExternalApiClient);
-      builder.Services.AddHttpClient<ITransportStaticDataService, TransportStaticDataService>(ConfigureExternalApiClient);
-
-      builder.Services.AddTransient<WeatherRateLimitingHandler>();
-      builder.Services.AddHttpClient<IWeatherPlannerService, WeatherPlannerService>(ConfigureExternalApiClient)
-          .AddHttpMessageHandler<WeatherRateLimitingHandler>();
-
-      builder.Services.AddHttpClient("StaticAssets", client =>
-      {
-        client.BaseAddress = new Uri(builder.HostEnvironment.BaseAddress);
-        client.Timeout = TimeSpan.FromSeconds(15);
-      });
-      builder.Services.AddScoped<IWeatherStationCatalogService>(services => new WeatherStationCatalogService(
-          services.GetRequiredService<IHttpClientFactory>().CreateClient("StaticAssets")));
-      builder.Services.AddScoped<IPlaceResolutionService, PlaceResolutionService>();
-
-      builder.Services.AddTransient<BaziFlowAuthHandler>();
-      builder.Services.AddHttpClient<IBaziFlowService, BaziFlowService>(client =>
-      {
-        var baziBaseUrl = builder.Configuration["BaziFlow:BaseUrl"];
-        if (Uri.TryCreate(baziBaseUrl, UriKind.Absolute, out var baziUri))
-        {
-          client.BaseAddress = baziUri;
-        }
-        ConfigureExternalApiClient(client);
-      })
-      .AddHttpMessageHandler<BaziFlowAuthHandler>();
+      builder.Services.AddSingleton<IAppHttpClientFactory>(_ =>
+        new AppHttpClientFactory(new Uri(builder.HostEnvironment.BaseAddress)));
 
       builder.Services.AddScoped<ThemeService>();
       builder.Services.AddCascadingValue(sp =>
@@ -73,7 +35,7 @@ namespace MyTransportAppWASM
         return source;
       });
       builder.Services.AddScoped<LanguageService>(services => new LanguageService(
-          services.GetRequiredService<IHttpClientFactory>().CreateClient("StaticAssets")));
+          services.GetRequiredService<IAppHttpClientFactory>().StaticAssets));
       builder.Services.AddCascadingValue(sp =>
       {
         var language = sp.GetRequiredService<LanguageService>();
@@ -82,36 +44,28 @@ namespace MyTransportAppWASM
         return source;
       });
       builder.Services.AddScoped<ILocationService, LocationService>();
-      builder.Services.AddScoped<ITransitTrackingService, TransitTrackingService>();
-      builder.Services.AddTransient<TransitMapSession>();
 
       builder.Services.AddSingleton(Options.Create(AppOptionsBinder.BindFirebaseOptions(builder.Configuration.GetSection("Firebase"))));
       builder.Services.AddScoped<FirebaseClientService>();
-      builder.Services.AddAuthorizationCore();
-      builder.Services.AddCascadingAuthenticationState();
-      builder.Services.AddScoped<FirebaseAuthenticationStateProvider>();
-      builder.Services.AddScoped<AuthenticationStateProvider>(sp => sp.GetRequiredService<FirebaseAuthenticationStateProvider>());
-      builder.Services.AddScoped<IAuthSessionService>(sp => sp.GetRequiredService<FirebaseAuthenticationStateProvider>());
-      builder.Services.AddScoped<IGoogleWorkspaceService, GoogleWorkspaceService>();
-      builder.Services.AddTransient<GoogleCalendarWorkflowService>();
-      builder.Services.AddScoped<GoogleTasksWorkflowService>();
+      builder.Services.AddScoped<FirebaseAuthSessionService>();
+      builder.Services.AddScoped<IAuthSessionService>(sp => sp.GetRequiredService<FirebaseAuthSessionService>());
+      builder.Services.AddCascadingValue(sp =>
+      {
+        var auth = sp.GetRequiredService<IAuthSessionService>();
+        var source = new CascadingValueSource<AuthSessionState>(auth.CurrentState, isFixed: false);
+        auth.StateChanged += state => _ = source.NotifyChangedAsync(state);
+        _ = auth.GetStateAsync();
+        return source;
+      });
       builder.Services.AddScoped<IUserSettingsService, UserSettingsService>();
       builder.Services.AddScoped<AppStateService>();
+      builder.Services.AddScoped<FeatureServiceHost>();
 
       var host = builder.Build();
 
-      // Force initialize the LanguageService on boot to ensure initial language is loaded
+      // Load embedded en-US translations synchronously so App mounts without waiting on HTTP.
       var languageService = host.Services.GetRequiredService<LanguageService>();
-      try
-      {
-        await languageService.LoadLanguageAsync("en-US");
-      }
-      catch (Exception ex)
-      {
-        host.Services.GetRequiredService<ILoggerFactory>()
-          .CreateLogger<Program>()
-          .LogWarning("Initial language load failed: {Message}", ex.Message);
-      }
+      languageService.LoadDefaultLanguage();
 
       await host.RunAsync();
     }

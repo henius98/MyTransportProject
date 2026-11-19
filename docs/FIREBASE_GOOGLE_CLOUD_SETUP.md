@@ -262,7 +262,7 @@ gcloud services enable tasks.googleapis.com
 The app uses Firebase Auth via JS interop:
 
 - [`wwwroot/js/firebase-auth.js`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/wwwroot/js/firebase-auth.js) — JS module for Google sign-in (popup + One Tap)
-- [`Core/Auth/FirebaseAuthenticationStateProvider.cs`](file:///var/home/henius/src/MyTransportProject/MyTransportAppWASM/Core/Auth/FirebaseAuthenticationStateProvider.cs) — Blazor `AuthenticationStateProvider` that calls the JS module
+- [`MyTransportAppWASM.Core/Auth/FirebaseAuthSessionService.cs`](../MyTransportAppWASM.Core/Auth/FirebaseAuthSessionService.cs) — `IAuthSessionService` implementation that calls the JS module and cascades `AuthSessionState`
 
 No additional code changes needed — just ensure the Firebase config values are correct.
 

@@ -1,8 +1,6 @@
 using System.Net;
 using System.Reflection;
-using System.Security.Claims;
 using Microsoft.AspNetCore.Components;
-using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -57,26 +55,24 @@ public class NavMenuRenderingTests
     await language.LoadLanguageAsync("en-US");
 
     var userSettings = new Mock<IUserSettingsService>();
-    var authState = new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity(
-        [new Claim(ClaimTypes.NameIdentifier, "user-123"), new Claim(ClaimTypes.Name, "Henius")],
-        "Firebase")));
-    var authProvider = new TestAuthStateProvider(authState);
+    var authState = new AuthSessionState(
+        new FirebaseUser { Uid = "user-123", DisplayName = "Henius" },
+        IsInitialized: true);
+    var authSession = new TestAuthSessionService(authState);
 
     var activator = new NavMenuActivator();
     var services = new ServiceCollection()
         .AddLogging()
-        .AddAuthorizationCore()
         .AddSingleton<NavigationManager>(new TestNavigationManager())
         .AddSingleton(js.Object)
         .AddSingleton(new FirebaseClientService(js.Object))
         .AddSingleton(new AppStateService())
-        .AddSingleton<AuthenticationStateProvider>(authProvider)
-        .AddSingleton(new Mock<IAuthSessionService>().Object)
+        .AddSingleton<IAuthSessionService>(authSession)
         .AddSingleton(userSettings.Object)
         .AddSingleton<IComponentActivator>(activator)
         .AddCascadingValue(_ => language)
         .AddCascadingValue(_ => new ThemeService(js.Object, userSettings.Object))
-        .AddCascadingValue(_ => Task.FromResult(authState))
+        .AddCascadingValue(_ => authState)
         .BuildServiceProvider();
 
     await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
@@ -159,24 +155,22 @@ public class NavMenuRenderingTests
     await language.LoadLanguageAsync("en-US");
 
     var userSettings = new Mock<IUserSettingsService>();
-    var authState = new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity(
-        [new Claim(ClaimTypes.NameIdentifier, "user-123"), new Claim(ClaimTypes.Name, "Henius")],
-        "Firebase")));
+    var authState = new AuthSessionState(
+        new FirebaseUser { Uid = "user-123", DisplayName = "Henius" },
+        IsInitialized: true);
     var activator = new NavMenuActivator();
     var services = new ServiceCollection()
         .AddLogging()
-        .AddAuthorizationCore()
         .AddSingleton<NavigationManager>(new TestNavigationManager())
         .AddSingleton(js.Object)
         .AddSingleton(new FirebaseClientService(js.Object))
         .AddSingleton(new AppStateService())
-        .AddSingleton<AuthenticationStateProvider>(new TestAuthStateProvider(authState))
-        .AddSingleton(new Mock<IAuthSessionService>().Object)
+        .AddSingleton<IAuthSessionService>(new TestAuthSessionService(authState))
         .AddSingleton(userSettings.Object)
         .AddSingleton<IComponentActivator>(activator)
         .AddCascadingValue(_ => language)
         .AddCascadingValue(_ => new ThemeService(js.Object, userSettings.Object))
-        .AddCascadingValue(_ => Task.FromResult(authState))
+        .AddCascadingValue(_ => authState)
         .BuildServiceProvider();
 
     await using var renderer = new HtmlRenderer(services, services.GetRequiredService<ILoggerFactory>());
@@ -214,9 +208,13 @@ public class NavMenuRenderingTests
     }
   }
 
-  private sealed class TestAuthStateProvider(AuthenticationState state) : AuthenticationStateProvider
+  private sealed class TestAuthSessionService(AuthSessionState state) : IAuthSessionService
   {
-    public override Task<AuthenticationState> GetAuthenticationStateAsync() => Task.FromResult(state);
+    public AuthSessionState CurrentState => state;
+    public event Action<AuthSessionState>? StateChanged { add { } remove { } }
+    public Task<AuthSessionState> GetStateAsync() => Task.FromResult(state);
+    public Task SignInWithGoogleAsync(string? clientId = null) => Task.CompletedTask;
+    public Task SignOutAsync() => Task.CompletedTask;
   }
 
   private sealed class TestNavigationManager : NavigationManager

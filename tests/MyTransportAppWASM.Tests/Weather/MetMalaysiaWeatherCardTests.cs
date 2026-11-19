@@ -2,7 +2,6 @@ using System.Net;
 using System.Text;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Web;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -168,7 +167,7 @@ public class MetMalaysiaWeatherCardTests
   {
     Uri? requestedEndpoint = null;
     var handler = new CapturingHandler(uri => requestedEndpoint = uri);
-    using var cache = new MemoryCache(new MemoryCacheOptions());
+    using var cache = new AppMemoryCache();
     var service = new WeatherPlannerService(
         new HttpClient(handler),
         cache,

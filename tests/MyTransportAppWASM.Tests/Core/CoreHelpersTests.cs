@@ -5,8 +5,24 @@ namespace MyTransportAppWASM.Tests;
 public class CoreHelpersTests
 {
   [Theory]
+  [InlineData("map", "map")]
+  [InlineData("/map", "map")]
+  [InlineData("/map/?tab=planner", "map")]
+  [InlineData("/weather/?q=kl", "weather")]
+  [InlineData("/map/#top", "map")]
+  [InlineData("/fortune/?day=today#section", "fortune")]
+  [InlineData("/google/calendar/?view=month", "google/calendar")]
+  [InlineData("/google/?q=1", "google")]
+  public void TrimRoutePath_SlicesQueryAndHashBeforeTrimmingSlashes(string path, string expected)
+  {
+    Assert.Equal(expected, App.TrimRoutePath(path).ToString());
+  }
+
+  [Theory]
   [InlineData("map", false, true)]
   [InlineData("/map", false, true)]
+  [InlineData("/map/?tab=planner", false, true)]
+  [InlineData("/map/#top", false, true)]
   [InlineData("/MAP?tab=planner#top", false, true)]
   [InlineData("map", true, false)]
   [InlineData("weather", false, false)]
@@ -18,6 +34,29 @@ public class CoreHelpersTests
     bool expected)
   {
     Assert.Equal(expected, App.ShouldLoadGtfsAssembly(path, alreadyLoaded));
+  }
+
+  [Theory]
+  [InlineData("weather", false, true)]
+  [InlineData("/weather/?q=kl", false, true)]
+  [InlineData("/map?q=test", false, true)]
+  [InlineData("/map/?tab=planner", false, true)]
+  [InlineData("fortune", false, true)]
+  [InlineData("google/calendar", false, true)]
+  [InlineData("/google/calendar/?view=month", false, true)]
+  [InlineData("google/tasks", false, true)]
+  [InlineData("google", false, false)]
+  [InlineData("/google/", false, false)]
+  [InlineData("/google/?q=1", false, false)]
+  [InlineData("privacy", false, false)]
+  [InlineData("", false, false)]
+  [InlineData("weather", true, false)]
+  public void ShouldLoadFeaturesAssembly_MatchesFeatureRoutesOnlyWhenNotYetLoaded(
+    string path,
+    bool alreadyLoaded,
+    bool expected)
+  {
+    Assert.Equal(expected, App.ShouldLoadFeaturesAssembly(path, alreadyLoaded));
   }
 
   [Theory]
@@ -77,8 +116,8 @@ public class CoreHelpersTests
       .Build();
 
     var cache = AppOptionsBinder.BindCacheExpirationOptions(config.GetSection(CacheExpirationOptions.SectionName));
-    var transit = AppOptionsBinder.BindTransitOptions(config);
-    var weather = AppOptionsBinder.BindWeatherOptions(config.GetSection("WeatherProviders"));
+    var transit = FeatureOptionsBinder.BindTransitOptions(config);
+    var weather = FeatureOptionsBinder.BindWeatherOptions(config.GetSection("WeatherProviders"));
 
     Assert.Equal(150, cache.SizeLimit);
     Assert.Equal(300, cache.Weather.LiveSeconds);

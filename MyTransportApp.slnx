@@ -1,4 +1,6 @@
 <Solution>
+  <Project Path="MyTransportAppWASM.Core/MyTransportAppWASM.Core.csproj" />
+  <Project Path="MyTransportAppWASM.Features/MyTransportAppWASM.Features.csproj" />
   <Project Path="MyTransportAppWASM.Gtfs/MyTransportAppWASM.Gtfs.csproj" />
   <Project Path="MyTransportAppWASM/MyTransportAppWASM.csproj" />
   <Project Path="tests/MyTransportAppWASM.Tests/MyTransportAppWASM.Tests.csproj" />
