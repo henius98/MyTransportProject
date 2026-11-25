@@ -1,5 +1,5 @@
 self.assetsManifest = {
-  "version": "hV4B+IDZ",
+  "version": "eLIOBp8P",
   "assets": [
     {
       "hash": "sha256-dPIg3DW9nrwG92/BjPAklkEZHy0JLkw9sL8KVB+dbCE=",
@@ -66,20 +66,20 @@ self.assetsManifest = {
       "url": "_framework/Microsoft.JSInterop.tq0wxlgi0y.wasm"
     },
     {
-      "hash": "sha256-+Lcu5SRN3whw/Jq/dAbY/t040ulUyTFoQd6bI9dJ28g=",
-      "url": "_framework/MyTransportAppWASM.4hdb7med5i.wasm"
+      "hash": "sha256-6f/jB7UjnReeSVxYw6Wj999bRfP+6ojzQqwu+R1utvM=",
+      "url": "_framework/MyTransportAppWASM.Core.3tk73qxsls.wasm"
     },
     {
-      "hash": "sha256-5iAr0NuFO8orZVafSY7x+RgT74U8H3oXSuhaD3cAE3I=",
-      "url": "_framework/MyTransportAppWASM.Core.qbo7akdrsg.wasm"
+      "hash": "sha256-+m/9FdyIN19BaDHQWLIv4AASpeCAC8rojH2WtcHSTQk=",
+      "url": "_framework/MyTransportAppWASM.Features.650h9rey0x.wasm"
     },
     {
-      "hash": "sha256-GjKJzwtGittHvpQbfjgtTVfJ0d+lQk6pyzbj1TkoPIw=",
-      "url": "_framework/MyTransportAppWASM.Features.qchl7w4rhh.wasm"
+      "hash": "sha256-T7B7GPHFX8slOk6wOCat7X7N8eKXL0vnCvArMLhawNM=",
+      "url": "_framework/MyTransportAppWASM.Gtfs.bdbruo8qlm.wasm"
     },
     {
-      "hash": "sha256-/QNjT8XXLyO/jO08cXPqNe9KPWJXmjWpJ/2z5GnOiu8=",
-      "url": "_framework/MyTransportAppWASM.Gtfs.7r38rzhfhu.wasm"
+      "hash": "sha256-3X9eyEcE/OeFsQYFe271vXAFGxyOWT+PH3uqsZO2qoo=",
+      "url": "_framework/MyTransportAppWASM.rm72l2bvpu.wasm"
     },
     {
       "hash": "sha256-SgZNNzuZxlceV4VJ/aCKQdet/8o7WeIXmiOF/MY7G1w=",
@@ -178,15 +178,15 @@ self.assetsManifest = {
       "url": "_framework/dotnet.native.yo2kiusye5.js"
     },
     {
-      "hash": "sha256-ctr62kM/YtXnVah0Jz3CQXP3tOBVeAnHaa2QINx8WZo=",
-      "url": "_framework/dotnet.ql8kdore89.js"
-    },
-    {
       "hash": "sha256-6SBqDbLLy460Bxd7wMZoiO97hZfLTuF+HRhWT3elS7U=",
       "url": "_framework/dotnet.runtime.v2rwe8u38b.js"
     },
     {
-      "hash": "sha256-8rr1ACzPSPKn3jxZxtnEN5lL9Hpt66ts9R3hRMXXEKE=",
+      "hash": "sha256-dt4MdXYgeDEBzDzjEMZTmqBq6NWDtzhOLEcTG5Zbglk=",
+      "url": "_framework/dotnet.uaneljtluc.js"
+    },
+    {
+      "hash": "sha256-edJks0Azt5WE5auWYQ8tJSlUErEwgwmm6sTqWPofhc8=",
       "url": "appsettings.json"
     },
     {
@@ -226,7 +226,7 @@ self.assetsManifest = {
       "url": "i18n/zh-CN.json"
     },
     {
-      "hash": "sha256-uhDZpw8ZXt6JfEF129NpH5eAIKc5ph/9j0iEfdHq6Dc=",
+      "hash": "sha256-QdvwMBUHbYdTSRZuJ/vZTvhHUMAtVmaqwUVDmYFP5AM=",
       "url": "index.html"
     },
     {
