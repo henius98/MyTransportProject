@@ -778,11 +778,6 @@
 #map[b-yr7ujqfrac] {
   height: 100%;
   width: 100%;
-  transition: opacity 0.18s ease;
-}
-
-#map.map-theme-switching[b-yr7ujqfrac] {
-  opacity: 0.15;
 }
 
 .map-overlay[b-yr7ujqfrac] {
@@ -1528,7 +1523,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #map[b-yr7ujqfrac],
   .map-overlay[b-yr7ujqfrac],
   .overlay-tab[b-yr7ujqfrac],
   #map-container[b-yr7ujqfrac],

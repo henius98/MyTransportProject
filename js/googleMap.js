@@ -11,10 +11,7 @@ let activeDotNetHelper = null;
 let gmAuthFailure = null;
 let mapInitSeq = 0;
 let mapThemeSeq = 0;
-let mapThemeFadeTimer = null;
-let mapThemeTilesListener = null;
 const MAP_ID = "7b39cc20de6bf1d7bcbd1c11"; // Required for AdvancedMarkerElement
-const MAP_THEME_FADE_FALLBACK_MS = 500;
 const activeMarkers = Object.create(null);
 const autocompletes = Object.create(null);
 const autocompleteConfigs = Object.create(null);
@@ -398,7 +395,8 @@ function onRouteArrowAnimationFrame(timestamp) {
     const elapsed = timestamp - routeArrowLastFrameAt;
     if (elapsed >= DIRECTION_ANIMATION_INTERVAL_MS) {
       routeArrowLastFrameAt = timestamp;
-      const stepScale = Math.min(elapsed, 200) / DIRECTION_ANIMATION_INTERVAL_MS;
+      const stepScale =
+        Math.min(elapsed, 200) / DIRECTION_ANIMATION_INTERVAL_MS;
       advanceRouteArrowFrame(stepScale);
     }
   }
@@ -779,22 +777,6 @@ function removeAdvancedMarker(marker) {
   } catch (_) {}
 }
 
-function clearPendingMapThemeTransition(el = null) {
-  if (mapThemeFadeTimer && typeof clearTimeout === "function") {
-    clearTimeout(mapThemeFadeTimer);
-  }
-  mapThemeFadeTimer = null;
-  if (mapThemeTilesListener) {
-    try {
-      window.google?.maps?.event?.removeListener?.(mapThemeTilesListener);
-    } catch (_) {}
-    mapThemeTilesListener = null;
-  }
-  const target =
-    el || (mapElementId ? document.getElementById(mapElementId) : null);
-  target?.classList?.remove?.("map-theme-switching");
-}
-
 function buildMapOptions(center, zoom, colorScheme, extra = {}) {
   const options = {
     center,
@@ -846,7 +828,6 @@ export async function initGoogleMaps(
 ) {
   const currentMapInitSeq = ++mapInitSeq;
   mapThemeSeq++;
-  clearPendingMapThemeTransition();
   mapElementId = elementId;
   lastMapCenter = { lat, lng };
   lastMapZoom = zoom;
@@ -932,7 +913,11 @@ export async function initGoogleMaps(
       const address =
         (await reverseGeocode(coords.lat, coords.lng)) ||
         `${coords.lat.toFixed(5)}, ${coords.lng.toFixed(5)}`;
-      if (dragSeq !== latestDragSeq || !map || currentMapInitSeq !== mapInitSeq) {
+      if (
+        dragSeq !== latestDragSeq ||
+        !map ||
+        currentMapInitSeq !== mapInitSeq
+      ) {
         return;
       }
       if (dotNetHelper) {
@@ -1005,8 +990,7 @@ export async function setMapTheme(theme) {
   }
 
   const oldMap = map;
-  const center =
-    toLatLngLiteral(oldMap.getCenter?.()) ||
+  const center = toLatLngLiteral(oldMap.getCenter?.()) ||
     lastMapCenter || { lat: 0, lng: 0 };
   const rawZoom =
     typeof oldMap.getZoom === "function" ? oldMap.getZoom() : lastMapZoom;
@@ -1032,9 +1016,6 @@ export async function setMapTheme(theme) {
     ? toLatLngLiteral(infoWindow?.getPosition?.()) ||
       getStaticStopPosition(openStopFeature, null)
     : null;
-
-  clearPendingMapThemeTransition(el);
-  el.classList?.add?.("map-theme-switching");
 
   try {
     infoWindow?.close?.();
@@ -1131,22 +1112,6 @@ export async function setMapTheme(theme) {
       currentInfoWindowAnchor = openAnchor;
     }
   }
-
-  const finishFade = () => {
-    if (seq !== mapThemeSeq) return;
-    clearPendingMapThemeTransition(el);
-  };
-
-  const addListenerOnce = window.google?.maps?.event?.addListenerOnce;
-  if (typeof addListenerOnce === "function") {
-    mapThemeTilesListener = addListenerOnce(map, "tilesloaded", finishFade);
-    if (typeof setTimeout === "function") {
-      mapThemeFadeTimer = setTimeout(finishFade, MAP_THEME_FADE_FALLBACK_MS);
-      mapThemeFadeTimer?.unref?.();
-    }
-  } else {
-    finishFade();
-  }
 }
 
 function createMarkerWithFallback(
@@ -1208,7 +1173,10 @@ function mountFallbackAutocompleteInput(elementId, dotNetHelper, methodName) {
   const container = document.getElementById(elementId);
   if (!container) return;
   const existingWidget = autocompletes[elementId];
-  if (existingWidget && String(existingWidget.tagName).toLowerCase() === "input") {
+  if (
+    existingWidget &&
+    String(existingWidget.tagName).toLowerCase() === "input"
+  ) {
     return;
   }
 
@@ -1260,12 +1228,14 @@ export async function initAutocomplete(
   autocompleteConfigs[elementId] = { dotNetHelper, methodName };
 
   try {
-    if (hasAuthFailureForKey(apiKey)) throw new Error("Google Maps authentication failed.");
+    if (hasAuthFailureForKey(apiKey))
+      throw new Error("Google Maps authentication failed.");
     await loadGoogleMaps(apiKey);
     const { PlaceAutocompleteElement } =
       await google.maps.importLibrary("places");
     if (isStale()) return;
-    if (hasAuthFailureForKey(apiKey)) throw new Error("Google Maps authentication failed.");
+    if (hasAuthFailureForKey(apiKey))
+      throw new Error("Google Maps authentication failed.");
 
     // Create the new PlaceAutocompleteElement widget
     const placeAutocomplete = new PlaceAutocompleteElement({
@@ -1348,15 +1318,19 @@ export async function initAutocomplete(
           pendingAutocompleteValues[elementId] = displayText;
 
           if (dotNetHelper && autocompletes[elementId] === placeAutocomplete) {
-            dotNetHelper.invokeMethodAsync(methodName, displayText)?.catch?.(() => {});
+            dotNetHelper
+              .invokeMethodAsync(methodName, displayText)
+              ?.catch?.(() => {});
 
             if (methodName === "UpdateOrigin" && selectedLoc) {
               updateUserMarker(selectedLoc.lat, selectedLoc.lng);
-              dotNetHelper.invokeMethodAsync(
-                "UpdateUserPosition",
-                selectedLoc.lat,
-                selectedLoc.lng,
-              )?.catch?.(() => {});
+              dotNetHelper
+                .invokeMethodAsync(
+                  "UpdateUserPosition",
+                  selectedLoc.lat,
+                  selectedLoc.lng,
+                )
+                ?.catch?.(() => {});
             }
           }
         } catch (err) {
@@ -2428,7 +2402,10 @@ export function setActiveRoute(routeId) {
       seg.polyline.setOptions(isActive ? seg.activeOpts : seg.inactiveOpts);
       if (seg.arrowPolyline) {
         if (isActive && seg.activeArrowOpts) {
-          seg.activeArrowOpts.icons = buildRouteDirectionIconSequences(true, true);
+          seg.activeArrowOpts.icons = buildRouteDirectionIconSequences(
+            true,
+            true,
+          );
         }
         seg.arrowPolyline.setOptions(
           isActive ? seg.activeArrowOpts : seg.inactiveArrowOpts,
@@ -2537,9 +2514,7 @@ const SELECTED_VEHICLE_Z_INDEX = 1000;
 function getVehicleMarkerKey(location) {
   const id = location?.vehicleId;
   if (id == null) return null;
-  return location.providerName
-    ? `${location.providerName}:${id}`
-    : String(id);
+  return location.providerName ? `${location.providerName}:${id}` : String(id);
 }
 
 function applyMarkerSelection(marker, isSelected) {
@@ -3001,7 +2976,11 @@ function buildStopInfoContent(feature) {
     seen.add(key);
     const formattedValue = formatStopPropertyValue(props[key]);
     if (!formattedValue) continue;
-    if (key === "route_id" && routeShortName && formattedValue === routeShortName) {
+    if (
+      key === "route_id" &&
+      routeShortName &&
+      formattedValue === routeShortName
+    ) {
       continue;
     }
     const label =
@@ -3029,7 +3008,6 @@ function appendBusInfoRow(container, label, value) {
 export function cleanupMap() {
   mapInitSeq++;
   mapThemeSeq++;
-  clearPendingMapThemeTransition();
   mapElementId = null;
   lastMapCenter = null;
   clearStaticRoute();
