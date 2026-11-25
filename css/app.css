@@ -538,6 +538,7 @@ body .form-select:focus {
 
 .autocomplete-container gmp-place-autocomplete {
   width: 100%;
+  color-scheme: var(--date-scheme);
   --gmpx-color-surface: var(--input-bg);
   --gmpx-color-on-surface: var(--text-color);
   --gmpx-font-size-base: 0.95rem;

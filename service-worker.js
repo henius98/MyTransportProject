@@ -1,4 +1,4 @@
-/* Manifest version: 1vbIM7Fx */
+/* Manifest version: hV4B+IDZ */
 // Caution! Be sure you understand the caveats before publishing an application with
 // offline support. See https://aka.ms/blazor-offline-considerations
 
@@ -26,6 +26,7 @@ function isGtfsStaticRequest(url) {
   return !isSelfMapRoute && (
     (url.hostname === 'api.data.gov.my' && url.pathname.includes('/gtfs-static/'))
     || url.pathname.includes('/data/routes')
+    || url.pathname.includes('/data/frequencies')
     || url.pathname.includes('/departures')
     || (url.pathname.endsWith('/map') || url.pathname.includes('/map?') || url.pathname.includes('/map/'))
   );
