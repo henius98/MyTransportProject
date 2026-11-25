@@ -33,11 +33,6 @@
 #map {
   height: 100%;
   width: 100%;
-  transition: opacity 0.18s ease;
-}
-
-#map.map-theme-switching {
-  opacity: 0.15;
 }
 
 .map-overlay {
@@ -783,7 +778,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #map,
   .map-overlay,
   .overlay-tab,
   #map-container,

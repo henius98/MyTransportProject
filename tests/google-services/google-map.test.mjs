@@ -3281,7 +3281,6 @@ test("setMapTheme recreates Map with new colorScheme while preserving camera, ma
   const polylineSchemes = [];
   const openedInfoWindows = [];
   const clearedListenerTargets = [];
-  const tilesLoadedCallbacks = [];
   let fitBoundsCalls = 0;
 
   class RecordingMap {
@@ -3465,14 +3464,6 @@ test("setMapTheme recreates Map with new colorScheme while preserving camera, ma
   mock.maps.SymbolPath = { CIRCLE: 0 };
   mock.maps.event = {
     clearInstanceListeners: (target) => clearedListenerTargets.push(target),
-    addListenerOnce: (target, eventName, cb) => {
-      const handle = { target, eventName, cb, removed: false };
-      if (eventName === "tilesloaded") tilesLoadedCallbacks.push(handle);
-      return handle;
-    },
-    removeListener: (handle) => {
-      if (handle) handle.removed = true;
-    },
   };
   const origImport = mock.maps.importLibrary;
   mock.maps.importLibrary = async (lib) => {
@@ -3608,12 +3599,6 @@ test("setMapTheme recreates Map with new colorScheme while preserving camera, ma
   assert.equal(openedInfoWindows.length, 2);
   assert.equal(openedInfoWindows[1].anchor, busMarker);
   assert.equal(openedInfoWindows[1].map, newMap);
-
-  // Transition class stays active until tilesloaded fires.
-  assert.equal(mapEl.classList.contains("map-theme-switching"), true);
-  assert.equal(tilesLoadedCallbacks.length, 1);
-  tilesLoadedCallbacks[0].cb();
-  assert.equal(mapEl.classList.contains("map-theme-switching"), false);
 });
 
 test("setMapTheme redraws cached non-transit route without recomputing Route.computeRoutes", async () => {
