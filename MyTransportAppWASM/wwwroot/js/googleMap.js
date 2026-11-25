@@ -2,11 +2,19 @@ let mapsApiPromise = null;
 let storedApiKey = null;
 let cachedGeocoder = null;
 let map, userMarker, infoWindow;
+let mapElementId = null;
+let lastMapCenter = null;
+let lastMapZoom = 13;
 let currentInfoWindowAnchor = null;
 let selectedVehicleKey = null;
 let activeDotNetHelper = null;
 let gmAuthFailure = null;
 let mapInitSeq = 0;
+let mapThemeSeq = 0;
+let mapThemeFadeTimer = null;
+let mapThemeTilesListener = null;
+const MAP_ID = "7b39cc20de6bf1d7bcbd1c11"; // Required for AdvancedMarkerElement
+const MAP_THEME_FADE_FALLBACK_MS = 500;
 const activeMarkers = Object.create(null);
 const autocompletes = Object.create(null);
 const autocompleteConfigs = Object.create(null);
@@ -239,15 +247,16 @@ let routeCalloutMarkers = [];
 let routeOptionsMap = new Map();
 let cachedTransitRoutes = new Map();
 let renderedRoutesData = [];
+let renderedSingleRoute = null;
 let activeRouteDotNetRef = null;
 let currentColorScheme = "DARK";
 let currentActiveRouteId = -1;
 let isRouteSelectionAnimated = false;
 let staticRouteLayer = null;
 let staticRoutePolylines = [];
-let staticRouteDotNetRef = null;
 let staticRouteSeq = 0;
 let hasStaticRouteOverlay = false;
+let activeStaticStopFeature = null;
 let transitLayer = null;
 let routeArrowAnimationTimer = null;
 let routeArrowAnimationFrameId = null;
@@ -569,6 +578,15 @@ function extractGeoJsonLinePaths(geometry) {
 export function clearStaticRoute(preserveVehicleSelection = false) {
   staticRouteSeq++;
   hasStaticRouteOverlay = false;
+  if (activeStaticStopFeature) {
+    if (currentInfoWindowAnchor === activeStaticStopFeature) {
+      try {
+        infoWindow?.close();
+      } catch (_) {}
+      currentInfoWindowAnchor = null;
+    }
+    activeStaticStopFeature = null;
+  }
   staticRoutePolylines.forEach((p) => {
     animatedDirectionPolylines.delete(p);
     p.setMap(null);
@@ -585,7 +603,19 @@ export function clearStaticRoute(preserveVehicleSelection = false) {
   }
 }
 
-export async function showStaticRoute(geoJson, dotNetRef) {
+function getStaticStopPosition(feature, fallbackLatLng) {
+  const geometry = feature?.getGeometry?.();
+  const point = typeof geometry?.get === "function" ? geometry.get() : null;
+  let position = toLatLngLiteral(point) || toLatLngLiteral(fallbackLatLng);
+  if (!position && typeof geometry?.forEachLatLng === "function") {
+    geometry.forEachLatLng((latLng) => {
+      if (!position) position = toLatLngLiteral(latLng);
+    });
+  }
+  return position;
+}
+
+export async function showStaticRoute(geoJson) {
   if (!map) return;
   const seq = ++staticRouteSeq;
   const collection = JSON.parse(geoJson);
@@ -600,9 +630,15 @@ export async function showStaticRoute(geoJson, dotNetRef) {
     staticRouteLayer.setStyle((feature) => {
       if (feature.getProperty("kind") === "stop") {
         return {
+          clickable: true,
+          cursor: "pointer",
+          title:
+            feature.getProperty("stop_name") ||
+            feature.getProperty("stop_id") ||
+            "",
           icon: {
             path: google.maps.SymbolPath.CIRCLE,
-            scale: 5,
+            scale: 6,
             fillColor: "#ffffff",
             fillOpacity: 1,
             strokeColor: "#1769aa",
@@ -619,23 +655,34 @@ export async function showStaticRoute(geoJson, dotNetRef) {
       };
     });
     staticRouteLayer.addListener("click", (event) => {
-      if (event.feature.getProperty("kind") !== "stop") return;
-      const stopId = event.feature.getProperty("stop_id");
-      if (!stopId || !staticRouteDotNetRef) return;
-      staticRouteDotNetRef
-        .invokeMethodAsync(
-          "OnStaticStopSelected",
-          stopId,
-          event.feature.getProperty("stop_name") || stopId,
-        )
-        .catch((error) =>
-          console.error("Static stop selection failed:", error),
-        );
+      const feature = event?.feature;
+      if (feature?.getProperty("kind") !== "stop") return;
+
+      if (currentInfoWindowAnchor === feature) {
+        infoWindow?.close();
+        currentInfoWindowAnchor = null;
+        activeStaticStopFeature = null;
+        return;
+      }
+
+      const position = getStaticStopPosition(feature, event?.latLng);
+      if (infoWindow && position) {
+        if (
+          currentInfoWindowAnchor &&
+          currentInfoWindowAnchor !== activeStaticStopFeature
+        ) {
+          infoWindow.close();
+        }
+        infoWindow.setContent(buildStopInfoContent(feature));
+        infoWindow.setPosition?.(position);
+        infoWindow.open({ map });
+        currentInfoWindowAnchor = feature;
+        activeStaticStopFeature = feature;
+      }
     });
   }
 
   clearStaticRoute(true);
-  staticRouteDotNetRef = dotNetRef;
 
   const rawFeatures = Array.isArray(collection?.features)
     ? collection.features
@@ -732,6 +779,61 @@ function removeAdvancedMarker(marker) {
   } catch (_) {}
 }
 
+function clearPendingMapThemeTransition(el = null) {
+  if (mapThemeFadeTimer && typeof clearTimeout === "function") {
+    clearTimeout(mapThemeFadeTimer);
+  }
+  mapThemeFadeTimer = null;
+  if (mapThemeTilesListener) {
+    try {
+      window.google?.maps?.event?.removeListener?.(mapThemeTilesListener);
+    } catch (_) {}
+    mapThemeTilesListener = null;
+  }
+  const target =
+    el || (mapElementId ? document.getElementById(mapElementId) : null);
+  target?.classList?.remove?.("map-theme-switching");
+}
+
+function buildMapOptions(center, zoom, colorScheme, extra = {}) {
+  const options = {
+    center,
+    zoom,
+    mapId: MAP_ID,
+    colorScheme,
+    mapTypeControl: false,
+    streetViewControl: false,
+    fullscreenControl: false,
+  };
+  if (Number.isFinite(extra.heading)) options.heading = extra.heading;
+  if (Number.isFinite(extra.tilt)) options.tilt = extra.tilt;
+  if (extra.mapTypeId) options.mapTypeId = extra.mapTypeId;
+  return options;
+}
+
+function bindMapClickListener(targetMap) {
+  // Close infoWindow when clicking anywhere else on the map; keep vehicle emphasis while a static route is shown.
+  targetMap.addListener("click", () => {
+    infoWindow?.close();
+    currentInfoWindowAnchor = null;
+    activeStaticStopFeature = null;
+    if (!hasStaticRouteOverlay) {
+      clearSelectedVehicle();
+    }
+  });
+}
+
+function setMarkerMap(marker, targetMap) {
+  if (!marker) return;
+  try {
+    if (typeof marker.setMap === "function") {
+      marker.setMap(targetMap);
+    } else {
+      marker.map = targetMap;
+    }
+  } catch (_) {}
+}
+
 export async function initGoogleMaps(
   elementId,
   lat,
@@ -743,10 +845,17 @@ export async function initGoogleMaps(
   timeZone,
 ) {
   const currentMapInitSeq = ++mapInitSeq;
+  mapThemeSeq++;
+  clearPendingMapThemeTransition();
+  mapElementId = elementId;
+  lastMapCenter = { lat, lng };
+  lastMapZoom = zoom;
   activeDotNetHelper = dotNetHelper;
   pendingUserPosition = null;
   selectedVehicleKey = null;
   hasStaticRouteOverlay = false;
+  activeStaticStopFeature = null;
+  renderedSingleRoute = null;
   currentColorScheme = (theme || "DARK").toUpperCase();
   if (hasAuthFailureForKey(apiKey)) {
     notifyMapAuthError();
@@ -782,16 +891,10 @@ export async function initGoogleMaps(
     lng = pendingUserPosition.lng;
     pendingUserPosition = null;
   }
+  lastMapCenter = { lat, lng };
+  lastMapZoom = zoom;
 
-  map = new Map(el, {
-    center: { lat, lng },
-    zoom,
-    mapId: "7b39cc20de6bf1d7bcbd1c11", // Required for AdvancedMarkerElement
-    colorScheme: theme.toUpperCase(),
-    mapTypeControl: false,
-    streetViewControl: false,
-    fullscreenControl: false,
-  });
+  map = new Map(el, buildMapOptions({ lat, lng }, zoom, currentColorScheme));
 
   if (transitLayer) {
     transitLayer.setMap(null);
@@ -804,14 +907,7 @@ export async function initGoogleMaps(
 
   infoWindow = new InfoWindow({ disableAutoPan: true, headerDisabled: true });
 
-  // Close infoWindow when clicking anywhere else on the map; keep vehicle emphasis while a static route is shown.
-  map.addListener("click", () => {
-    infoWindow.close();
-    currentInfoWindowAnchor = null;
-    if (!hasStaticRouteOverlay) {
-      clearSelectedVehicle();
-    }
-  });
+  bindMapClickListener(map);
 
   const pin = document.createElement("div");
   pin.textContent = "🚶";
@@ -885,18 +981,171 @@ export async function initGoogleMaps(
 }
 
 export async function setMapTheme(theme) {
-  currentColorScheme = (theme || "DARK").toUpperCase();
-  if (map) {
-    map.setOptions({ colorScheme: currentColorScheme });
-    if (renderedRoutesData.length > 0 && currentActiveRouteId >= 0) {
-      await renderMultipleRoutes(
-        renderedRoutesData,
-        currentActiveRouteId,
-        activeRouteDotNetRef,
-        false,
-        isRouteSelectionAnimated,
-      );
+  const nextColorScheme = (theme || "DARK").toUpperCase();
+  if (map && nextColorScheme === currentColorScheme) {
+    return;
+  }
+
+  currentColorScheme = nextColorScheme;
+  if (!map || hasAuthFailureForKey()) {
+    return;
+  }
+
+  const seq = ++mapThemeSeq;
+  const initSeqSnapshot = mapInitSeq;
+  const el = mapElementId ? document.getElementById(mapElementId) : null;
+  if (!el || (typeof el.isConnected === "boolean" && !el.isConnected)) {
+    return;
+  }
+
+  // Google Maps ignores colorScheme updates in map.setOptions(); recreate Map and TransitLayer, then re-attach overlays.
+  const { Map, TransitLayer } = await google.maps.importLibrary("maps");
+  if (!map || seq !== mapThemeSeq || initSeqSnapshot !== mapInitSeq) {
+    return;
+  }
+
+  const oldMap = map;
+  const center =
+    toLatLngLiteral(oldMap.getCenter?.()) ||
+    lastMapCenter || { lat: 0, lng: 0 };
+  const rawZoom =
+    typeof oldMap.getZoom === "function" ? oldMap.getZoom() : lastMapZoom;
+  const zoom = Number.isFinite(rawZoom) ? rawZoom : lastMapZoom;
+  const heading =
+    typeof oldMap.getHeading === "function" ? oldMap.getHeading() : undefined;
+  const tilt =
+    typeof oldMap.getTilt === "function" ? oldMap.getTilt() : undefined;
+  const mapTypeId =
+    typeof oldMap.getMapTypeId === "function"
+      ? oldMap.getMapTypeId()
+      : undefined;
+
+  lastMapCenter = center;
+  lastMapZoom = zoom;
+
+  const openAnchor = currentInfoWindowAnchor;
+  const openStopFeature =
+    activeStaticStopFeature && openAnchor === activeStaticStopFeature
+      ? activeStaticStopFeature
+      : null;
+  const openStopPosition = openStopFeature
+    ? toLatLngLiteral(infoWindow?.getPosition?.()) ||
+      getStaticStopPosition(openStopFeature, null)
+    : null;
+
+  clearPendingMapThemeTransition(el);
+  el.classList?.add?.("map-theme-switching");
+
+  try {
+    infoWindow?.close?.();
+  } catch (_) {}
+
+  // Detach overlays from oldMap before clearing the container so AdvancedMarkerElement nodes stay intact.
+  const hadTransitLayer = !!transitLayer;
+  if (transitLayer) {
+    transitLayer.setMap(null);
+    transitLayer = null;
+  }
+  setMarkerMap(userMarker, null);
+  for (const key in activeMarkers) {
+    setMarkerMap(activeMarkers[key], null);
+  }
+  staticRouteLayer?.setMap?.(null);
+  staticRoutePolylines.forEach((p) => p.setMap?.(null));
+
+  const willRedrawMultiRoutes =
+    renderedRoutesData.length > 0 && currentActiveRouteId >= 0;
+  const willRedrawSingleRoute = !willRedrawMultiRoutes && !!renderedSingleRoute;
+  if (!willRedrawMultiRoutes && !willRedrawSingleRoute) {
+    routePolylines.forEach((p) => p.setMap?.(null));
+    routeMarkers.forEach((m) => setMarkerMap(m, null));
+    routeCalloutMarkers.forEach((entry) => setMarkerMap(entry.marker, null));
+  }
+
+  try {
+    window.google?.maps?.event?.clearInstanceListeners?.(oldMap);
+  } catch (_) {}
+
+  if (typeof el.replaceChildren === "function") {
+    el.replaceChildren();
+  } else if ("innerHTML" in el) {
+    el.innerHTML = "";
+  }
+
+  map = new Map(
+    el,
+    buildMapOptions(center, zoom, currentColorScheme, {
+      heading,
+      tilt,
+      mapTypeId,
+    }),
+  );
+  bindMapClickListener(map);
+
+  // TransitLayer caches its initial tile style (TransitFocused vs TransitFocusedDark); recreate it for the new map.
+  if (hadTransitLayer && TransitLayer) {
+    transitLayer = new TransitLayer();
+    transitLayer.setMap(map);
+  }
+  setMarkerMap(userMarker, map);
+  for (const key in activeMarkers) {
+    setMarkerMap(activeMarkers[key], map);
+  }
+  staticRouteLayer?.setMap?.(map);
+  staticRoutePolylines.forEach((p) => p.setMap?.(map));
+
+  if (willRedrawMultiRoutes) {
+    await renderMultipleRoutes(
+      renderedRoutesData,
+      currentActiveRouteId,
+      activeRouteDotNetRef,
+      false,
+      isRouteSelectionAnimated,
+    );
+  } else if (willRedrawSingleRoute) {
+    await renderSingleRoute(
+      renderedSingleRoute.route,
+      renderedSingleRoute.originLoc,
+      renderedSingleRoute.destinationLoc,
+      renderedSingleRoute.routesTravelMode,
+      false,
+    );
+  } else {
+    routePolylines.forEach((p) => p.setMap?.(map));
+    routeMarkers.forEach((m) => setMarkerMap(m, map));
+    routeCalloutMarkers.forEach((entry) => setMarkerMap(entry.marker, map));
+  }
+
+  if (seq !== mapThemeSeq || initSeqSnapshot !== mapInitSeq || !map) {
+    return;
+  }
+
+  if (infoWindow && openAnchor) {
+    if (openStopFeature && openStopPosition) {
+      infoWindow.setPosition?.(openStopPosition);
+      infoWindow.open?.({ map });
+      currentInfoWindowAnchor = openStopFeature;
+      activeStaticStopFeature = openStopFeature;
+    } else if (Object.values(activeMarkers).includes(openAnchor)) {
+      infoWindow.open?.({ anchor: openAnchor, map });
+      currentInfoWindowAnchor = openAnchor;
     }
+  }
+
+  const finishFade = () => {
+    if (seq !== mapThemeSeq) return;
+    clearPendingMapThemeTransition(el);
+  };
+
+  const addListenerOnce = window.google?.maps?.event?.addListenerOnce;
+  if (typeof addListenerOnce === "function") {
+    mapThemeTilesListener = addListenerOnce(map, "tilesloaded", finishFade);
+    if (typeof setTimeout === "function") {
+      mapThemeFadeTimer = setTimeout(finishFade, MAP_THEME_FADE_FALLBACK_MS);
+      mapThemeFadeTimer?.unref?.();
+    }
+  } else {
+    finishFade();
   }
 }
 
@@ -1226,6 +1475,7 @@ export function clearRoute() {
   clearRenderedRouteOverlays();
   cachedTransitRoutes.clear();
   renderedRoutesData = [];
+  renderedSingleRoute = null;
   activeRouteDotNetRef = null;
   currentActiveRouteId = -1;
   isRouteSelectionAnimated = false;
@@ -1567,46 +1817,21 @@ function getRouteEndpoints(route, fallbackStart, fallbackEnd) {
   return { startPos: fallbackStart, endPos: fallbackEnd };
 }
 
-/**
- * Computes and renders a route using the new Routes library (Route.computeRoutes).
- * Replaces legacy DirectionsService.route() + DirectionsRenderer.setDirections().
- */
-async function showRoute(origin, destination, travelMode = "TRANSIT") {
-  await loadGoogleMaps();
-  if (!map) throw new Error("Map not initialized.");
-
-  const [{ Route }, { Polyline }] = await Promise.all([
-    google.maps.importLibrary("routes"),
-    google.maps.importLibrary("maps"),
-  ]);
-
-  clearRoute();
-
-  const originLoc = toLatLngLiteral(origin) || origin;
-  const destinationLoc = toLatLngLiteral(destination) || destination;
-
-  const routesTravelMode = normalizeRoutesTravelMode(travelMode);
-  const request = {
-    origin: originLoc,
-    destination: destinationLoc,
-    travelMode: routesTravelMode,
-    fields: [
-      "path",
-      "durationMillis",
-      "distanceMeters",
-      "legs",
-      "viewport",
-      "localizedValues",
-    ],
+async function renderSingleRoute(
+  route,
+  originLoc,
+  destinationLoc,
+  routesTravelMode,
+  fitViewport = true,
+) {
+  const { Polyline } = await google.maps.importLibrary("maps");
+  clearRenderedRouteOverlays();
+  renderedSingleRoute = {
+    route,
+    originLoc,
+    destinationLoc,
+    routesTravelMode,
   };
-
-  const { routes } = await Route.computeRoutes(request);
-
-  if (!routes || routes.length === 0) {
-    return false;
-  }
-
-  const route = routes[0];
 
   const segmentMeta = [];
   routePolylines = route.createPolylines({
@@ -1663,7 +1888,52 @@ async function showRoute(origin, destination, travelMode = "TRANSIT") {
     );
   }
 
-  if (route.viewport) map.fitBounds(route.viewport);
+  if (fitViewport && route.viewport) map.fitBounds(route.viewport);
+}
+
+/**
+ * Computes and renders a route using the new Routes library (Route.computeRoutes).
+ * Replaces legacy DirectionsService.route() + DirectionsRenderer.setDirections().
+ */
+async function showRoute(origin, destination, travelMode = "TRANSIT") {
+  await loadGoogleMaps();
+  if (!map) throw new Error("Map not initialized.");
+
+  const { Route } = await google.maps.importLibrary("routes");
+
+  clearRoute();
+
+  const originLoc = toLatLngLiteral(origin) || origin;
+  const destinationLoc = toLatLngLiteral(destination) || destination;
+
+  const routesTravelMode = normalizeRoutesTravelMode(travelMode);
+  const request = {
+    origin: originLoc,
+    destination: destinationLoc,
+    travelMode: routesTravelMode,
+    fields: [
+      "path",
+      "durationMillis",
+      "distanceMeters",
+      "legs",
+      "viewport",
+      "localizedValues",
+    ],
+  };
+
+  const { routes } = await Route.computeRoutes(request);
+
+  if (!routes || routes.length === 0) {
+    return false;
+  }
+
+  await renderSingleRoute(
+    routes[0],
+    originLoc,
+    destinationLoc,
+    routesTravelMode,
+    true,
+  );
   return true;
 }
 
@@ -1953,6 +2223,7 @@ async function renderMultipleRoutes(
   ]);
 
   clearRenderedRouteOverlays();
+  renderedSingleRoute = null;
   renderedRoutesData = routesData.slice();
   activeRouteDotNetRef = dotNetRef;
   currentActiveRouteId = activeRouteId;
@@ -2410,7 +2681,8 @@ function isSameVehicleSnapshot(previous, current) {
     previous.routeShortName === current.routeShortName &&
     previous.routeId === current.routeId &&
     previous.speed === current.speed &&
-    previous.timestamp === current.timestamp
+    previous.timestamp === current.timestamp &&
+    Boolean(previous.isEstimated) === Boolean(current.isEstimated)
   );
 }
 
@@ -2445,7 +2717,8 @@ export async function syncMarkers(locations) {
       const speedKmh = (loc.speed || 0) * 3.6;
       loc.displaySpeed = speedKmh > 0 ? Math.round(speedKmh) : "-";
       const routeLabel = loc.routeShortName || loc.routeId;
-      const title = `Route ${routeLabel || "Unknown"} - ${id}`;
+      const estimatedSuffix = loc.isEstimated ? " (Estimated)" : "";
+      const title = `Route ${routeLabel || "Unknown"} - ${id}${estimatedSuffix}`;
 
       if (activeMarkers[markerKey]) {
         const marker = activeMarkers[markerKey];
@@ -2499,6 +2772,7 @@ export async function syncMarkers(locations) {
           ) {
             infoWindow.close();
             currentInfoWindowAnchor = null;
+            activeStaticStopFeature = null;
             clearSelectedVehicle();
             notifyVehicleDeselected(marker.busData);
             return;
@@ -2507,6 +2781,7 @@ export async function syncMarkers(locations) {
           infoWindow.setContent(buildVehicleInfoContent(id, marker.busData));
           infoWindow.open({ anchor: marker, map });
           currentInfoWindowAnchor = marker;
+          activeStaticStopFeature = null;
           notifyVehicleSelected(marker.busData);
         };
 
@@ -2621,6 +2896,9 @@ function buildVehicleInfoContent(id, location) {
     "Route",
     location.routeShortName || location.routeId || "N/A",
   );
+  if (location.isEstimated) {
+    appendBusInfoRow(content, "Status", "Estimated (schedule)");
+  }
   appendBusInfoRow(
     content,
     "Speed",
@@ -2633,6 +2911,105 @@ function buildVehicleInfoContent(id, location) {
       timeZone: displayTimeZone,
     }),
   );
+
+  return content;
+}
+
+const STOP_PROPERTY_LABELS = {
+  stop_id: "Stop ID",
+  stop_code: "Code",
+  route_short_name: "Route",
+  route_id: "Route",
+  arrival_times: "Arrival Times",
+  departure_times: "Departure Times",
+  stop_sequence: "Sequence",
+  platform_code: "Platform",
+  stop_desc: "Description",
+  zone_id: "Zone",
+  message: "Message",
+};
+
+const STOP_PROPERTY_ORDER = Object.keys(STOP_PROPERTY_LABELS);
+
+function extractFeatureProperties(feature) {
+  const props = Object.create(null);
+  if (typeof feature?.forEachProperty === "function") {
+    feature.forEachProperty((value, key) => {
+      if (key) props[key] = value;
+    });
+    return props;
+  }
+  for (const key of ["stop_name", ...STOP_PROPERTY_ORDER]) {
+    const value = feature?.getProperty?.(key);
+    if (value !== undefined) props[key] = value;
+  }
+  return props;
+}
+
+function formatStopPropertyLabel(key) {
+  if (Object.hasOwn(STOP_PROPERTY_LABELS, key)) {
+    return STOP_PROPERTY_LABELS[key];
+  }
+  return String(key)
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+function formatStopPropertyValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => formatStopPropertyValue(item))
+      .filter(Boolean)
+      .join(", ");
+  }
+  try {
+    return JSON.stringify(value);
+  } catch (_) {
+    return String(value);
+  }
+}
+
+function buildStopInfoContent(feature) {
+  const props = extractFeatureProperties(feature);
+  const stopName = formatStopPropertyValue(props.stop_name);
+  const stopId = formatStopPropertyValue(props.stop_id);
+
+  const content = document.createElement("div");
+  content.className = "bus-info-window";
+
+  const header = document.createElement("div");
+  header.className = "bus-info-header";
+  header.textContent = stopName || stopId || "Stop";
+  content.appendChild(header);
+
+  const routeShortName = formatStopPropertyValue(props.route_short_name);
+  const seen = new Set(["kind", "stop_name", "trip_ids"]);
+  const orderedKeys = [
+    ...STOP_PROPERTY_ORDER.filter((key) => Object.hasOwn(props, key)),
+    ...Object.keys(props).filter(
+      (key) => !seen.has(key) && !STOP_PROPERTY_ORDER.includes(key),
+    ),
+  ];
+
+  for (const key of orderedKeys) {
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const formattedValue = formatStopPropertyValue(props[key]);
+    if (!formattedValue) continue;
+    if (key === "route_id" && routeShortName && formattedValue === routeShortName) {
+      continue;
+    }
+    const label =
+      key === "route_id" && routeShortName
+        ? "Route ID"
+        : formatStopPropertyLabel(key);
+    appendBusInfoRow(content, label, formattedValue);
+  }
 
   return content;
 }
@@ -2651,6 +3028,10 @@ function appendBusInfoRow(container, label, value) {
 }
 export function cleanupMap() {
   mapInitSeq++;
+  mapThemeSeq++;
+  clearPendingMapThemeTransition();
+  mapElementId = null;
+  lastMapCenter = null;
   clearStaticRoute();
   clearRoute();
   activeDotNetHelper = null;
@@ -2660,7 +3041,6 @@ export function cleanupMap() {
     } catch (_) {}
     staticRouteLayer.setMap(null);
     staticRouteLayer = null;
-    staticRouteDotNetRef = null;
   }
   if (transitLayer) {
     transitLayer.setMap(null);
@@ -2676,6 +3056,7 @@ export function cleanupMap() {
     infoWindow = null;
   }
   currentInfoWindowAnchor = null;
+  activeStaticStopFeature = null;
   if (userMarker) {
     removeAdvancedMarker(userMarker);
     userMarker = null;

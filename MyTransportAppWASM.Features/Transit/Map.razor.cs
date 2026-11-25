@@ -114,7 +114,7 @@ public partial class Map : FeatureComponentBase, IAsyncDisposable
       {
         if (geoJson != null)
         {
-          await mapModule.InvokeVoidAsync("showStaticRoute", geoJson, objRef);
+          await mapModule.InvokeVoidAsync("showStaticRoute", geoJson);
         }
         await SyncMarkersFromCacheAsync();
       }
@@ -145,18 +145,6 @@ public partial class Map : FeatureComponentBase, IAsyncDisposable
     if (!Session.ClearVehicleRouteSelection(providerName)) return;
     await UpdateStaticOverlayAsync(() => Task.FromResult<string?>(null));
     if (!_isDisposed) StateHasChanged();
-  }
-
-  [JSInvokable]
-  public async Task OnStaticStopSelected(string stopId, string stopName)
-  {
-    if (_isDisposed) return;
-    var loadTask = Session.LoadStaticDeparturesAsync(stopId, stopName, _cts.Token);
-    StateHasChanged();
-    if (await loadTask && !_isDisposed)
-    {
-      StateHasChanged();
-    }
   }
 
   protected override Task OnInitializedAsync()

@@ -867,7 +867,9 @@ function createFakeElement(tagName = "div") {
     getAttribute(name) {
       return attributes[name] ?? null;
     },
-    append: () => {},
+    append(...nodes) {
+      element.children.push(...nodes);
+    },
     appendChild(node) {
       element.children.push(node);
       return node;
@@ -2283,6 +2285,300 @@ test("showStaticRoute draws route LineStrings as Polylines with repeated chevron
   assert.equal(dataFeaturesRemoved.length, 1);
 });
 
+test("clicking a static stop toggles an InfoWindow with GeoJSON properties without invoking departure API", async () => {
+  const openedInfo = [];
+  const createdMarkers = [];
+  let closedCount = 0;
+  let dataClickListener = null;
+  let dataStyleFn = null;
+  const mapListeners = {};
+
+  class RecordingMarker {
+    constructor(opts) {
+      this.listeners = {};
+      Object.assign(this, opts);
+      createdMarkers.push(this);
+    }
+    addEventListener(type, fn) {
+      this.listeners[type] = fn;
+    }
+    removeEventListener() {}
+  }
+
+  class RecordingInfoWindow {
+    setContent(content) {
+      this.lastContent = content;
+    }
+    setPosition(position) {
+      this.lastPosition = position;
+    }
+    open(opts) {
+      openedInfo.push({
+        anchor: opts?.anchor ?? null,
+        map: opts?.map ?? null,
+        position: this.lastPosition ?? null,
+        content: this.lastContent,
+      });
+    }
+    close() {
+      closedCount++;
+    }
+  }
+
+  class MockDataLayer {
+    constructor() {
+      this.features = [];
+    }
+    setStyle(fn) {
+      dataStyleFn = fn;
+    }
+    addListener(eventName, cb) {
+      if (eventName === "click") dataClickListener = cb;
+    }
+    addGeoJson(fc) {
+      const wrapped = fc.features.map((f) => ({
+        raw: f,
+        getProperty: (key) => f.properties?.[key],
+        forEachProperty: (cb) => {
+          for (const [key, value] of Object.entries(f.properties || {})) {
+            cb(value, key);
+          }
+        },
+        getGeometry: () => ({
+          get: () =>
+            f.geometry?.type === "Point"
+              ? {
+                  lat: () => f.geometry.coordinates[1],
+                  lng: () => f.geometry.coordinates[0],
+                }
+              : null,
+          forEachLatLng: (cb) => {
+            if (f.geometry?.type === "Point") {
+              cb({
+                lat: f.geometry.coordinates[1],
+                lng: f.geometry.coordinates[0],
+              });
+            }
+          },
+        }),
+      }));
+      this.features.push(...wrapped);
+      return wrapped;
+    }
+    forEach(cb) {
+      this.features.forEach(cb);
+    }
+    remove(f) {
+      this.features = this.features.filter((item) => item !== f);
+    }
+  }
+
+  const mock = createMockGoogleMaps();
+  mock.maps.Data = MockDataLayer;
+  mock.maps.SymbolPath = { CIRCLE: 0 };
+  const origImport = mock.maps.importLibrary;
+  mock.maps.importLibrary = async (lib) => {
+    const m = await origImport(lib);
+    if (lib === "maps") {
+      class RecordingMap extends m.Map {
+        addListener(name, fn) {
+          mapListeners[name] = fn;
+        }
+      }
+      return { ...m, Map: RecordingMap, InfoWindow: RecordingInfoWindow };
+    }
+    if (lib === "marker") {
+      return { ...m, AdvancedMarkerElement: RecordingMarker };
+    }
+    return m;
+  };
+
+  const api = await loadMapModule(mock, {
+    createElement: createFakeElement,
+    createElementNS: (_ns, tag) => createFakeElement(tag),
+    getElementById: () => createFakeElement("div"),
+  });
+
+  const { invocations, dotNetHelper } = createDotNetRecorder();
+  await api.initGoogleMaps(
+    "map",
+    3.14,
+    101.69,
+    13,
+    "test-api-key",
+    dotNetHelper,
+    "DARK",
+    "Asia/Kuala_Lumpur",
+  );
+  createdMarkers.length = 0;
+
+  await api.showStaticRoute(
+    JSON.stringify({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [101.6952, 3.1859] },
+          properties: {
+            kind: "stop",
+            stop_id: "AG1",
+            stop_name: "SENTUL TIMUR",
+            route_id: "AG",
+            platform_code: "P1",
+            custom_note: "Terminal station",
+          },
+        },
+        {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [101.7119, 3.1348] },
+          properties: {
+            kind: "stop",
+            stop_id: "AG10",
+            stop_name: "PUDU",
+            route_id: "AG",
+          },
+        },
+      ],
+    }),
+    dotNetHelper,
+  );
+
+  assert.equal(typeof dataStyleFn, "function");
+  assert.equal(typeof dataClickListener, "function");
+
+  const stop1Props = {
+    kind: "stop",
+    stop_id: "AG1",
+    stop_name: "SENTUL TIMUR",
+    route_id: "AG",
+    trip_ids: ["AGL_MonFri_0", "AGL_MonFri_1"],
+    arrival_times: "06:25:20, 08:50:20, 20:25:20",
+    departure_times: "06:25:20, 08:50:20, 20:25:20",
+    platform_code: "P1",
+    custom_note: "Terminal station",
+  };
+  const stop1 = {
+    getProperty: (key) => stop1Props[key],
+    forEachProperty: (cb) => {
+      for (const [k, v] of Object.entries(stop1Props)) {
+        cb(v, k);
+      }
+    },
+    getGeometry: () => ({
+      get: () => ({ lat: () => 3.1859, lng: () => 101.6952 }),
+    }),
+  };
+
+  const stopStyle = dataStyleFn(stop1);
+  assert.equal(stopStyle.clickable, true);
+  assert.equal(stopStyle.cursor, "pointer");
+  assert.equal(stopStyle.title, "SENTUL TIMUR");
+
+  // First click opens InfoWindow with GeoJSON properties without invoking .NET departure callbacks.
+  dataClickListener({ feature: stop1 });
+  assert.equal(openedInfo.length, 1);
+  assert.deepEqual(plain(openedInfo[0].position), {
+    lat: 3.1859,
+    lng: 101.6952,
+  });
+  const card = openedInfo[0].content;
+  assert.equal(card.className, "bus-info-window");
+  assert.equal(card.children[0].className, "bus-info-header");
+  assert.equal(card.children[0].textContent, "SENTUL TIMUR");
+  const rows = card.children
+    .slice(1)
+    .map((row) => [row.children[0].textContent, row.children[1].textContent]);
+  assert.deepEqual(rows, [
+    ["Stop ID", "AG1"],
+    ["Route", "AG"],
+    ["Arrival Times", "06:25:20, 08:50:20, 20:25:20"],
+    ["Departure Times", "06:25:20, 08:50:20, 20:25:20"],
+    ["Platform", "P1"],
+    ["Custom Note", "Terminal station"],
+  ]);
+  assert.deepEqual(invocations, []);
+
+  // Second click on the same stop toggles the InfoWindow closed.
+  dataClickListener({ feature: stop1 });
+  assert.equal(closedCount, 1);
+  assert.equal(invocations.length, 0);
+
+  // Opening a stop InfoWindow and calling clearStaticRoute closes it.
+  dataClickListener({ feature: stop1 });
+  assert.equal(openedInfo.length, 2);
+  api.clearStaticRoute();
+  assert.equal(closedCount, 2);
+
+  // Clicking a bus marker opens its InfoWindow; clearStaticRoute(true) keeps it open,
+  // and clicking a stop detaches the previous bus anchor before opening on the stop.
+  await api.syncMarkers([
+    {
+      providerName: "Rapid Bus KL",
+      transportType: "Bus",
+      routeId: "U4200",
+      routeShortName: "420",
+      vehicleId: "BUS-420",
+      lat: 3.14,
+      lng: 101.69,
+      speed: 5,
+      timestamp: 1794885820,
+    },
+  ]);
+  createdMarkers[0].listeners["gmp-click"]();
+  const closesAfterBusOpen = closedCount;
+  api.clearStaticRoute(true);
+  assert.equal(closedCount, closesAfterBusOpen);
+
+  dataClickListener({ feature: stop1 });
+  assert.equal(closedCount, closesAfterBusOpen + 1);
+  assert.equal(openedInfo.at(-1).anchor, null);
+  assert.deepEqual(plain(openedInfo.at(-1).position), {
+    lat: 3.1859,
+    lng: 101.6952,
+  });
+
+  // Clicking a second stop without stop_name falls back to stop_id as header and labels distinct route_id as Route ID.
+  const stop2 = {
+    getProperty: (key) =>
+      ({
+        kind: "stop",
+        stop_id: "KL1079",
+        route_short_name: "420",
+        route_id: "U4200",
+      })[key],
+    forEachProperty: (cb) => {
+      for (const [k, v] of Object.entries({
+        kind: "stop",
+        stop_id: "KL1079",
+        route_short_name: "420",
+        route_id: "U4200",
+      })) {
+        cb(v, k);
+      }
+    },
+    getGeometry: () => ({
+      get: () => ({ lat: () => 3.1348, lng: () => 101.7119 }),
+    }),
+  };
+  dataClickListener({ feature: stop2 });
+  const card2 = openedInfo.at(-1).content;
+  assert.equal(card2.children[0].textContent, "KL1079");
+  assert.deepEqual(
+    card2.children
+      .slice(1)
+      .map((row) => [row.children[0].textContent, row.children[1].textContent]),
+    [
+      ["Stop ID", "KL1079"],
+      ["Route", "420"],
+      ["Route ID", "U4200"],
+    ],
+  );
+
+  // Clicking the map closes the open stop InfoWindow.
+  mapListeners.click();
+  assert.equal(closedCount, closesAfterBusOpen + 2);
+});
+
 test("route arrow breath animation respects prefers-reduced-motion", async () => {
   const createdPolylines = [];
   class TrackingPolyline {
@@ -2886,4 +3182,527 @@ test("gm_authFailure for one key does not force fallback autocomplete when remou
   assert.ok(mounted);
   assert.notEqual(String(mounted.tagName).toLowerCase(), "input");
   assert.equal(mapRecorder.invocations.length, 0);
+});
+
+test("syncMarkers marks estimated rail vehicles with title suffix and info window status without estimated style class", async () => {
+  const createdMarkers = [];
+  const openedInfo = [];
+  class RecordingInfoWindow {
+    setContent(content) {
+      this._content = content;
+    }
+    open(opts) {
+      openedInfo.push({ ...opts, content: this._content });
+    }
+    close() {}
+    addListener() {}
+  }
+  class RecordingMarker {
+    constructor(opts) {
+      Object.assign(this, opts);
+      this.listeners = {};
+      createdMarkers.push(this);
+    }
+    addEventListener(name, fn) {
+      this.listeners[name] = fn;
+    }
+    addListener(name, fn) {
+      this.listeners[name] = fn;
+    }
+  }
+
+  const mock = createMockGoogleMaps();
+  const origImport = mock.maps.importLibrary;
+  mock.maps.importLibrary = async (lib) => {
+    const m = await origImport(lib);
+    if (lib === "maps") {
+      return { ...m, InfoWindow: RecordingInfoWindow };
+    }
+    if (lib === "marker") {
+      return { ...m, AdvancedMarkerElement: RecordingMarker };
+    }
+    return m;
+  };
+  const api = await loadMapModule(mock, {
+    createElement: createFakeElement,
+    createElementNS: (_ns, tag) => createFakeElement(tag),
+    getElementById: () => createFakeElement("div"),
+  });
+  const recorder = createDotNetRecorder();
+  await api.initGoogleMaps(
+    "map",
+    3.14,
+    101.69,
+    13,
+    "key",
+    recorder.dotNetHelper,
+    "LIGHT",
+    "Asia/Kuala_Lumpur",
+  );
+  createdMarkers.length = 0;
+
+  await api.syncMarkers([
+    {
+      providerName: "Rapid Rail KL",
+      transportType: "LRT",
+      routeId: "KJ",
+      routeShortName: "KJL",
+      vehicleId: "KJL-0-0800",
+      lat: 3.141,
+      lng: 101.692,
+      bearing: 90,
+      speed: 12.5,
+      timestamp: 1794885820,
+      isEstimated: true,
+    },
+  ]);
+
+  assert.equal(createdMarkers.length, 1);
+  const marker = createdMarkers[0];
+  assert.equal(marker.title, "Route KJL - KJL-0-0800 (Estimated)");
+  assert.equal(marker.content.classList.contains("transport-marker--estimated"), false);
+
+  marker.listeners["gmp-click"]();
+  assert.equal(openedInfo.length, 1);
+  const card = openedInfo[0].content;
+  const rows = card.children
+    .slice(1)
+    .map((row) => [row.children[0].textContent, row.children[1].textContent]);
+  assert.equal(rows[0][0], "Route");
+  assert.equal(rows[0][1], "KJL");
+  assert.equal(rows[1][0], "Status");
+  assert.equal(rows[1][1], "Estimated (schedule)");
+});
+
+test("setMapTheme recreates Map with new colorScheme while preserving camera, markers, static routes, transit routes, and open InfoWindow", async () => {
+  const createdMaps = [];
+  const transitLayers = [];
+  const createdMarkers = [];
+  const polylineSchemes = [];
+  const openedInfoWindows = [];
+  const clearedListenerTargets = [];
+  const tilesLoadedCallbacks = [];
+  let fitBoundsCalls = 0;
+
+  class RecordingMap {
+    constructor(el, opts) {
+      this.el = el;
+      this.opts = opts;
+      this.center = opts.center;
+      this.zoom = opts.zoom;
+      this.heading = opts.heading ?? 45;
+      this.tilt = opts.tilt ?? 10;
+      this.mapTypeId = opts.mapTypeId ?? "roadmap";
+      this.listeners = {};
+      createdMaps.push(this);
+    }
+    getCenter() {
+      return { lat: () => this.center.lat, lng: () => this.center.lng };
+    }
+    getZoom() {
+      return this.zoom;
+    }
+    getHeading() {
+      return this.heading;
+    }
+    getTilt() {
+      return this.tilt;
+    }
+    getMapTypeId() {
+      return this.mapTypeId;
+    }
+    addListener(name, cb) {
+      this.listeners[name] = cb;
+    }
+    fitBounds() {
+      fitBoundsCalls++;
+    }
+  }
+
+  class RecordingInfoWindow {
+    constructor() {
+      this.openCount = 0;
+    }
+    setContent(content) {
+      this.content = content;
+    }
+    setPosition(pos) {
+      this.position = pos;
+    }
+    getPosition() {
+      return this.position;
+    }
+    open(opts) {
+      this.openCount++;
+      openedInfoWindows.push({ ...opts, content: this.content });
+    }
+    close() {}
+  }
+
+  const createdDataLayers = [];
+  const createdPolylines = [];
+
+  class RecordingDataLayer {
+    constructor({ map }) {
+      this.map = map;
+      this.features = [];
+      createdDataLayers.push(this);
+    }
+    setMap(m) {
+      this.map = m;
+    }
+    setStyle() {}
+    addListener() {}
+    addGeoJson(fc) {
+      this.features = (fc.features || []).map((f) => ({
+        props: f.properties || {},
+        getProperty: (k) => f.properties?.[k],
+        getGeometry: () => ({ forEachLatLng: () => {} }),
+      }));
+      return this.features;
+    }
+    forEach(cb) {
+      this.features.forEach(cb);
+    }
+    remove(f) {
+      this.features = this.features.filter((x) => x !== f);
+    }
+  }
+
+  class RecordingPolyline {
+    constructor(opts = {}) {
+      this.opts = opts;
+      this.map = opts.map ?? null;
+      createdPolylines.push(this);
+    }
+    getPath() {
+      return this.opts.path ?? [];
+    }
+    setOptions(opts) {
+      Object.assign(this.opts, opts);
+    }
+    setMap(m) {
+      this.map = m;
+    }
+    addListener() {}
+  }
+
+  class RecordingMarker {
+    constructor(opts) {
+      Object.assign(this, opts);
+      this.listeners = {};
+      createdMarkers.push(this);
+    }
+    addEventListener(name, cb) {
+      this.listeners[name] = cb;
+    }
+    removeEventListener() {}
+  }
+
+  function createFakeElement(tag = "div") {
+    const classes = new Set();
+    return {
+      tagName: tag.toUpperCase(),
+      style: {
+        setProperty() {},
+        removeProperty() {},
+      },
+      children: [],
+      isConnected: true,
+      classList: {
+        add: (c) => classes.add(c),
+        remove: (c) => classes.delete(c),
+        toggle: (c, force) => (force ? classes.add(c) : classes.delete(c)),
+        contains: (c) => classes.has(c),
+      },
+      setAttribute() {},
+      append(...nodes) {
+        this.children.push(...nodes);
+      },
+      appendChild(node) {
+        this.children.push(node);
+        return node;
+      },
+      replaceChildren(...nodes) {
+        this.children = [...nodes];
+      },
+      querySelector() {
+        return null;
+      },
+      addEventListener() {},
+    };
+  }
+
+  const mapEl = createFakeElement("div");
+  const mock = createMockGoogleMaps({
+    transitLayers,
+    routesResult: () => ({
+      routes: [
+        {
+          path: [
+            { lat: 3.14, lng: 101.69 },
+            { lat: 3.15, lng: 101.7 },
+          ],
+          durationMillis: 900000,
+          distanceMeters: 4200,
+          localizedValues: { duration: "15 min" },
+          createPolylines: (opts) => {
+            polylineSchemes.push(opts.colorScheme);
+            return [new RecordingPolyline({ path: [{ lat: 3.14, lng: 101.69 }, { lat: 3.15, lng: 101.7 }] })];
+          },
+          legs: [
+            {
+              startLocation: { lat: 3.14, lng: 101.69 },
+              endLocation: { lat: 3.15, lng: 101.7 },
+              steps: [],
+            },
+          ],
+        },
+      ],
+    }),
+  });
+  mock.maps.Data = RecordingDataLayer;
+  mock.maps.SymbolPath = { CIRCLE: 0 };
+  mock.maps.event = {
+    clearInstanceListeners: (target) => clearedListenerTargets.push(target),
+    addListenerOnce: (target, eventName, cb) => {
+      const handle = { target, eventName, cb, removed: false };
+      if (eventName === "tilesloaded") tilesLoadedCallbacks.push(handle);
+      return handle;
+    },
+    removeListener: (handle) => {
+      if (handle) handle.removed = true;
+    },
+  };
+  const origImport = mock.maps.importLibrary;
+  mock.maps.importLibrary = async (lib) => {
+    const mod = await origImport(lib);
+    if (lib === "maps") {
+      return {
+        ...mod,
+        Map: RecordingMap,
+        InfoWindow: RecordingInfoWindow,
+        Polyline: RecordingPolyline,
+      };
+    }
+    if (lib === "marker") {
+      return { ...mod, AdvancedMarkerElement: RecordingMarker };
+    }
+    return mod;
+  };
+
+  const api = await loadMapModule(mock, {
+    createElement: (tag) => createFakeElement(tag),
+    createElementNS: (_ns, tag) => createFakeElement(tag),
+    getElementById: (id) => (id === "map" ? mapEl : createFakeElement("div")),
+  });
+
+  await api.initGoogleMaps(
+    "map",
+    3.14,
+    101.69,
+    14,
+    "test-api-key",
+    null,
+    "DARK",
+    "Asia/Kuala_Lumpur",
+  );
+  assert.equal(createdMaps.length, 1);
+  assert.equal(createdMaps[0].opts.colorScheme, "DARK");
+  const userMarker = createdMarkers[0];
+
+  // Pan and zoom the map before toggling theme.
+  createdMaps[0].center = { lat: 3.16, lng: 101.71 };
+  createdMaps[0].zoom = 16;
+
+  // Add a live vehicle marker and open its InfoWindow.
+  await api.syncMarkers([
+    {
+      providerName: "Rapid Bus KL",
+      transportType: "Bus",
+      routeId: "400",
+      routeShortName: "400",
+      vehicleId: "BUS-1",
+      lat: 3.15,
+      lng: 101.7,
+      bearing: 90,
+      speed: 10,
+      timestamp: 1794885820,
+    },
+  ]);
+  const busMarker = createdMarkers[1];
+  busMarker.listeners["gmp-click"]();
+  assert.equal(openedInfoWindows.length, 1);
+
+  // Add a static route and a multi-route transit overlay.
+  await api.showStaticRoute(
+    JSON.stringify({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: { route_color: "#ff0000" },
+          geometry: {
+            type: "LineString",
+            coordinates: [
+              [101.69, 3.14],
+              [101.7, 3.15],
+            ],
+          },
+        },
+        {
+          type: "Feature",
+          properties: { kind: "stop", stop_name: "KLCC" },
+          geometry: { type: "Point", coordinates: [101.7, 3.15] },
+        },
+      ],
+    }),
+  );
+
+  const routes = await api.getTransitRoutes("KLCC", "Pasar Seni");
+  await api.drawMultipleRoutes(
+    routes.map((r) => ({
+      id: r.routeId,
+      path: r.encodedPolyline,
+      hasLiveBus: false,
+      durationSeconds: r.durationSeconds,
+      localizedDuration: r.localizedDuration,
+      headwayMinutes: r.headwayMinutes,
+    })),
+    0,
+    null,
+  );
+  const fitBoundsBeforeSwitch = fitBoundsCalls;
+
+  // Calling setMapTheme with the same theme is a no-op.
+  await api.setMapTheme("DARK");
+  assert.equal(createdMaps.length, 1);
+
+  // Switching to LIGHT recreates the Map with preserved camera and overlays.
+  await api.setMapTheme("LIGHT");
+  assert.equal(createdMaps.length, 2);
+  const newMap = createdMaps[1];
+  assert.equal(newMap.opts.colorScheme, "LIGHT");
+  assert.deepEqual(plain(newMap.opts.center), { lat: 3.16, lng: 101.71 });
+  assert.equal(newMap.opts.zoom, 16);
+  assert.equal(newMap.opts.heading, 45);
+  assert.equal(newMap.opts.tilt, 10);
+  assert.equal(clearedListenerTargets.includes(createdMaps[0]), true);
+
+  // Old TransitLayer is detached and a fresh TransitLayer is attached to the new Map instance.
+  assert.equal(transitLayers.length, 2);
+  assert.equal(transitLayers[0].getMap(), null);
+  assert.equal(transitLayers[1].getMap(), newMap);
+  assert.equal(userMarker.map, newMap);
+  assert.equal(busMarker.map, newMap);
+  assert.equal(createdDataLayers.length, 1);
+  assert.equal(createdDataLayers[0].map, newMap);
+  assert.equal(createdPolylines[0].map, newMap);
+  assert.equal(createdPolylines[1].map, newMap);
+
+  // Transit route redrawn in LIGHT without resetting viewport.
+  assert.deepEqual(polylineSchemes, ["DARK", "LIGHT"]);
+  assert.equal(fitBoundsCalls, fitBoundsBeforeSwitch);
+
+  // Open InfoWindow reopened on the new Map for the same vehicle marker.
+  assert.equal(openedInfoWindows.length, 2);
+  assert.equal(openedInfoWindows[1].anchor, busMarker);
+  assert.equal(openedInfoWindows[1].map, newMap);
+
+  // Transition class stays active until tilesloaded fires.
+  assert.equal(mapEl.classList.contains("map-theme-switching"), true);
+  assert.equal(tilesLoadedCallbacks.length, 1);
+  tilesLoadedCallbacks[0].cb();
+  assert.equal(mapEl.classList.contains("map-theme-switching"), false);
+});
+
+test("setMapTheme redraws cached non-transit route without recomputing Route.computeRoutes", async () => {
+  const createdMaps = [];
+  const computeRequests = [];
+  const polylineSchemes = [];
+  let fitBoundsCalls = 0;
+
+  class RecordingMap {
+    constructor(_el, opts) {
+      this.opts = opts;
+      createdMaps.push(this);
+    }
+    getCenter() {
+      return this.opts.center;
+    }
+    getZoom() {
+      return this.opts.zoom;
+    }
+    addListener() {}
+    fitBounds() {
+      fitBoundsCalls++;
+    }
+  }
+
+  const mock = createMockGoogleMaps({
+    computeRequests,
+    routesResult: () => ({
+      routes: [
+        {
+          path: [
+            { lat: 3.14, lng: 101.69 },
+            { lat: 3.15, lng: 101.7 },
+          ],
+          durationMillis: 600000,
+          distanceMeters: 3000,
+          viewport: { north: 3.16, south: 3.13, east: 101.71, west: 101.68 },
+          createPolylines: (opts) => {
+            polylineSchemes.push(opts.colorScheme);
+            return [
+              {
+                setMap() {},
+                setOptions() {},
+                addListener() {},
+              },
+            ];
+          },
+          legs: [
+            {
+              startLocation: { lat: 3.14, lng: 101.69 },
+              endLocation: { lat: 3.15, lng: 101.7 },
+              steps: [],
+            },
+          ],
+        },
+      ],
+    }),
+  });
+  const origImport = mock.maps.importLibrary;
+  mock.maps.importLibrary = async (lib) => {
+    const mod = await origImport(lib);
+    if (lib === "maps") {
+      return { ...mod, Map: RecordingMap };
+    }
+    return mod;
+  };
+
+  const api = await loadMapModule(mock);
+  await api.initGoogleMaps(
+    "map",
+    3.14,
+    101.69,
+    14,
+    "test-api-key",
+    null,
+    "LIGHT",
+    "Asia/Kuala_Lumpur",
+  );
+
+  const ok = await api.showRouteByName("KLCC", "Mid Valley", "DRIVING");
+  assert.equal(ok, true);
+  assert.equal(computeRequests.length, 1);
+  assert.deepEqual(polylineSchemes, ["LIGHT"]);
+  assert.equal(fitBoundsCalls, 1);
+
+  await api.setMapTheme("DARK");
+  assert.equal(createdMaps.length, 2);
+  assert.equal(createdMaps[1].opts.colorScheme, "DARK");
+  assert.equal(computeRequests.length, 1);
+  assert.deepEqual(polylineSchemes, ["LIGHT", "DARK"]);
+  assert.equal(fitBoundsCalls, 1);
 });

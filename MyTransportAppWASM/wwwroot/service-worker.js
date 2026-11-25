@@ -22,6 +22,7 @@ self.addEventListener('fetch', event => {
   const isGtfsStatic = !isSelfMapRoute && (
     (url.hostname === 'api.data.gov.my' && url.pathname.includes('/gtfs-static/'))
     || url.pathname.includes('/data/routes')
+    || url.pathname.includes('/data/frequencies')
     || url.pathname.includes('/departures')
     || (url.pathname.endsWith('/map') || url.pathname.includes('/map?') || url.pathname.includes('/map/'))
   );

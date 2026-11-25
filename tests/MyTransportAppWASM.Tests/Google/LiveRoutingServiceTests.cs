@@ -392,7 +392,8 @@ public class LiveRoutingServiceTests
     var staticRoutes = new List<StaticRoute>
     {
       new("30000019", "401"),
-      new("U4200", "420")
+      new("U4200", "420"),
+      new("30000009", null, "T808")
     };
 
     var vehicles = new List<BusLocation>
@@ -400,6 +401,7 @@ public class LiveRoutingServiceTests
       BuildBus("30000019") with { VehicleId = "kl-id", ProviderName = "Rapid Bus KL", TransportType = "Bus" },
       BuildBus("401") with { VehicleId = "kl-short", ProviderName = "Rapid Bus KL", TransportType = "Bus" },
       BuildBus("other") with { VehicleId = "kl-mapped", ProviderName = "Rapid Bus KL", RouteShortName = "401", TransportType = "Bus" },
+      BuildBus("T808") with { VehicleId = "kl-long", ProviderName = "Rapid Bus KL", TransportType = "Bus" },
       BuildBus("4010") with { VehicleId = "kl-prefix", ProviderName = "Rapid Bus KL", TransportType = "Bus" },
       BuildBus("401") with { VehicleId = "penang-same-route", ProviderName = "Rapid Bus Penang", TransportType = "Bus" },
       BuildBus("401") with { VehicleId = "no-provider", ProviderName = null, TransportType = "Bus" }
@@ -408,6 +410,11 @@ public class LiveRoutingServiceTests
     var filtered = LiveRouting.FilterVehiclesForStaticRoute("Rapid Bus KL", "30000019", staticRoutes, vehicles);
 
     Assert.Equal(["kl-id", "kl-short", "kl-mapped"], filtered.Select(v => v.VehicleId ?? "").ToArray());
+    Assert.Equal(
+      ["kl-long"],
+      LiveRouting.FilterVehiclesForStaticRoute("Rapid Bus KL", "30000009", staticRoutes, vehicles)
+        .Select(v => v.VehicleId ?? "")
+        .ToArray());
     Assert.Empty(LiveRouting.FilterVehiclesForStaticRoute("Rapid Bus KL", "", staticRoutes, vehicles));
     Assert.Empty(LiveRouting.FilterVehiclesForStaticRoute("", "30000019", staticRoutes, vehicles));
   }

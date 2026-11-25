@@ -8,6 +8,7 @@ public sealed class TransportStaticDataService(HttpClient httpClient, IAppCache?
 {
   private static readonly TimeSpan StaticCacheDuration = TimeSpan.FromMinutes(15);
   private readonly ConcurrentDictionary<string, Task<string>> _inFlightMaps = new(StringComparer.Ordinal);
+  private readonly ConcurrentDictionary<string, Task<List<StaticFrequency>>> _inFlightFrequencies = new(StringComparer.Ordinal);
 
   public async Task<List<StaticRoute>> GetRoutesAsync(TransportStaticData source, CancellationToken cancellationToken = default)
   {
@@ -24,7 +25,7 @@ public sealed class TransportStaticDataService(HttpClient httpClient, IAppCache?
     {
       routes = await GetRoutesFromDataAsync(source, cancellationToken);
     }
-    catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+    catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.ServiceUnavailable or System.Net.HttpStatusCode.TooManyRequests)
     {
       throw;
     }
@@ -53,10 +54,9 @@ public sealed class TransportStaticDataService(HttpClient httpClient, IAppCache?
       var rows = document.RootElement.GetProperty("data");
       foreach (var row in rows.EnumerateArray())
       {
-        var id = row.GetProperty("route_id").GetString();
-        if (string.IsNullOrWhiteSpace(id)) continue;
-        var name = Text(row, "route_short_name") ?? Text(row, "route_long_name") ?? id;
-        routes.Add(new StaticRoute(id, name));
+        var routeId = Text(row, "route_id");
+        if (routeId == null) continue;
+        routes.Add(new StaticRoute(routeId, Text(row, "route_short_name"), Text(row, "route_long_name")));
       }
       if (rows.GetArrayLength() < pageSize) break;
     }
@@ -73,18 +73,31 @@ public sealed class TransportStaticDataService(HttpClient httpClient, IAppCache?
     {
       var properties = feature.GetProperty("properties");
       if (Text(properties, "kind") != "route") continue;
-      var id = Text(properties, "route_id");
-      if (id == null || routes.ContainsKey(id)) continue;
-      var name = Text(properties, "route_short_name") ?? Text(properties, "route_long_name") ?? id;
-      routes.Add(id, new StaticRoute(id, name));
+      var routeId = Text(properties, "route_id");
+      if (routeId == null || routes.ContainsKey(routeId)) continue;
+      routes.Add(routeId, new StaticRoute(routeId, Text(properties, "route_short_name"), Text(properties, "route_long_name")));
     }
-    return routes.Values.OrderBy(route => route.Name, StringComparer.OrdinalIgnoreCase).ToList();
+    return routes.Values.OrderBy(route => route.RouteShortName ?? route.RouteId, StringComparer.OrdinalIgnoreCase).ToList();
   }
 
-  public async Task<string> GetMapAsync(TransportStaticData source, string routeId = "", CancellationToken cancellationToken = default)
+  public Task<string> GetMapAsync(TransportStaticData source, string routeId = "", CancellationToken cancellationToken = default) =>
+    GetMapAsync(source, routeId, serviceDate: null, cancellationToken);
+
+  public async Task<string> GetMapAsync(TransportStaticData source, string routeId, string? serviceDate, CancellationToken cancellationToken = default)
   {
     if (string.IsNullOrWhiteSpace(source.BaseUrl)) return "";
-    var query = string.IsNullOrEmpty(routeId) ? "" : $"?route_id={Uri.EscapeDataString(routeId)}";
+    var trimmedRouteId = routeId?.Trim() ?? string.Empty;
+    var trimmedDate = serviceDate?.Trim() ?? string.Empty;
+    var queryParts = new List<string>(2);
+    if (!string.IsNullOrEmpty(trimmedRouteId))
+    {
+      queryParts.Add($"route_id={Uri.EscapeDataString(trimmedRouteId)}");
+    }
+    if (!string.IsNullOrEmpty(trimmedDate))
+    {
+      queryParts.Add($"date={Uri.EscapeDataString(trimmedDate)}");
+    }
+    var query = queryParts.Count == 0 ? "" : $"?{string.Join('&', queryParts)}";
     var url = BuildUrl(source, source.GeoJSONUrlPath, query);
     var cacheKey = $"static_map:{url}";
 
@@ -113,10 +126,12 @@ public sealed class TransportStaticDataService(HttpClient httpClient, IAppCache?
 
   public async Task<List<StaticDeparture>> GetDeparturesAsync(TransportStaticData source, string routeId, string stopId, CancellationToken cancellationToken = default)
   {
-    if (string.IsNullOrWhiteSpace(source.BaseUrl)) return [];
-    var routeQuery = string.IsNullOrEmpty(routeId) ? "" : $"&route_id={Uri.EscapeDataString(routeId)}";
+    var trimmedStopId = stopId?.Trim() ?? string.Empty;
+    if (string.IsNullOrWhiteSpace(source.BaseUrl) || string.IsNullOrEmpty(trimmedStopId)) return [];
+    var trimmedRouteId = routeId?.Trim() ?? string.Empty;
+    var routeQuery = string.IsNullOrEmpty(trimmedRouteId) ? "" : $"&route_id={Uri.EscapeDataString(trimmedRouteId)}";
     var url = BuildUrl(source, source.DeparturePath,
-      $"?stop_id={Uri.EscapeDataString(stopId)}{routeQuery}&limit=5");
+      $"?stop_id={Uri.EscapeDataString(trimmedStopId)}{routeQuery}&limit=5");
     using var response = await httpClient.GetAsync(url, cancellationToken);
     response.EnsureSuccessStatusCode();
     using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -128,12 +143,72 @@ public sealed class TransportStaticDataService(HttpClient httpClient, IAppCache?
           ? parsed
           : null;
         return new StaticDeparture(
-          row.TryGetProperty("route_id", out var rProp) ? rProp.GetString() ?? routeId : routeId,
+          row.TryGetProperty("route_id", out var rProp) ? rProp.GetString() ?? trimmedRouteId : trimmedRouteId,
           Text(row, "trip_headsign"),
           depTime);
       })
       .ToList();
   }
+
+  public async Task<List<StaticFrequency>> GetFrequenciesAsync(TransportStaticData source, CancellationToken cancellationToken = default)
+  {
+    if (string.IsNullOrWhiteSpace(source.BaseUrl) || string.IsNullOrWhiteSpace(source.FrequenciesPath))
+    {
+      return [];
+    }
+
+    var cacheKey = $"static_frequencies:{source.BaseUrl.TrimEnd('/')}|{source.FrequenciesPath.TrimStart('/')}";
+    if (cache != null && cache.TryGetValue(cacheKey, out List<StaticFrequency>? cached) && cached != null)
+    {
+      return cached;
+    }
+
+    var sharedTask = _inFlightFrequencies.GetOrAdd(cacheKey, _ => FetchAndCacheFrequenciesAsync(source, cacheKey));
+    return await sharedTask.WaitAsync(cancellationToken);
+  }
+
+  private async Task<List<StaticFrequency>> FetchAndCacheFrequenciesAsync(TransportStaticData source, string cacheKey)
+  {
+    try
+    {
+      const int pageSize = 1000;
+      const int maxPages = 100;
+      var frequencies = new List<StaticFrequency>();
+      for (var offset = 0; offset < pageSize * maxPages; offset += pageSize)
+      {
+        var url = BuildUrl(source, source.FrequenciesPath,
+          $"?include=trip_id,start_time,end_time,headway_secs&sort=trip_id,start_time&limit={pageSize}&offset={offset}");
+        using var response = await httpClient.GetAsync(url);
+        response.EnsureSuccessStatusCode();
+        using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+        var rows = document.RootElement.GetProperty("data");
+        foreach (var row in rows.EnumerateArray())
+        {
+          var tripId = Text(row, "trip_id");
+          var startTime = Text(row, "start_time");
+          var endTime = Text(row, "end_time");
+          var headwaySecs = IntValue(row, "headway_secs");
+          if (tripId == null || startTime == null || endTime == null || headwaySecs <= 0) continue;
+          frequencies.Add(new StaticFrequency(tripId, startTime, endTime, headwaySecs));
+        }
+        if (rows.GetArrayLength() < pageSize) break;
+      }
+
+      cache?.Set(cacheKey, frequencies, StaticCacheDuration);
+      return frequencies;
+    }
+    finally
+    {
+      _inFlightFrequencies.TryRemove(cacheKey, out _);
+    }
+  }
+
+  private static int IntValue(JsonElement row, string property) =>
+    row.TryGetProperty(property, out var value)
+      ? (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var n)
+          ? n
+          : (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0))
+      : 0;
 
   private static string BuildRoutesCacheKey(TransportStaticData source) =>
     $"static_routes:{source.BaseUrl.TrimEnd('/')}|{source.RouteInfoPath.TrimStart('/')}|{source.GeoJSONUrlPath.TrimStart('/')}";

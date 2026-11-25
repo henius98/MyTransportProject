@@ -33,6 +33,11 @@
 #map {
   height: 100%;
   width: 100%;
+  transition: opacity 0.18s ease;
+}
+
+#map.map-theme-switching {
+  opacity: 0.15;
 }
 
 .map-overlay {
@@ -778,6 +783,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  #map,
   .map-overlay,
   .overlay-tab,
   #map-container,
@@ -802,6 +808,7 @@
 ::deep .bus-info-window {
   padding: 12px;
   min-width: 180px;
+  max-width: 300px;
 }
 
 ::deep .bus-info-header {
@@ -821,7 +828,8 @@
   color: var(--text-color);
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 ::deep .bus-info-item:last-child {
@@ -833,6 +841,12 @@
   font-weight: 700;
   text-transform: uppercase;
   margin-right: 12px;
+  flex-shrink: 0;
+}
+
+::deep .bus-info-item span {
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 ::deep .transport-marker {
@@ -860,8 +874,16 @@
   --marker-fill: #1B4965;
 }
 
+.theme-dark ::deep .lrt-marker {
+  --marker-fill: #8ECAE6;
+}
+
 ::deep .mrt-marker {
   --marker-fill: #5B3E85;
+}
+
+.theme-dark ::deep .mrt-marker {
+  --marker-fill: var(--accent-lavender);
 }
 
 ::deep .ktmb-marker,
@@ -869,8 +891,17 @@
   --marker-fill: #234F1E;
 }
 
+.theme-dark ::deep .ktmb-marker,
+.theme-dark ::deep .rail-marker {
+  --marker-fill: var(--accent-sage);
+}
+
 ::deep .unknown-marker {
   --marker-fill: #52504A;
+}
+
+.theme-dark ::deep .unknown-marker {
+  --marker-fill: var(--text-dim);
 }
 
 ::deep .transport-marker:hover {
@@ -957,9 +988,9 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  background: #FAF7F2;
-  border: 2.5px solid #1E1E1C;
-  box-shadow: 0 2px 0 #1E1E1C;
+  background: var(--surface-subtle);
+  border: 2.5px solid var(--border-color);
+  box-shadow: var(--shadow-control);
 }
 
 ::deep .route-callout-pill {
@@ -968,22 +999,22 @@
   gap: 5px;
   padding: 5px 10px;
   border-radius: var(--radius-pill);
-  border: 1.5px solid #1E1E1C;
-  background: #FAF7F2;
-  color: #1E1E1C;
+  border: var(--border-crisp);
+  background: var(--surface-subtle);
+  color: var(--text-color);
   font-family: var(--font-mono);
   font-size: 0.76rem;
   font-weight: 700;
   line-height: 1.15;
-  box-shadow: 0 2px 0 #1E1E1C;
+  box-shadow: var(--shadow-control);
   cursor: pointer;
   white-space: nowrap;
 }
 
 ::deep .route-callout-pill--active {
-  background: #C5D8C1;
+  background: var(--accent-sage);
   color: #1E1E1C;
-  border-color: #1E1E1C;
+  border-color: var(--border-color);
 }
 
 ::deep .route-callout-icon {

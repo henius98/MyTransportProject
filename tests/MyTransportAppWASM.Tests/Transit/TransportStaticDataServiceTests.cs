@@ -24,9 +24,10 @@ public sealed class TransportStaticDataServiceTests
       Assert.DoesNotContain("localhost", baseUrl, StringComparison.OrdinalIgnoreCase);
       if (p.HasStaticData)
       {
-        Assert.StartsWith("https://", baseUrl, StringComparison.OrdinalIgnoreCase);
+        Assert.StartsWith("https://my-gtfs-worker.98heniyschen.workers.dev/", baseUrl, StringComparison.OrdinalIgnoreCase);
       }
     });
+    Assert.Equal(6, prodProviders.Count(p => p.HasStaticData));
     Assert.DoesNotContain("localhost", prodSettings["BaziFlow:BaseUrl"] ?? string.Empty, StringComparison.OrdinalIgnoreCase);
 
     var devSettings = new ConfigurationBuilder()
@@ -38,9 +39,11 @@ public sealed class TransportStaticDataServiceTests
 
     Assert.False(railProvider.HasRealtimeFeed);
     Assert.True(railProvider.HasStaticData);
+    Assert.True(railProvider.HasFrequencyFeed);
     Assert.Equal("Rail", railProvider.TransportType);
     Assert.Equal("http://localhost:8787/rapid-rail-kl", railProvider.StaticData?.BaseUrl);
     Assert.Equal("/departures", railProvider.StaticData?.DeparturePath);
+    Assert.Equal("/data/frequencies", railProvider.StaticData?.FrequenciesPath);
     Assert.Equal("http://localhost:8080", devSettings["BaziFlow:BaseUrl"]);
   }
 
@@ -69,7 +72,7 @@ public sealed class TransportStaticDataServiceTests
   {
     var handler = new FakeHandler(request => request.RequestUri!.AbsolutePath switch
     {
-      "/rapid-bus-kl/data/routes" => """{"data":[{"route_id":"A 1","route_short_name":"A1","route_long_name":"Airport"}],"limit":1000,"offset":0}""",
+      "/rapid-bus-kl/data/routes" => """{"data":[{"route_id":"A 1","route_short_name":"A1","route_long_name":"Airport"},{"route_id":"B2","route_long_name":"Downtown"}],"limit":1000,"offset":0}""",
       "/rapid-bus-kl/map" => """{"type":"FeatureCollection","features":[]}""",
       "/rapid-bus-kl/departures" => """{"departures":[{"route_id":"A 1","trip_headsign":"Airport","estimated_departure_at":"2026-09-27T15:30:00+08:00"}]}""",
       _ => throw new InvalidOperationException(request.RequestUri.ToString())
@@ -82,11 +85,11 @@ public sealed class TransportStaticDataServiceTests
     var allDepartures = await service.GetDeparturesAsync(Source, "", "STOP/1");
     var departures = await service.GetDeparturesAsync(Source, "A 1", "STOP/1");
 
-    Assert.Equal(new StaticRoute("A 1", "A1"), Assert.Single(routes));
+    Assert.Equal([new StaticRoute("A 1", "A1", "Airport"), new StaticRoute("B2", null, "Downtown")], routes);
     Assert.Contains("FeatureCollection", allMap);
     Assert.Contains("FeatureCollection", map);
-    Assert.Equal("Airport", Assert.Single(allDepartures).Headsign);
-    Assert.Equal("Airport", Assert.Single(departures).Headsign);
+    Assert.Equal("Airport", Assert.Single(allDepartures).TripHeadsign);
+    Assert.Equal("Airport", Assert.Single(departures).TripHeadsign);
     Assert.Equal("https://worker.example/rapid-bus-kl/data/routes?include=route_id,route_short_name,route_long_name&sort=route_id&limit=1000&offset=0", handler.Urls[0]);
     Assert.Equal("https://worker.example/rapid-bus-kl/map", handler.Urls[1]);
     Assert.Equal("https://worker.example/rapid-bus-kl/map?route_id=A%201", handler.Urls[2]);
@@ -142,10 +145,10 @@ public sealed class TransportStaticDataServiceTests
 
     Assert.Equal(2, departures.Count);
     Assert.Equal("A1", departures[0].RouteId);
-    Assert.Null(departures[0].DepartureAt);
+    Assert.Null(departures[0].EstimatedDepartureAt);
     Assert.Equal("B2", departures[1].RouteId);
-    Assert.Null(departures[1].Headsign);
-    Assert.Null(departures[1].DepartureAt);
+    Assert.Null(departures[1].TripHeadsign);
+    Assert.Null(departures[1].EstimatedDepartureAt);
   }
 
   [Fact]
@@ -208,6 +211,91 @@ public sealed class TransportStaticDataServiceTests
     Assert.Equal(HttpStatusCode.ServiceUnavailable, ex.StatusCode);
     Assert.Single(handler.Urls);
     Assert.Contains("/rapid-bus-kl/data/routes", handler.Urls[0]);
+  }
+
+  [Fact]
+  public async Task ThrowsTooManyRequestsWithoutRetryingMapEndpoint()
+  {
+    var handler = new FakeHandler(request => request.RequestUri!.AbsolutePath switch
+    {
+      "/rapid-bus-kl/data/routes" => throw new HttpRequestException("Too Many Requests", null, HttpStatusCode.TooManyRequests),
+      _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
+    });
+    var service = new TransportStaticDataService(new HttpClient(handler));
+
+    var ex = await Assert.ThrowsAsync<HttpRequestException>(() => service.GetRoutesAsync(Source));
+    Assert.Equal(HttpStatusCode.TooManyRequests, ex.StatusCode);
+    Assert.Single(handler.Urls);
+    Assert.Contains("/rapid-bus-kl/data/routes", handler.Urls[0]);
+  }
+
+  [Fact]
+  public async Task TrimsQueryParametersAndSkipsEmptyStopId()
+  {
+    var handler = new FakeHandler(request => request.RequestUri!.AbsolutePath switch
+    {
+      "/rapid-bus-kl/map" => """{"type":"FeatureCollection","features":[]}""",
+      "/rapid-bus-kl/departures" => """{"departures":[]}""",
+      _ => throw new InvalidOperationException($"Unexpected request: {request.RequestUri}")
+    });
+    var service = new TransportStaticDataService(new HttpClient(handler));
+
+    await service.GetMapAsync(Source, "   ");
+    await service.GetMapAsync(Source, " A 1 ");
+    Assert.Empty(await service.GetDeparturesAsync(Source, "A 1", "   "));
+    await service.GetDeparturesAsync(Source, "   ", " STOP/1 ");
+
+    Assert.Equal(
+    [
+      "https://worker.example/rapid-bus-kl/map",
+      "https://worker.example/rapid-bus-kl/map?route_id=A%201",
+      "https://worker.example/rapid-bus-kl/departures?stop_id=STOP%2F1&limit=5"
+    ], handler.Urls);
+  }
+
+  [Fact]
+  public async Task ReadsAndCachesFrequenciesAndDateScopedMapsAndSkipsWhenPathMissing()
+  {
+    const string frequenciesPayload = """
+      {
+        "data": [
+          { "trip_id": "AGL_MonFri_0", "start_time": "6:00:00", "end_time": "9:00:00", "headway_secs": 180 },
+          { "trip_id": "AGL_MonFri_0", "start_time": "9:00:00", "end_time": "17:00:00", "headway_secs": 300 }
+        ],
+        "limit": 1000,
+        "offset": 0
+      }
+      """;
+
+    var railSource = new TransportStaticData(
+      "https://worker.example/rapid-rail-kl", "/data/routes", "/map", "/departures", "/data/frequencies");
+    var handler = new FakeHandler(request => request.RequestUri!.AbsolutePath switch
+    {
+      "/rapid-rail-kl/data/frequencies" => frequenciesPayload,
+      "/rapid-rail-kl/map" => """{"type":"FeatureCollection","features":[]}""",
+      _ => throw new InvalidOperationException(request.RequestUri.ToString())
+    });
+    using var cache = new AppMemoryCache(sizeLimit: 10);
+    var service = new TransportStaticDataService(new HttpClient(handler), cache);
+
+    Assert.Empty(await service.GetFrequenciesAsync(Source)); // FrequenciesPath is empty on bus source
+
+    var first = await service.GetFrequenciesAsync(railSource);
+    var second = await service.GetFrequenciesAsync(railSource);
+    var datedMap = await service.GetMapAsync(railSource, "", "2026-11-25");
+    var routeDatedMap = await service.GetMapAsync(railSource, "AG", "2026-11-24");
+
+    Assert.Same(first, second);
+    Assert.Equal(2, first.Count);
+    Assert.Equal(new StaticFrequency("AGL_MonFri_0", "6:00:00", "9:00:00", 180), first[0]);
+    Assert.Contains("FeatureCollection", datedMap);
+    Assert.Contains("FeatureCollection", routeDatedMap);
+    Assert.Equal(
+    [
+      "https://worker.example/rapid-rail-kl/data/frequencies?include=trip_id,start_time,end_time,headway_secs&sort=trip_id,start_time&limit=1000&offset=0",
+      "https://worker.example/rapid-rail-kl/map?date=2026-11-25",
+      "https://worker.example/rapid-rail-kl/map?route_id=AG&date=2026-11-24"
+    ], handler.Urls);
   }
 
   private sealed class FakeHandler(Func<HttpRequestMessage, string> respond) : HttpMessageHandler

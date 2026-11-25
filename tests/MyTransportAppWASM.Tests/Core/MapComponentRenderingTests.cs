@@ -189,13 +189,7 @@ public class MapComponentRenderingTests
 
     var routes = new List<StaticRoute>
         {
-            new("route-1", "Route One")
-        };
-
-    var departures = new List<StaticDeparture>
-        {
-            new("route-1", "KL Sentral", DateTimeOffset.UtcNow.AddMinutes(10)),
-            new("route-2", "Unknown Time", null)
+            new("route-1", "R1", "Route One")
         };
 
     var html = await renderer.Dispatcher.InvokeAsync(async () =>
@@ -208,9 +202,7 @@ public class MapComponentRenderingTests
                 [nameof(StaticRoutePanel.HasSelectedStaticData)] = true,
                 [nameof(StaticRoutePanel.SelectedRouteId)] = "route-1",
                 [nameof(StaticRoutePanel.Routes)] = routes,
-                [nameof(StaticRoutePanel.Status)] = "Scheduled estimates, not live arrivals.",
-                [nameof(StaticRoutePanel.StopName)] = "Test Stop",
-                [nameof(StaticRoutePanel.Departures)] = departures
+                [nameof(StaticRoutePanel.Status)] = "Select a stop on the map for details."
               }));
       return component.ToHtmlString();
     });
@@ -218,11 +210,9 @@ public class MapComponentRenderingTests
     Assert.Contains("Rapid Bus KL", html);
     Assert.DoesNotContain("value=\"1\">KTMB", html);
     Assert.Contains("All routes", html);
-    Assert.Contains("Route One (route-1)", html);
-    Assert.Contains("Test Stop", html);
-    Assert.Contains("Scheduled estimates, not live arrivals.", html);
+    Assert.Contains("R1 (Route One)", html);
+    Assert.Contains("Select a stop on the map for details.", html);
     Assert.DoesNotContain("tracker-status--error", html);
-    Assert.Contains("Time unavailable", html);
   }
 
   [Fact]
@@ -249,13 +239,16 @@ public class MapComponentRenderingTests
                 [nameof(StaticRoutePanel.SelectedProviderIndex)] = 0,
                 [nameof(StaticRoutePanel.HasSelectedStaticData)] = true,
                 [nameof(StaticRoutePanel.SelectedRouteId)] = "route-1",
-                [nameof(StaticRoutePanel.Routes)] = new List<StaticRoute> { new("route-1", "Route One") },
+                [nameof(StaticRoutePanel.Routes)] = new List<StaticRoute> { new("AG", "AGL", "Ampang Line"), new("B2", null, "Downtown"), new("route-1", "Route One") },
                 [nameof(StaticRoutePanel.Status)] = "Static route map unavailable.",
                 [nameof(StaticRoutePanel.IsErrorStatus)] = true
               }));
       return component.ToHtmlString();
     });
 
+    Assert.Contains("AGL (Ampang Line)", html);
+    Assert.Contains("B2 (Downtown)", html);
+    Assert.Contains(">Route One</option>", html);
     Assert.Contains("tracker-status--error", html);
     Assert.Contains("role=\"alert\"", html);
     Assert.Contains("bi-exclamation-triangle-fill", html);

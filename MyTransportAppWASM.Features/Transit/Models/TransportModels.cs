@@ -6,13 +6,31 @@ namespace MyTransportAppWASM.Features.Transit.Models
 
     public bool HasRealtimeFeed => !string.IsNullOrWhiteSpace(Endpoint);
     public bool HasStaticData => !string.IsNullOrWhiteSpace(StaticData?.BaseUrl);
+    public bool HasFrequencyFeed => HasStaticData && !string.IsNullOrWhiteSpace(StaticData?.FrequenciesPath);
   }
 
-  public record TransportStaticData(string BaseUrl, string RouteInfoPath, string GeoJSONUrlPath, string DeparturePath);
+  public record TransportStaticData(
+    string BaseUrl,
+    string RouteInfoPath,
+    string GeoJSONUrlPath,
+    string DeparturePath,
+    string FrequenciesPath = "");
 
-  public record StaticRoute(string Id, string Name);
+  public record StaticRoute(
+    [property: System.Text.Json.Serialization.JsonPropertyName("route_id")] string RouteId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("route_short_name")] string? RouteShortName = null,
+    [property: System.Text.Json.Serialization.JsonPropertyName("route_long_name")] string? RouteLongName = null);
 
-  public record StaticDeparture(string RouteId, string? Headsign, DateTimeOffset? DepartureAt);
+  public record StaticDeparture(
+    [property: System.Text.Json.Serialization.JsonPropertyName("route_id")] string RouteId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("trip_headsign")] string? TripHeadsign,
+    [property: System.Text.Json.Serialization.JsonPropertyName("estimated_departure_at")] DateTimeOffset? EstimatedDepartureAt);
+
+  public sealed record StaticFrequency(
+    [property: System.Text.Json.Serialization.JsonPropertyName("trip_id")] string TripId,
+    [property: System.Text.Json.Serialization.JsonPropertyName("start_time")] string StartTime,
+    [property: System.Text.Json.Serialization.JsonPropertyName("end_time")] string EndTime,
+    [property: System.Text.Json.Serialization.JsonPropertyName("headway_secs")] int HeadwaySecs);
 
   // Models for Live Routing Service
   public record GoogleRoute
@@ -81,6 +99,8 @@ namespace MyTransportAppWASM.Features.Transit.Models
     public float Speed { get; set; }
     [System.Text.Json.Serialization.JsonPropertyName("timestamp")]
     public ulong Timestamp { get; set; }
+    [System.Text.Json.Serialization.JsonPropertyName("isEstimated")]
+    public bool IsEstimated { get; set; }
   }
 
   public record LiveBusInfo

@@ -21,7 +21,8 @@
                 <option value="">@(Language?["AllRoutesOption"] ?? "All routes")</option>
                 @foreach (var route in Routes)
                 {
-                    <option @key="route.Id" value="@route.Id">@route.Name (@route.Id)</option>
+                    var shortName = string.IsNullOrWhiteSpace(route.RouteShortName) ? route.RouteId : route.RouteShortName;
+                    <option @key="route.RouteId" value="@route.RouteId">@(string.IsNullOrWhiteSpace(route.RouteLongName) ? shortName : $"{shortName} ({route.RouteLongName})")</option>
                 }
             </select>
             <div class="@(IsErrorStatus ? "tracker-status tracker-status--error mt-2" : "small mt-2")"
@@ -33,14 +34,6 @@
                 }
                 <span>@Status</span>
             </div>
-            @if (!string.IsNullOrEmpty(StopName))
-            {
-                <h4 class="fs-6 mt-3">@StopName</h4>
-                @foreach (var departure in Departures)
-                {
-                    <div class="small tabular-nums">@(departure.DepartureAt.HasValue ? MalaysiaTime.Convert(departure.DepartureAt.Value).ToString("HH:mm") : (Language?["TimeUnavailable"] ?? "Time unavailable")) · @(departure.Headsign ?? departure.RouteId)</div>
-                }
-            }
         }
     </div>
 }
@@ -69,12 +62,6 @@
 
     [Parameter]
     public bool IsErrorStatus { get; set; }
-
-    [Parameter]
-    public string StopName { get; set; } = string.Empty;
-
-    [Parameter]
-    public IReadOnlyList<StaticDeparture> Departures { get; set; } = [];
 
     [Parameter]
     public EventCallback<ChangeEventArgs> OnProviderChanged { get; set; }

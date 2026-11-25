@@ -124,10 +124,11 @@ internal static class LiveRouting
 
     foreach (var route in staticRoutes)
     {
-      if (string.Equals(route.Id?.Trim(), trimmedRouteId, StringComparison.OrdinalIgnoreCase))
+      if (string.Equals(route.RouteId?.Trim(), trimmedRouteId, StringComparison.OrdinalIgnoreCase))
       {
-        AddRouteAliases(allowedRouteIds, route.Id);
-        AddRouteAliases(allowedRouteIds, route.Name);
+        AddRouteAliases(allowedRouteIds, route.RouteId);
+        AddRouteAliases(allowedRouteIds, route.RouteShortName);
+        AddRouteAliases(allowedRouteIds, route.RouteLongName);
       }
     }
 

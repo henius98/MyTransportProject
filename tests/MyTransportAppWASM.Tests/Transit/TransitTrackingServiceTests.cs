@@ -308,6 +308,162 @@ public class TransitTrackingServiceTests
     bazi.Verify(b => b.GetDateFortuneAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
   }
 
+  [Fact]
+  public async Task RefreshVehiclesAsync_NearbyFrequencyProvider_EstimatesRailPositionsAndHandlesMidnightRollover()
+  {
+    var gtfs = new Mock<IGtfsService>();
+    var bazi = new Mock<IBaziFlowService>();
+    var staticData = new Mock<ITransportStaticDataService>();
+
+    var railSource = new TransportStaticData(
+      "https://worker.example/rapid-rail-kl",
+      "/data/routes",
+      "/map",
+      "/departures",
+      "/data/frequencies");
+    var railProvider = new TransportProvider("Rapid Rail KL", "", 3.139, 101.6869, 60.0, "Rail", railSource);
+
+    const string fridayMapGeoJson = """
+      {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "geometry": { "type": "LineString", "coordinates": [[101.68, 3.13], [101.70, 3.15]] },
+            "properties": { "kind": "route", "route_id": "KJ", "shape_id": "shp_KJ_0", "trip_ids": ["KJL_MonFri_0"], "route_short_name": "KJL" }
+          },
+          {
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": [101.68, 3.13] },
+            "properties": { "kind": "stop", "route_id": "KJ", "stop_id": "KJ1", "trip_ids": ["KJL_MonFri_0"], "arrival_times": "06:00:00", "departure_times": "06:00:00" }
+          },
+          {
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": [101.70, 3.15] },
+            "properties": { "kind": "stop", "route_id": "KJ", "stop_id": "KJ2", "trip_ids": ["KJL_MonFri_0"], "arrival_times": "06:20:00", "departure_times": "06:20:00" }
+          }
+        ]
+      }
+      """;
+
+    const string saturdayMapGeoJson = """
+      {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "geometry": { "type": "LineString", "coordinates": [[101.68, 3.13], [101.70, 3.15]] },
+            "properties": { "kind": "route", "route_id": "KJ", "shape_id": "shp_KJ_0", "trip_ids": ["KJL_Sat_0"], "route_short_name": "KJL" }
+          },
+          {
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": [101.68, 3.13] },
+            "properties": { "kind": "stop", "route_id": "KJ", "stop_id": "KJ1", "trip_ids": ["KJL_Sat_0"], "arrival_times": "06:00:00", "departure_times": "06:00:00" }
+          },
+          {
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": [101.70, 3.15] },
+            "properties": { "kind": "stop", "route_id": "KJ", "stop_id": "KJ2", "trip_ids": ["KJL_Sat_0"], "arrival_times": "06:20:00", "departure_times": "06:20:00" }
+          }
+        ]
+      }
+      """;
+
+    List<StaticFrequency> frequencies =
+    [
+      new("KJL_MonFri_0", "23:40:00", "24:00:00", 600),
+      new("KJL_Sat_0", "6:00:00", "23:30:00", 600)
+    ];
+
+    staticData.Setup(s => s.GetFrequenciesAsync(railSource, It.IsAny<CancellationToken>()))
+      .ReturnsAsync(frequencies);
+    staticData.Setup(s => s.GetMapAsync(railSource, "", "2026-06-05", It.IsAny<CancellationToken>()))
+      .ReturnsAsync(fridayMapGeoJson);
+    staticData.Setup(s => s.GetMapAsync(railSource, "", "2026-06-06", It.IsAny<CancellationToken>()))
+      .ReturnsAsync(saturdayMapGeoJson);
+
+    // Friday 2026-06-05 at 23:52:00 MYT (active departure: 23:50 and 23:40 -> 2 trains)
+    var currentTime = new DateTimeOffset(2026, 6, 5, 23, 52, 0, MalaysiaTime.Offset).ToUniversalTime();
+    using var cache = CreateBoundedCache();
+    var service = new TransitTrackingService(
+      gtfs.Object,
+      bazi.Object,
+      [railProvider],
+      cache: cache,
+      staticDataService: staticData.Object,
+      utcNowProvider: () => currentTime);
+
+    var first = await service.RefreshVehiclesAsync(3.140, 101.6870, force: true);
+    Assert.Equal(2, first.Vehicles.Count);
+    var train2350 = Assert.Single(first.Vehicles, v => v.VehicleId == "KJL-0-2350");
+    Assert.True(train2350.IsEstimated);
+    Assert.Equal("KJL", train2350.RouteShortName);
+    Assert.Equal("LRT", train2350.TransportType);
+    Assert.Contains("incl. estimated rail", first.StatusMessage);
+
+    // Advance 2 minutes (still Friday 23:54) -> moves forward without refetching /data/frequencies or /map
+    currentTime = currentTime.AddMinutes(2);
+    var second = await service.RefreshVehiclesAsync(3.140, 101.6870, force: false);
+    var moved2350 = Assert.Single(second.Vehicles, v => v.VehicleId == "KJL-0-2350");
+    Assert.True(moved2350.Lat > train2350.Lat);
+    staticData.Verify(s => s.GetFrequenciesAsync(railSource, It.IsAny<CancellationToken>()), Times.Once);
+    staticData.Verify(s => s.GetMapAsync(railSource, "", "2026-06-05", It.IsAny<CancellationToken>()), Times.Once);
+
+    // Cross midnight into Saturday 2026-06-06 00:05:00 MYT -> fetches Saturday map and keeps Friday's 23:50 train!
+    currentTime = new DateTimeOffset(2026, 6, 6, 0, 5, 0, MalaysiaTime.Offset).ToUniversalTime();
+    var postMidnight = await service.RefreshVehiclesAsync(3.140, 101.6870, force: false);
+    var nightTrain = Assert.Single(postMidnight.Vehicles);
+    Assert.Equal("KJL-0-2350", nightTrain.VehicleId);
+    Assert.True(nightTrain.Lat > moved2350.Lat);
+    staticData.Verify(s => s.GetMapAsync(railSource, "", "2026-06-06", It.IsAny<CancellationToken>()), Times.Once);
+    staticData.Verify(s => s.GetMapAsync(railSource, "", "2026-06-05", It.IsAny<CancellationToken>()), Times.Once);
+
+    // Estimated rail trains participate in live route enrichment
+    var enriched = await service.EnrichRoutesAsync(
+    [
+      new GoogleRoute
+      {
+        RouteId = 0,
+        DurationSeconds = 600,
+        TransitSteps = [new TransitStep { LineShortName = "KJL", DepartureLat = 3.15, DepartureLng = 101.70 }]
+      }
+    ]);
+    Assert.True(Assert.Single(enriched).HasLiveBus);
+
+    // Reset clears cached frequencies and day maps
+    service.Reset();
+    await service.RefreshVehiclesAsync(3.140, 101.6870, force: true);
+    staticData.Verify(s => s.GetFrequenciesAsync(railSource, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    staticData.Verify(s => s.GetMapAsync(railSource, "", "2026-06-06", It.IsAny<CancellationToken>()), Times.Exactly(2));
+  }
+
+  [Fact]
+  public async Task RefreshVehiclesAsync_ContinuesServingLiveBusesWhenFrequenciesFetchFails()
+  {
+    var gtfs = new Mock<IGtfsService>();
+    var bazi = new Mock<IBaziFlowService>();
+    var staticData = new Mock<ITransportStaticDataService>();
+
+    var railSource = new TransportStaticData(
+      "https://worker.example/rapid-rail-kl", "/data/routes", "/map", "/departures", "/data/frequencies");
+    var railProvider = new TransportProvider("Rapid Rail KL", "", 3.139, 101.6869, 60.0, "Rail", railSource);
+    SetupVehicles(gtfs, RapidKl, new BusLocation { VehicleId = "BUS-1", RouteId = "U60" });
+
+    staticData.Setup(s => s.GetFrequenciesAsync(railSource, It.IsAny<CancellationToken>()))
+      .ThrowsAsync(new HttpRequestException("Frequencies unavailable"));
+
+    var service = new TransitTrackingService(
+      gtfs.Object,
+      bazi.Object,
+      [RapidKl, railProvider],
+      staticDataService: staticData.Object);
+
+    var result = await service.RefreshVehiclesAsync(3.140, 101.6870, force: true);
+    var bus = Assert.Single(result.Vehicles);
+    Assert.Equal("BUS-1", bus.VehicleId);
+    Assert.False(bus.IsEstimated);
+  }
+
   private static AppMemoryCache CreateBoundedCache() =>
       new(sizeLimit: 10);
 

@@ -83,18 +83,16 @@ public class TransitMapSessionTests
     Assert.Null(await firstLoad);
     Assert.Equal(0, session.SelectedStaticProviderIndex);
     var route = Assert.Single(session.StaticRoutes);
-    Assert.Equal("R2", route.Id);
+    Assert.Equal("R2", route.RouteId);
     staticData.Verify(s => s.GetMapAsync(StaticSource, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
   }
 
   [Fact]
-  public async Task SelectStaticProviderAndLoadDepartures_UpdatesSessionState()
+  public async Task SelectStaticProvider_UpdatesSessionState()
   {
     var staticData = new Mock<ITransportStaticDataService>();
     staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
       .ReturnsAsync([new StaticRoute("R1", "Route 1")]);
-    staticData.Setup(s => s.GetDeparturesAsync(StaticSource, "", "STOP1", It.IsAny<CancellationToken>()))
-      .ReturnsAsync([new StaticDeparture("R1", "KL Sentral", null)]);
 
     using var session = CreateSession(staticData: staticData);
 
@@ -103,11 +101,6 @@ public class TransitMapSessionTests
     Assert.Single(session.StaticRoutes);
     Assert.Equal("Select a route to view its map.", session.StaticStatus);
     staticData.Verify(s => s.GetMapAsync(StaticSource, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-
-    Assert.True(await session.LoadStaticDeparturesAsync("STOP1", "", CancellationToken.None));
-    Assert.Equal("STOP1", session.StaticStopName);
-    Assert.Single(session.StaticDepartures);
-    Assert.Equal("Scheduled estimates, not live arrivals.", session.StaticStatus);
   }
 
   [Fact]
@@ -268,13 +261,16 @@ public class TransitMapSessionTests
     var staticData = new Mock<ITransportStaticDataService>();
     staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
       .ReturnsAsync([
-        new StaticRoute("U4200", "420"),
-        new StaticRoute("30000019", "401")
+        new StaticRoute("U4200", "420", "Pandan Indah - Lebuh Ampang"),
+        new StaticRoute("30000019", "401", "401"),
+        new StaticRoute("30000009", null, "T808")
       ]);
     staticData.Setup(s => s.GetMapAsync(StaticSource, "U4200", It.IsAny<CancellationToken>()))
       .ReturnsAsync("""{"route":"U4200"}""");
     staticData.Setup(s => s.GetMapAsync(StaticSource, "30000019", It.IsAny<CancellationToken>()))
       .ReturnsAsync("""{"route":"30000019"}""");
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "30000009", It.IsAny<CancellationToken>()))
+      .ReturnsAsync("""{"route":"30000009"}""");
 
     var noStaticProvider = new TransportProvider("Rapid Kuantan", "https://feed.test/kuantan", 3.8, 103.3, 40, "Bus");
     var providers = new[]
@@ -296,14 +292,60 @@ public class TransitMapSessionTests
     Assert.Equal("""{"route":"U4200"}""", geoJson);
     Assert.Equal(1, session.SelectedStaticProviderIndex);
     Assert.Equal("U4200", session.SelectedStaticRouteId);
-    Assert.Equal(2, session.StaticRoutes.Count);
-    Assert.Equal("Select a stop on the map for departures.", session.StaticStatus);
+    Assert.Equal(3, session.StaticRoutes.Count);
+    Assert.Equal("Select a stop on the map for details.", session.StaticStatus);
 
     // Feeds sending route_short_name in routeId (e.g. "401") resolve to the static route_id ("30000019").
     var shortNameGeoJson = await session.SelectVehicleRouteAsync("Rapid KL", "401");
     Assert.Equal("""{"route":"30000019"}""", shortNameGeoJson);
     Assert.Equal("30000019", session.SelectedStaticRouteId);
+
+    // Feeds sending route_long_name in routeId (e.g. MRT feeder "T808") resolve to the static route_id ("30000009").
+    var longNameGeoJson = await session.SelectVehicleRouteAsync("Rapid KL", "T808");
+    Assert.Equal("""{"route":"30000009"}""", longNameGeoJson);
+    Assert.Equal("30000009", session.SelectedStaticRouteId);
+
+    // Unmatched route names must not call /map with route_short_name/route_long_name or unknown values.
+    Assert.Null(await session.SelectVehicleRouteAsync("Rapid KL", "Unknown Line"));
+    Assert.Equal(string.Empty, session.SelectedStaticRouteId);
+    Assert.False(session.IsStaticRouteVehicleFilterActive);
+    Assert.True(session.IsStaticErrorStatus);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, "Unknown Line", It.IsAny<CancellationToken>()), Times.Never);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, "401", It.IsAny<CancellationToken>()), Times.Never);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, "T808", It.IsAny<CancellationToken>()), Times.Never);
     staticData.Verify(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()), Times.Once);
+  }
+
+  [Fact]
+  public async Task SelectStaticRouteAsync_AlwaysCallsMapWithRouteId_AndRejectsUnresolvedNames()
+  {
+    var staticData = new Mock<ITransportStaticDataService>();
+    staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
+      .ReturnsAsync([
+        new StaticRoute("30000019", "401", "401"),
+        new StaticRoute("30000009", null, "T808")
+      ]);
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "30000019", It.IsAny<CancellationToken>()))
+      .ReturnsAsync("""{"route":"30000019"}""");
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "30000009", It.IsAny<CancellationToken>()))
+      .ReturnsAsync("""{"route":"30000009"}""");
+
+    using var session = CreateSession(staticData: staticData);
+    await session.SelectStaticProviderAsync(0);
+
+    Assert.Equal("""{"route":"30000019"}""", await session.SelectStaticRouteAsync("401"));
+    Assert.Equal("30000019", session.SelectedStaticRouteId);
+
+    Assert.Equal("""{"route":"30000009"}""", await session.SelectStaticRouteAsync("T808"));
+    Assert.Equal("30000009", session.SelectedStaticRouteId);
+
+    Assert.Null(await session.SelectStaticRouteAsync("Missing Route"));
+    Assert.Equal(string.Empty, session.SelectedStaticRouteId);
+    Assert.False(session.IsStaticRouteVehicleFilterActive);
+    Assert.True(session.IsStaticErrorStatus);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, "401", It.IsAny<CancellationToken>()), Times.Never);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, "T808", It.IsAny<CancellationToken>()), Times.Never);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, "Missing Route", It.IsAny<CancellationToken>()), Times.Never);
   }
 
   [Fact]
@@ -413,7 +455,7 @@ public class TransitMapSessionTests
     Assert.True(session.IsStaticErrorStatus);
 
     Assert.NotNull(await session.SelectStaticRouteAsync("R1"));
-    Assert.Equal("Select a stop on the map for departures.", session.StaticStatus);
+    Assert.Equal("Select a stop on the map for details.", session.StaticStatus);
     Assert.False(session.IsStaticErrorStatus);
   }
 
@@ -467,8 +509,6 @@ public class TransitMapSessionTests
       .ReturnsAsync([new StaticRoute("30000019", "401"), new StaticRoute("U4200", "420")]);
     staticData.Setup(s => s.GetMapAsync(StaticSource, "U4200", It.IsAny<CancellationToken>()))
       .ReturnsAsync("""{"route":"U4200"}""");
-    staticData.Setup(s => s.GetDeparturesAsync(StaticSource, "U4200", "stop-1", It.IsAny<CancellationToken>()))
-      .ReturnsAsync([new StaticDeparture("U4200", "KLCC", DateTimeOffset.UtcNow.AddMinutes(5))]);
 
     var route = new EnrichedRoute
     {
@@ -489,12 +529,10 @@ public class TransitMapSessionTests
     await session.EnrichTransitRoutesAsync([route.OriginalRoute]);
     await session.SelectStaticProviderAsync(0);
     await session.SelectStaticRouteAsync("U4200");
-    await session.LoadStaticDeparturesAsync("stop-1", "Stop 1");
 
     Assert.Equal(0, session.SelectedStaticProviderIndex);
     Assert.Equal("U4200", session.SelectedStaticRouteId);
     Assert.NotEmpty(session.StaticRoutes);
-    Assert.NotEmpty(session.StaticDepartures);
     Assert.True(session.IsStaticRouteVehicleFilterActive);
     Assert.Single(session.GetDisplayedVehicles());
 
@@ -503,9 +541,6 @@ public class TransitMapSessionTests
     Assert.Equal(-1, session.SelectedStaticProviderIndex);
     Assert.Equal(string.Empty, session.SelectedStaticRouteId);
     Assert.Empty(session.StaticRoutes);
-    Assert.Empty(session.StaticDepartures);
-    Assert.Equal(string.Empty, session.SelectedStaticStopId);
-    Assert.Equal(string.Empty, session.StaticStopName);
     Assert.Equal(string.Empty, session.StaticStatus);
     Assert.False(session.IsStaticErrorStatus);
     Assert.False(session.IsStaticRouteVehicleFilterActive);

@@ -13,7 +13,6 @@ public sealed class TransitMapSession : IDisposable
   private int _refreshInProgress;
   private int _staticProviderSeq;
   private int _staticRouteSeq;
-  private int _staticStopSeq;
   private bool _disposed;
 
   public TransitMapSession(
@@ -48,9 +47,6 @@ public sealed class TransitMapSession : IDisposable
   public int SelectedStaticProviderIndex { get; private set; } = -1;
   public string SelectedStaticRouteId { get; private set; } = string.Empty;
   public List<StaticRoute> StaticRoutes { get; private set; } = [];
-  public List<StaticDeparture> StaticDepartures { get; private set; } = [];
-  public string SelectedStaticStopId { get; private set; } = string.Empty;
-  public string StaticStopName { get; private set; } = string.Empty;
   public string StaticStatus { get; private set; } = string.Empty;
   public bool IsStaticErrorStatus { get; private set; }
 
@@ -158,15 +154,11 @@ public sealed class TransitMapSession : IDisposable
   {
     var providerSeq = Interlocked.Increment(ref _staticProviderSeq);
     Interlocked.Increment(ref _staticRouteSeq);
-    Interlocked.Increment(ref _staticStopSeq);
 
     SelectedStaticProviderIndex = index;
     SelectedStaticRouteId = string.Empty;
     IsStaticRouteVehicleFilterActive = false;
     StaticRoutes = [];
-    StaticDepartures = [];
-    SelectedStaticStopId = string.Empty;
-    StaticStopName = string.Empty;
 
     var source = SelectedStaticData;
     if (source == null)
@@ -207,30 +199,37 @@ public sealed class TransitMapSession : IDisposable
   {
     var providerSeq = Volatile.Read(ref _staticProviderSeq);
     var routeSeq = Interlocked.Increment(ref _staticRouteSeq);
-    Interlocked.Increment(ref _staticStopSeq);
-
-    SelectedStaticRouteId = routeId;
-    ClearStaticStopSelection();
 
     var source = SelectedStaticData;
     if (source == null)
     {
+      SelectedStaticRouteId = string.Empty;
       IsStaticRouteVehicleFilterActive = false;
       SetStaticStatus(string.Empty);
       return null;
     }
 
-    if (!string.IsNullOrWhiteSpace(routeId))
+    if (string.IsNullOrWhiteSpace(routeId))
     {
-      IsStaticRouteVehicleFilterActive = true;
-      IsRouteVehicleFilterActive = false;
-    }
-    else
-    {
+      SelectedStaticRouteId = string.Empty;
       IsStaticRouteVehicleFilterActive = false;
+      return await LoadStaticRouteMapAsync(source, string.Empty, providerSeq, routeSeq, cancellationToken);
     }
 
-    return await LoadStaticRouteMapAsync(source, routeId, providerSeq, routeSeq, cancellationToken);
+    var resolvedRouteId = ResolveStaticRouteId(StaticRoutes, routeId, null);
+    if (string.IsNullOrEmpty(resolvedRouteId))
+    {
+      SelectedStaticRouteId = string.Empty;
+      IsStaticRouteVehicleFilterActive = false;
+      SetStaticStatus("Static route map unavailable.", isError: true);
+      return null;
+    }
+
+    SelectedStaticRouteId = resolvedRouteId;
+    IsStaticRouteVehicleFilterActive = true;
+    IsRouteVehicleFilterActive = false;
+
+    return await LoadStaticRouteMapAsync(source, resolvedRouteId, providerSeq, routeSeq, cancellationToken);
   }
 
   public async Task<string?> SelectVehicleRouteAsync(
@@ -252,21 +251,16 @@ public sealed class TransitMapSession : IDisposable
     {
       providerSeq = Interlocked.Increment(ref _staticProviderSeq);
       routeSeq = Interlocked.Increment(ref _staticRouteSeq);
-      Interlocked.Increment(ref _staticStopSeq);
 
       SelectedStaticProviderIndex = providerIndex;
       SelectedStaticRouteId = string.Empty;
       IsStaticRouteVehicleFilterActive = false;
       StaticRoutes = [];
-      ClearStaticStopSelection();
     }
     else
     {
       providerSeq = Volatile.Read(ref _staticProviderSeq);
       routeSeq = Interlocked.Increment(ref _staticRouteSeq);
-      Interlocked.Increment(ref _staticStopSeq);
-
-      ClearStaticStopSelection();
     }
 
     var source = SelectedStaticData;
@@ -326,11 +320,9 @@ public sealed class TransitMapSession : IDisposable
     }
 
     Interlocked.Increment(ref _staticRouteSeq);
-    Interlocked.Increment(ref _staticStopSeq);
 
     SelectedStaticRouteId = string.Empty;
     IsStaticRouteVehicleFilterActive = false;
-    ClearStaticStopSelection();
 
     if (SelectedStaticData == null)
     {
@@ -367,7 +359,7 @@ public sealed class TransitMapSession : IDisposable
         SetStaticStatus("Static route map unavailable.", isError: true);
         return null;
       }
-      SetStaticStatus("Select a stop on the map for departures.");
+      SetStaticStatus("Select a stop on the map for details.");
       return geoJson;
     }
     catch (OperationCanceledException)
@@ -403,79 +395,37 @@ public sealed class TransitMapSession : IDisposable
     string? routeId,
     string? routeShortName)
   {
-    if (!string.IsNullOrEmpty(routeId))
-    {
-      var byId = routes.FirstOrDefault(r => string.Equals(r.Id?.Trim(), routeId, StringComparison.OrdinalIgnoreCase));
-      if (byId != null) return byId.Id;
+    if (routes.Count == 0) return null;
 
-      var byName = routes.FirstOrDefault(r => string.Equals(r.Name?.Trim(), routeId, StringComparison.OrdinalIgnoreCase));
-      if (byName != null) return byName.Id;
-    }
-
-    if (!string.IsNullOrEmpty(routeShortName))
-    {
-      var byShortName = routes.FirstOrDefault(r => string.Equals(r.Name?.Trim(), routeShortName, StringComparison.OrdinalIgnoreCase));
-      if (byShortName != null) return byShortName.Id;
-    }
-
-    return !string.IsNullOrEmpty(routeId) ? routeId : null;
+    return MatchStaticRouteId(routes, routeId)
+      ?? MatchStaticRouteId(routes, routeShortName);
   }
 
-  private void ClearStaticStopSelection()
+  private static string? MatchStaticRouteId(IReadOnlyList<StaticRoute> routes, string? candidate)
   {
-    StaticDepartures = [];
-    SelectedStaticStopId = string.Empty;
-    StaticStopName = string.Empty;
+    var trimmed = candidate?.Trim();
+    if (string.IsNullOrEmpty(trimmed)) return null;
+
+    var byId = routes.FirstOrDefault(r =>
+      !string.IsNullOrWhiteSpace(r.RouteId) &&
+      string.Equals(r.RouteId.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
+    if (byId != null) return byId.RouteId.Trim();
+
+    var byShortName = routes.FirstOrDefault(r =>
+      !string.IsNullOrWhiteSpace(r.RouteId) &&
+      string.Equals(r.RouteShortName?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
+    if (byShortName != null) return byShortName.RouteId.Trim();
+
+    var byLongName = routes.FirstOrDefault(r =>
+      !string.IsNullOrWhiteSpace(r.RouteId) &&
+      string.Equals(r.RouteLongName?.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
+    if (byLongName != null) return byLongName.RouteId.Trim();
+
+    return null;
   }
 
   private bool IsStaleStaticRouteSelection(int providerSeq, int routeSeq) =>
     _disposed || providerSeq != Volatile.Read(ref _staticProviderSeq) || routeSeq != Volatile.Read(ref _staticRouteSeq);
-
-  public async Task<bool> LoadStaticDeparturesAsync(string stopId, string stopName, CancellationToken cancellationToken = default)
-  {
-    var source = SelectedStaticData;
-    var routeId = SelectedStaticRouteId;
-    if (_disposed || source == null) return false;
-
-    var providerSeq = Volatile.Read(ref _staticProviderSeq);
-    var routeSeq = Volatile.Read(ref _staticRouteSeq);
-    var stopSeq = Interlocked.Increment(ref _staticStopSeq);
-
-    SelectedStaticStopId = stopId;
-    StaticStopName = string.IsNullOrWhiteSpace(stopName) ? stopId : stopName;
-    StaticDepartures = [];
-    SetStaticStatus("Loading estimated departures...");
-
-    try
-    {
-      var departures = await _staticData.GetDeparturesAsync(source, routeId, stopId, cancellationToken);
-      if (_disposed || providerSeq != Volatile.Read(ref _staticProviderSeq) || routeSeq != Volatile.Read(ref _staticRouteSeq) || stopSeq != Volatile.Read(ref _staticStopSeq))
-        return false;
-
-      StaticDepartures = departures;
-      SetStaticStatus(departures.Count == 0
-        ? "No upcoming departures for this route."
-        : "Scheduled estimates, not live arrivals.");
-      return true;
-    }
-    catch (OperationCanceledException)
-    {
-      return false;
-    }
-    catch (ObjectDisposedException)
-    {
-      return false;
-    }
-    catch (Exception ex)
-    {
-      if (_disposed || providerSeq != Volatile.Read(ref _staticProviderSeq) || routeSeq != Volatile.Read(ref _staticRouteSeq) || stopSeq != Volatile.Read(ref _staticStopSeq))
-        return false;
-
-      SetStaticStatus("Departures unavailable.", isError: true);
-      _logger.LogWarning("Static departures failed: {Message}", ex.Message);
-      return true;
-    }
-  }
 
   public async Task<IReadOnlyList<EnrichedRoute>> EnrichTransitRoutesAsync(List<GoogleRoute>? googleRoutes, CancellationToken cancellationToken = default)
   {
@@ -557,12 +507,10 @@ public sealed class TransitMapSession : IDisposable
   {
     Interlocked.Increment(ref _staticProviderSeq);
     Interlocked.Increment(ref _staticRouteSeq);
-    Interlocked.Increment(ref _staticStopSeq);
 
     SelectedStaticProviderIndex = -1;
     SelectedStaticRouteId = string.Empty;
     StaticRoutes = [];
-    ClearStaticStopSelection();
     SetStaticStatus(string.Empty);
 
     ClearRoutes(announce);
@@ -598,7 +546,6 @@ public sealed class TransitMapSession : IDisposable
     if (_disposed) return;
     _disposed = true;
     StaticRoutes = [];
-    StaticDepartures = [];
     RouteOptions = [];
   }
 }

@@ -26,7 +26,8 @@ namespace MyTransportAppWASM.Core.Models
             staticSection["BaseUrl"] ?? string.Empty,
             staticSection["RouteInfoPath"] ?? string.Empty,
             staticSection["GeoJSONUrlPath"] ?? string.Empty,
-            staticSection["DeparturePath"] ?? string.Empty)
+            staticSection["DeparturePath"] ?? string.Empty,
+            staticSection["FrequenciesPath"] ?? string.Empty)
           : null;
 
         providers.Add(new TransportProvider(
