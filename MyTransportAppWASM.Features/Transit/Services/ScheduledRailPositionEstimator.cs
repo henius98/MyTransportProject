@@ -42,7 +42,6 @@ internal sealed record CompiledScheduledTrip(
 
 internal static class ScheduledRailPositionEstimator
 {
-  public const int PostMidnightLookbackSeconds = 4 * 3600;
   private const double DegToRad = Math.PI / 180.0;
   private const double RadToDeg = 180.0 / Math.PI;
   private const double EarthRadiusMeters = 6371000.0;
@@ -124,28 +123,22 @@ internal static class ScheduledRailPositionEstimator
 
   public static List<BusLocation> EstimateVehicles(
     ScheduledRailDayNetwork? todayNetwork,
-    ScheduledRailDayNetwork? yesterdayNetwork,
     TransportProvider provider,
     DateTimeOffset utcNow)
   {
     ArgumentNullException.ThrowIfNull(provider);
+
+    if (todayNetwork is not { Trips.Count: > 0 })
+    {
+      return [];
+    }
 
     var localNow = MalaysiaTime.Convert(utcNow);
     var nowUnixSecs = (ulong)Math.Max(0, utcNow.ToUnixTimeSeconds());
     var nowSecsToday = (int)localNow.TimeOfDay.TotalSeconds;
 
     var vehicles = new List<BusLocation>();
-    if (todayNetwork is { Trips.Count: > 0 })
-    {
-      CollectForServiceDay(todayNetwork, provider, nowSecsToday, nowUnixSecs, vehicles);
-    }
-
-    // Include trips that departed on the previous service day and run past midnight.
-    if (nowSecsToday < PostMidnightLookbackSeconds && yesterdayNetwork is { Trips.Count: > 0 })
-    {
-      CollectForServiceDay(yesterdayNetwork, provider, nowSecsToday + 86400, nowUnixSecs, vehicles);
-    }
-
+    CollectForServiceDay(todayNetwork, provider, nowSecsToday, nowUnixSecs, vehicles);
     return vehicles;
   }
 

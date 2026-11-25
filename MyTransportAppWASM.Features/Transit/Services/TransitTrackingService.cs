@@ -626,36 +626,24 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
 
     var localNow = MalaysiaTime.Convert(utcNow);
     var todayDate = FormatServiceDate(localNow.Date);
-    var yesterdayDate = localNow.TimeOfDay.TotalSeconds < ScheduledRailPositionEstimator.PostMidnightLookbackSeconds
-      ? FormatServiceDate(localNow.Date.AddDays(-1))
-      : null;
 
     var estimated = new List<BusLocation>();
     foreach (var provider in nearbyScheduleProviders)
     {
       if (!provider.HasFrequencyFeed) continue;
 
-      TryGetCachedScheduledDayNetwork(GetScheduledDayKey(provider, todayDate), out var todayNetwork);
-      ScheduledRailDayNetwork? yesterdayNetwork = null;
-      if (yesterdayDate != null)
+      if (!TryGetCachedScheduledDayNetwork(GetScheduledDayKey(provider, todayDate), out var todayNetwork))
       {
-        TryGetCachedScheduledDayNetwork(GetScheduledDayKey(provider, yesterdayDate), out yesterdayNetwork);
+        continue;
       }
 
-      if (todayNetwork == null && yesterdayNetwork == null) continue;
-      estimated.AddRange(ScheduledRailPositionEstimator.EstimateVehicles(todayNetwork, yesterdayNetwork, provider, utcNow));
+      estimated.AddRange(ScheduledRailPositionEstimator.EstimateVehicles(todayNetwork, provider, utcNow));
     }
     return estimated;
   }
 
-  private static string[] GetRequiredServiceDates(DateTimeOffset utcNow)
-  {
-    var localNow = MalaysiaTime.Convert(utcNow);
-    var today = FormatServiceDate(localNow.Date);
-    return localNow.TimeOfDay.TotalSeconds < ScheduledRailPositionEstimator.PostMidnightLookbackSeconds
-      ? [today, FormatServiceDate(localNow.Date.AddDays(-1))]
-      : [today];
-  }
+  private static string[] GetRequiredServiceDates(DateTimeOffset utcNow) =>
+    [FormatServiceDate(MalaysiaTime.Convert(utcNow).Date)];
 
   private void PruneStaleScheduledDayNetworks(string[] requiredDates)
   {

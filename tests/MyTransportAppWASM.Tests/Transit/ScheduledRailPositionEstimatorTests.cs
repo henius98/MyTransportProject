@@ -65,7 +65,7 @@ public sealed class ScheduledRailPositionEstimatorTests
 
     // Wednesday 2026-06-03 at 06:01:40 MYT (100s after 06:00:00 departure = 50% of 200s segment)
     var now = new DateTimeOffset(2026, 6, 3, 6, 1, 40, MalaysiaTime.Offset);
-    var vehicles = ScheduledRailPositionEstimator.EstimateVehicles(network, null, RapidRail, now);
+    var vehicles = ScheduledRailPositionEstimator.EstimateVehicles(network, RapidRail, now);
 
     var train = Assert.Single(vehicles);
     Assert.True(train.IsEstimated);
@@ -131,7 +131,7 @@ public sealed class ScheduledRailPositionEstimatorTests
 
     // At 07:59:50 MYT: train is dwelling at S1 (10s before departure)
     var dwelling = Assert.Single(ScheduledRailPositionEstimator.EstimateVehicles(
-      network, null, RapidRail, new DateTimeOffset(2026, 6, 3, 7, 59, 50, MalaysiaTime.Offset)));
+      network, RapidRail, new DateTimeOffset(2026, 6, 3, 7, 59, 50, MalaysiaTime.Offset)));
     Assert.Equal("MRT", dwelling.TransportType);
     Assert.Equal(0f, dwelling.Speed);
     Assert.InRange(dwelling.Lng, 101.0099f, 101.0101f);
@@ -198,7 +198,7 @@ public sealed class ScheduledRailPositionEstimatorTests
     var network = ScheduledRailPositionEstimator.CompileForServiceDay(mapGeoJson, frequencies);
     // At 08:02:30 (150s): Express is 50% of S1->S3 (lat ~3.12), Regular is 50% of S1->S2 (lat ~3.11)
     var vehicles = ScheduledRailPositionEstimator.EstimateVehicles(
-      network, null, RapidRail, new DateTimeOffset(2026, 6, 3, 8, 2, 30, MalaysiaTime.Offset));
+      network, RapidRail, new DateTimeOffset(2026, 6, 3, 8, 2, 30, MalaysiaTime.Offset));
 
     Assert.Equal(2, vehicles.Count);
     var lats = vehicles.Select(v => v.Lat).OrderBy(lat => lat).ToArray();
@@ -207,7 +207,7 @@ public sealed class ScheduledRailPositionEstimatorTests
   }
 
   [Fact]
-  public void EstimateVehicles_DeduplicatesHalfOpenWindowsAndSupportsPostMidnightRollover()
+  public void EstimateVehicles_DeduplicatesHalfOpenWindowsAndStopsAfterMidnight()
   {
     const string fridayMapGeoJson = """
       {
@@ -217,8 +217,8 @@ public sealed class ScheduledRailPositionEstimatorTests
             "type": "Feature",
             "geometry": { "type": "Point", "coordinates": [101.68, 3.13] },
             "properties": {
-              "kind": "stop", "route_id": "MR", "stop_id": "MR1",
-              "trip_ids": ["MRL_MonFri_0"],
+              "kind": "stop", "route_id": "BRT", "stop_id": "BRT1",
+              "trip_ids": ["BRT_MonFri_0"],
               "arrival_times": "06:00:00", "departure_times": "06:00:00"
             }
           },
@@ -226,35 +226,9 @@ public sealed class ScheduledRailPositionEstimatorTests
             "type": "Feature",
             "geometry": { "type": "Point", "coordinates": [101.70, 3.17] },
             "properties": {
-              "kind": "stop", "route_id": "MR", "stop_id": "MR2",
-              "trip_ids": ["MRL_MonFri_0"],
-              "arrival_times": "06:20:00", "departure_times": "06:20:00"
-            }
-          }
-        ]
-      }
-      """;
-
-    const string saturdayMapGeoJson = """
-      {
-        "type": "FeatureCollection",
-        "features": [
-          {
-            "type": "Feature",
-            "geometry": { "type": "Point", "coordinates": [101.68, 3.13] },
-            "properties": {
-              "kind": "stop", "route_id": "MR", "stop_id": "MR1",
-              "trip_ids": ["MRL_Sat_0"],
-              "arrival_times": "06:00:00", "departure_times": "06:00:00"
-            }
-          },
-          {
-            "type": "Feature",
-            "geometry": { "type": "Point", "coordinates": [101.70, 3.17] },
-            "properties": {
-              "kind": "stop", "route_id": "MR", "stop_id": "MR2",
-              "trip_ids": ["MRL_Sat_0"],
-              "arrival_times": "06:20:00", "departure_times": "06:20:00"
+              "kind": "stop", "route_id": "BRT", "stop_id": "BRT2",
+              "trip_ids": ["BRT_MonFri_0"],
+              "arrival_times": "06:16:00", "departure_times": "06:16:00"
             }
           }
         ]
@@ -263,29 +237,30 @@ public sealed class ScheduledRailPositionEstimatorTests
 
     IReadOnlyList<StaticFrequency> frequencies =
     [
-      new("MRL_MonFri_0", "8:00:00", "9:00:00", 600),
-      new("MRL_MonFri_0", "9:00:00", "10:00:00", 600),
-      new("MRL_MonFri_0", "23:40:00", "24:00:00", 600),
-      new("MRL_Sat_0", "6:00:00", "23:30:00", 720)
+      new("BRT_MonFri_0", "6:00:00", "7:00:00", 480),
+      new("BRT_MonFri_0", "7:00:00", "9:00:00", 240),
+      new("BRT_MonFri_0", "9:00:00", "17:00:00", 480),
+      new("BRT_MonFri_0", "17:00:00", "19:00:00", 240),
+      new("BRT_MonFri_0", "19:00:00", "24:00:00", 480)
     ];
 
     var fridayNetwork = ScheduledRailPositionEstimator.CompileForServiceDay(fridayMapGeoJson, frequencies);
-    var saturdayNetwork = ScheduledRailPositionEstimator.CompileForServiceDay(saturdayMapGeoJson, frequencies);
 
-    // At 09:00:00 on Friday: departures 08:40, 08:50, 09:00 are active (no duplicate 09:00!)
+    // At 09:00:00: adjacent windows [07:00, 09:00) and [09:00, 17:00) do not duplicate 09:00
     var boundaryVehicles = ScheduledRailPositionEstimator.EstimateVehicles(
-      fridayNetwork, null, RapidRail, new DateTimeOffset(2026, 6, 5, 9, 0, 0, MalaysiaTime.Offset));
-    Assert.Equal(3, boundaryVehicles.Count);
-    Assert.Equal(["MR-0-0840", "MR-0-0850", "MR-0-0900"], boundaryVehicles.Select(v => v.VehicleId ?? "").OrderBy(id => id).ToArray());
-    Assert.All(boundaryVehicles, v => Assert.Equal("Rail", v.TransportType));
+      fridayNetwork, RapidRail, new DateTimeOffset(2026, 6, 5, 9, 0, 0, MalaysiaTime.Offset));
+    Assert.Equal(5, boundaryVehicles.Count);
+    Assert.Single(boundaryVehicles, v => v.VehicleId == "BRT-0-0900");
 
-    // On Saturday at 00:05:00 MYT: Saturday service has not started, but Friday's 23:50 train is still running!
-    var postMidnightVehicles = ScheduledRailPositionEstimator.EstimateVehicles(
-      saturdayNetwork, fridayNetwork, RapidRail, new DateTimeOffset(2026, 6, 6, 0, 5, 0, MalaysiaTime.Offset));
-    var nightTrain = Assert.Single(postMidnightVehicles);
-    Assert.Equal("MR-0-2350", nightTrain.VehicleId);
-    // 15 min into a 20 min straight-line segment = 75% progress
-    Assert.InRange(nightTrain.Lat, 3.159f, 3.161f);
-    Assert.InRange(nightTrain.Lng, 101.694f, 101.696f);
+    // At 23:58:00 (before midnight): late evening trips are active
+    var beforeMidnight = ScheduledRailPositionEstimator.EstimateVehicles(
+      fridayNetwork, RapidRail, new DateTimeOffset(2026, 6, 5, 23, 58, 0, MalaysiaTime.Offset));
+    Assert.NotEmpty(beforeMidnight);
+
+    // After 12:00 AM (00:00:00 and 00:10:59): no estimated rail vehicles are shown
+    Assert.Empty(ScheduledRailPositionEstimator.EstimateVehicles(
+      fridayNetwork, RapidRail, new DateTimeOffset(2026, 6, 6, 0, 0, 0, MalaysiaTime.Offset)));
+    Assert.Empty(ScheduledRailPositionEstimator.EstimateVehicles(
+      fridayNetwork, RapidRail, new DateTimeOffset(2026, 6, 6, 0, 10, 59, MalaysiaTime.Offset)));
   }
 }

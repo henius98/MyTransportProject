@@ -409,16 +409,7 @@ public class TransitTrackingServiceTests
     staticData.Verify(s => s.GetFrequenciesAsync(railSource, It.IsAny<CancellationToken>()), Times.Once);
     staticData.Verify(s => s.GetMapAsync(railSource, "", "2026-06-05", It.IsAny<CancellationToken>()), Times.Once);
 
-    // Cross midnight into Saturday 2026-06-06 00:05:00 MYT -> fetches Saturday map and keeps Friday's 23:50 train!
-    currentTime = new DateTimeOffset(2026, 6, 6, 0, 5, 0, MalaysiaTime.Offset).ToUniversalTime();
-    var postMidnight = await service.RefreshVehiclesAsync(3.140, 101.6870, force: false);
-    var nightTrain = Assert.Single(postMidnight.Vehicles);
-    Assert.Equal("KJL-0-2350", nightTrain.VehicleId);
-    Assert.True(nightTrain.Lat > moved2350.Lat);
-    staticData.Verify(s => s.GetMapAsync(railSource, "", "2026-06-06", It.IsAny<CancellationToken>()), Times.Once);
-    staticData.Verify(s => s.GetMapAsync(railSource, "", "2026-06-05", It.IsAny<CancellationToken>()), Times.Once);
-
-    // Estimated rail trains participate in live route enrichment
+    // Estimated rail trains participate in live route enrichment while active
     var enriched = await service.EnrichRoutesAsync(
     [
       new GoogleRoute
@@ -429,6 +420,14 @@ public class TransitTrackingServiceTests
       }
     ]);
     Assert.True(Assert.Single(enriched).HasLiveBus);
+
+    // Cross midnight into Saturday 2026-06-06 00:05:00 MYT -> switches to Saturday map and clears estimated rail after 12am
+    currentTime = new DateTimeOffset(2026, 6, 6, 0, 5, 0, MalaysiaTime.Offset).ToUniversalTime();
+    var afterMidnight = await service.RefreshVehiclesAsync(3.140, 101.6870, force: false);
+    Assert.Empty(afterMidnight.Vehicles);
+    Assert.True(afterMidnight.VehiclesChanged);
+    staticData.Verify(s => s.GetMapAsync(railSource, "", "2026-06-06", It.IsAny<CancellationToken>()), Times.Once);
+    staticData.Verify(s => s.GetMapAsync(railSource, "", "2026-06-05", It.IsAny<CancellationToken>()), Times.Once);
 
     // Reset clears cached frequencies and day maps
     service.Reset();
