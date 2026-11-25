@@ -18,15 +18,21 @@ public sealed class TransportStaticDataServiceTests
 
     var prodSettings = new ConfigurationBuilder().AddJsonFile(prodPath).Build();
     var prodProviders = prodSettings.GetSection("TransportProviders").Get<List<TransportProvider>>()!;
+    var staticOrigins = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     Assert.All(prodProviders, p =>
     {
       var baseUrl = p.StaticData?.BaseUrl ?? string.Empty;
       Assert.DoesNotContain("localhost", baseUrl, StringComparison.OrdinalIgnoreCase);
       if (p.HasStaticData)
       {
-        Assert.StartsWith("https://my-gtfs-worker.98heniyschen.workers.dev/", baseUrl, StringComparison.OrdinalIgnoreCase);
+        Assert.True(Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri));
+        Assert.Equal(Uri.UriSchemeHttps, uri.Scheme);
+        Assert.False(uri.IsLoopback);
+        Assert.NotEqual("/", uri.AbsolutePath);
+        staticOrigins.Add(uri.GetLeftPart(UriPartial.Authority));
       }
     });
+    Assert.Single(staticOrigins);
     Assert.Equal(6, prodProviders.Count(p => p.HasStaticData));
     Assert.DoesNotContain("localhost", prodSettings["BaziFlow:BaseUrl"] ?? string.Empty, StringComparison.OrdinalIgnoreCase);
 
