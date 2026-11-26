@@ -3,12 +3,10 @@ using System.Text.Json;
 
 namespace MyTransportAppWASM.Features.Transit.Services;
 
-internal sealed class ScheduledRailDayNetwork(
-  IReadOnlyList<CompiledScheduledTrip> trips,
-  IReadOnlyDictionary<string, string> routeShortNames)
+internal sealed class ScheduledRailDayNetwork(IReadOnlyList<CompiledScheduledTrip> trips)
 {
+  public static readonly ScheduledRailDayNetwork Empty = new([]);
   public IReadOnlyList<CompiledScheduledTrip> Trips { get; } = trips;
-  public IReadOnlyDictionary<string, string> RouteShortNames { get; } = routeShortNames;
 }
 
 internal sealed record CompiledPolyline(
@@ -22,32 +20,26 @@ internal sealed record CompiledFrequencyWindow(
 
 internal sealed record CompiledStopPoint(
   int ArrivalOffsetSecs,
-  int DepartureOffsetSecs,
   double Lat,
   double Lng,
-  bool HasCoords,
-  double ShapeDistanceMeters,
-  bool HasShapeDistance);
+  double ShapeDistanceMeters);
 
 internal sealed record CompiledScheduledTrip(
-  string TripId,
   string RouteId,
   string RouteShortName,
   string? TransportType,
   int DirectionId,
-  int DurationSecs,
   IReadOnlyList<CompiledFrequencyWindow> Frequencies,
   CompiledStopPoint[] Stops,
-  CompiledPolyline? Track);
+  CompiledPolyline? Track)
+{
+  public int DurationSecs => Stops[^1].ArrivalOffsetSecs;
+}
 
 internal static class ScheduledRailPositionEstimator
 {
-  private const double DegToRad = Math.PI / 180.0;
-  private const double RadToDeg = 180.0 / Math.PI;
-  private const double EarthRadiusMeters = 6371000.0;
-
   private sealed record TripMeta(string RouteId, string? ShapeId, int DirectionId);
-  private sealed record RawTripStop(double Lat, double Lng, int ArrivalSecs, int DepartureSecs);
+  private sealed record RawTripStop(double Lat, double Lng, int ArrivalSecs);
 
   public static ScheduledRailDayNetwork CompileForServiceDay(
     string mapGeoJson,
@@ -57,13 +49,13 @@ internal static class ScheduledRailPositionEstimator
 
     if (string.IsNullOrWhiteSpace(mapGeoJson) || frequencies.Count == 0)
     {
-      return new ScheduledRailDayNetwork([], new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+      return ScheduledRailDayNetwork.Empty;
     }
 
     var freqByTrip = IndexFrequenciesByTrip(frequencies);
     if (freqByTrip.Count == 0)
     {
-      return new ScheduledRailDayNetwork([], new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
+      return ScheduledRailDayNetwork.Empty;
     }
 
     var shapes = new Dictionary<string, CompiledPolyline>(StringComparer.Ordinal);
@@ -72,53 +64,41 @@ internal static class ScheduledRailPositionEstimator
     var routeTripIds = new Dictionary<string, SortedSet<string>>(StringComparer.OrdinalIgnoreCase);
     var tripStops = new Dictionary<string, List<RawTripStop>>(StringComparer.Ordinal);
 
-    ParseMapGeoJson(mapGeoJson, shapes, routeShortNames, tripMeta, routeTripIds, tripStops);
+    ParseMapGeoJson(mapGeoJson, freqByTrip, shapes, routeShortNames, tripMeta, routeTripIds, tripStops);
 
     var compiledTrips = new List<CompiledScheduledTrip>(tripStops.Count);
     foreach (var (tripId, rawStops) in tripStops)
     {
-      if (rawStops.Count < 2 || !freqByTrip.TryGetValue(tripId, out var windows) || windows.Count == 0)
+      if (rawStops.Count < 2)
       {
         continue;
       }
 
-      if (!tripMeta.TryGetValue(tripId, out var meta))
-      {
-        continue;
-      }
+      rawStops.Sort(static (a, b) => a.ArrivalSecs.CompareTo(b.ArrivalSecs));
 
-      rawStops.Sort(static (a, b) =>
-      {
-        var cmp = a.ArrivalSecs.CompareTo(b.ArrivalSecs);
-        return cmp != 0 ? cmp : a.DepartureSecs.CompareTo(b.DepartureSecs);
-      });
-
+      var meta = tripMeta[tripId];
       CompiledPolyline? track = null;
       if (!string.IsNullOrWhiteSpace(meta.ShapeId))
       {
         shapes.TryGetValue(meta.ShapeId, out track);
       }
 
-      var originSecs = rawStops[0].DepartureSecs;
-      var compiledStops = CompileStops(rawStops, originSecs, track);
-      var durationSecs = Math.Max(0, compiledStops[^1].DepartureOffsetSecs);
+      var compiledStops = CompileStops(rawStops, rawStops[0].ArrivalSecs, track);
       var routeShortName = routeShortNames.TryGetValue(meta.RouteId, out var shortName)
         ? shortName
         : meta.RouteId;
 
       compiledTrips.Add(new CompiledScheduledTrip(
-        tripId,
         meta.RouteId,
         routeShortName,
         ResolveTransportType(meta.RouteId, routeShortName),
         meta.DirectionId,
-        durationSecs,
-        windows,
+        freqByTrip[tripId],
         compiledStops,
         track));
     }
 
-    return new ScheduledRailDayNetwork(compiledTrips, routeShortNames);
+    return new ScheduledRailDayNetwork(compiledTrips);
   }
 
   public static List<BusLocation> EstimateVehicles(
@@ -133,42 +113,21 @@ internal static class ScheduledRailPositionEstimator
       return [];
     }
 
-    var localNow = MalaysiaTime.Convert(utcNow);
     var nowUnixSecs = (ulong)Math.Max(0, utcNow.ToUnixTimeSeconds());
-    var nowSecsToday = (int)localNow.TimeOfDay.TotalSeconds;
-
+    var nowSecs = (int)MalaysiaTime.Convert(utcNow).TimeOfDay.TotalSeconds;
     var vehicles = new List<BusLocation>();
-    CollectForServiceDay(todayNetwork, provider, nowSecsToday, nowUnixSecs, vehicles);
-    return vehicles;
-  }
 
-  private static void CollectForServiceDay(
-    ScheduledRailDayNetwork network,
-    TransportProvider provider,
-    int nowSecs,
-    ulong nowUnixSecs,
-    List<BusLocation> vehicles)
-  {
-    foreach (var trip in network.Trips)
+    foreach (var trip in todayNetwork.Trips)
     {
-      var firstArrivalOffset = trip.Stops[0].ArrivalOffsetSecs;
-      var lastOffset = Math.Max(trip.DurationSecs, trip.Stops[^1].DepartureOffsetSecs);
-      var minActiveDep = nowSecs - lastOffset;
-      var maxActiveDep = nowSecs - firstArrivalOffset;
-
+      var minActiveDep = nowSecs - trip.DurationSecs;
       HashSet<int>? seenDepartures = trip.Frequencies.Count > 1 ? [] : null;
 
       foreach (var freq in trip.Frequencies)
       {
-        if (freq.HeadwaySecs <= 0 || freq.EndSecs <= freq.StartSecs)
-        {
-          continue;
-        }
-
         // Match GTFS / worker half-open window [start_secs, end_secs).
         var lastWindowDep = freq.StartSecs + ((freq.EndSecs - freq.StartSecs - 1) / freq.HeadwaySecs) * freq.HeadwaySecs;
         var rangeStart = Math.Max(freq.StartSecs, minActiveDep);
-        var rangeEnd = Math.Min(lastWindowDep, maxActiveDep);
+        var rangeEnd = Math.Min(lastWindowDep, nowSecs);
         if (rangeStart > rangeEnd)
         {
           continue;
@@ -185,12 +144,7 @@ internal static class ScheduledRailPositionEstimator
             continue;
           }
 
-          var elapsed = nowSecs - dep;
-          if (!TryInterpolatePosition(trip, elapsed, out var lat, out var lng, out var bearing, out var speedMps))
-          {
-            continue;
-          }
-
+          var (lat, lng, bearing, speedMps) = InterpolatePosition(trip, nowSecs - dep);
           vehicles.Add(new BusLocation
           {
             ProviderName = provider.Name,
@@ -208,6 +162,8 @@ internal static class ScheduledRailPositionEstimator
         }
       }
     }
+
+    return vehicles;
   }
 
   private static Dictionary<string, List<CompiledFrequencyWindow>> IndexFrequenciesByTrip(
@@ -253,6 +209,7 @@ internal static class ScheduledRailPositionEstimator
 
   private static void ParseMapGeoJson(
     string mapGeoJson,
+    Dictionary<string, List<CompiledFrequencyWindow>> freqByTrip,
     Dictionary<string, CompiledPolyline> shapes,
     Dictionary<string, string> routeShortNames,
     Dictionary<string, TripMeta> tripMeta,
@@ -266,7 +223,7 @@ internal static class ScheduledRailPositionEstimator
       return;
     }
 
-    var pendingStops = new List<(string RouteId, double Lat, double Lng, List<string>? TripIds, string? Arrivals, string? Departures)>();
+    var pendingStops = new List<(string RouteId, double Lat, double Lng, List<string>? TripIds, string Arrivals)>();
 
     foreach (var feature in features.EnumerateArray())
     {
@@ -329,7 +286,9 @@ internal static class ScheduledRailPositionEstimator
       else if (string.Equals(kind, "stop", StringComparison.OrdinalIgnoreCase))
       {
         var routeId = ReadString(props, "route_id");
+        var arrivalsRaw = ReadString(props, "arrival_times");
         if (string.IsNullOrWhiteSpace(routeId) ||
+            string.IsNullOrWhiteSpace(arrivalsRaw) ||
             !string.Equals(ReadString(geometry, "type"), "Point", StringComparison.OrdinalIgnoreCase) ||
             !geometry.TryGetProperty("coordinates", out var coord) ||
             !TryReadGeoJsonCoordinate(coord, out var lat, out var lng))
@@ -337,32 +296,16 @@ internal static class ScheduledRailPositionEstimator
           continue;
         }
 
-        pendingStops.Add((
-          routeId,
-          lat,
-          lng,
-          ReadStringArray(props, "trip_ids"),
-          ReadString(props, "arrival_times"),
-          ReadString(props, "departure_times")));
+        pendingStops.Add((routeId, lat, lng, ReadStringArray(props, "trip_ids"), arrivalsRaw));
       }
     }
 
-    var sortedRouteTrips = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
-    foreach (var (routeId, set) in routeTripIds)
-    {
-      sortedRouteTrips[routeId] = set.ToArray();
-    }
+    Dictionary<string, string[]>? sortedRouteTrips = null;
 
     foreach (var stop in pendingStops)
     {
-      if (string.IsNullOrWhiteSpace(stop.Arrivals) || string.IsNullOrWhiteSpace(stop.Departures))
-      {
-        continue;
-      }
-
       var arrivals = stop.Arrivals.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-      var departures = stop.Departures.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-      if (arrivals.Length == 0 || arrivals.Length != departures.Length)
+      if (arrivals.Length == 0)
       {
         continue;
       }
@@ -373,11 +316,20 @@ internal static class ScheduledRailPositionEstimator
       {
         alignedTripIds = stop.TripIds;
       }
-      else if (stop.TripIds == null &&
-               sortedRouteTrips.TryGetValue(stop.RouteId, out var fallbackTripIds) &&
-               fallbackTripIds.Length == arrivals.Length)
+      else if (stop.TripIds == null)
       {
-        alignedTripIds = fallbackTripIds;
+        sortedRouteTrips ??= new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        if (!sortedRouteTrips.TryGetValue(stop.RouteId, out var fallbackTripIds) &&
+            routeTripIds.TryGetValue(stop.RouteId, out var set))
+        {
+          fallbackTripIds = set.ToArray();
+          sortedRouteTrips[stop.RouteId] = fallbackTripIds;
+        }
+
+        if (fallbackTripIds != null && fallbackTripIds.Length == arrivals.Length)
+        {
+          alignedTripIds = fallbackTripIds;
+        }
       }
 
       if (alignedTripIds == null)
@@ -388,9 +340,7 @@ internal static class ScheduledRailPositionEstimator
       for (var i = 0; i < alignedTripIds.Count; i++)
       {
         var tripId = alignedTripIds[i];
-        if (!TryParseGtfsTimeSecs(arrivals[i], out var arrSecs) ||
-            !TryParseGtfsTimeSecs(departures[i], out var depSecs) ||
-            depSecs < arrSecs)
+        if (!freqByTrip.ContainsKey(tripId) || !TryParseGtfsTimeSecs(arrivals[i], out var arrSecs))
         {
           continue;
         }
@@ -403,134 +353,83 @@ internal static class ScheduledRailPositionEstimator
           list = [];
           tripStops[tripId] = list;
         }
-        list.Add(new RawTripStop(stop.Lat, stop.Lng, arrSecs, depSecs));
+        list.Add(new RawTripStop(stop.Lat, stop.Lng, arrSecs));
       }
     }
   }
 
-  private static bool TryInterpolatePosition(
+  private static (double Lat, double Lng, double Bearing, double SpeedMps) InterpolatePosition(
     CompiledScheduledTrip trip,
-    int elapsedSecs,
-    out double lat,
-    out double lng,
-    out double bearing,
-    out double speedMps)
+    int elapsedSecs)
   {
     var stops = trip.Stops;
-    var first = stops[0];
-    var last = stops[^1];
 
-    if (elapsedSecs <= first.DepartureOffsetSecs)
+    if (elapsedSecs <= stops[0].ArrivalOffsetSecs)
     {
-      return TryResolveDwell(trip, 0, out lat, out lng, out bearing, out speedMps);
+      return ResolveAtStop(trip, 0);
     }
 
-    if (elapsedSecs >= last.ArrivalOffsetSecs)
+    if (elapsedSecs >= stops[^1].ArrivalOffsetSecs)
     {
-      return TryResolveDwell(trip, stops.Length - 1, out lat, out lng, out bearing, out speedMps);
+      return ResolveAtStop(trip, stops.Length - 1);
     }
 
     for (var i = 0; i < stops.Length - 1; i++)
     {
       var current = stops[i];
+      if (elapsedSecs <= current.ArrivalOffsetSecs)
+      {
+        return ResolveAtStop(trip, i);
+      }
+
       var next = stops[i + 1];
-
-      if (elapsedSecs <= current.DepartureOffsetSecs)
+      if (elapsedSecs >= next.ArrivalOffsetSecs)
       {
-        return TryResolveDwell(trip, i, out lat, out lng, out bearing, out speedMps);
+        continue;
       }
 
-      if (elapsedSecs < next.ArrivalOffsetSecs)
+      var travelSecs = next.ArrivalOffsetSecs - current.ArrivalOffsetSecs;
+      var fraction = (elapsedSecs - current.ArrivalOffsetSecs) / (double)travelSecs;
+
+      if (trip.Track != null && next.ShapeDistanceMeters > current.ShapeDistanceMeters)
       {
-        var travelSecs = next.ArrivalOffsetSecs - current.DepartureOffsetSecs;
-        var fraction = travelSecs > 0
-          ? Math.Clamp((elapsedSecs - current.DepartureOffsetSecs) / (double)travelSecs, 0.0, 1.0)
-          : 0.0;
-
-        if (trip.Track != null &&
-            current.HasShapeDistance &&
-            next.HasShapeDistance &&
-            next.ShapeDistanceMeters > current.ShapeDistanceMeters)
-        {
-          var segMeters = next.ShapeDistanceMeters - current.ShapeDistanceMeters;
-          var targetDist = current.ShapeDistanceMeters + fraction * segMeters;
-          SampleTrackAtDistance(trip.Track, targetDist, out lat, out lng, out bearing);
-          speedMps = travelSecs > 0 ? segMeters / travelSecs : 0.0;
-          return true;
-        }
-
-        if (current.HasCoords && next.HasCoords)
-        {
-          lat = current.Lat + (next.Lat - current.Lat) * fraction;
-          lng = current.Lng + (next.Lng - current.Lng) * fraction;
-          bearing = ComputeBearingDegrees(current.Lat, current.Lng, next.Lat, next.Lng);
-          speedMps = travelSecs > 0
-            ? GeoMath.DistanceMeters(current.Lat, current.Lng, next.Lat, next.Lng) / travelSecs
-            : 0.0;
-          return true;
-        }
-
-        lat = lng = bearing = speedMps = 0.0;
-        return false;
+        var segMeters = next.ShapeDistanceMeters - current.ShapeDistanceMeters;
+        var (lat, lng, bearing) = SampleTrackAtDistance(trip.Track, current.ShapeDistanceMeters + fraction * segMeters);
+        return (lat, lng, bearing, segMeters / travelSecs);
       }
+
+      return (
+        current.Lat + (next.Lat - current.Lat) * fraction,
+        current.Lng + (next.Lng - current.Lng) * fraction,
+        ComputeBearingDegrees(current.Lat, current.Lng, next.Lat, next.Lng),
+        GeoMath.DistanceMeters(current.Lat, current.Lng, next.Lat, next.Lng) / travelSecs);
     }
 
-    return TryResolveDwell(trip, stops.Length - 1, out lat, out lng, out bearing, out speedMps);
+    return ResolveAtStop(trip, stops.Length - 1);
   }
 
-  private static bool TryResolveDwell(
+  private static (double Lat, double Lng, double Bearing, double SpeedMps) ResolveAtStop(
     CompiledScheduledTrip trip,
-    int stopIndex,
-    out double lat,
-    out double lng,
-    out double bearing,
-    out double speedMps)
+    int stopIndex)
   {
     var stop = trip.Stops[stopIndex];
-    speedMps = 0.0;
-
-    if (trip.Track != null && stop.HasShapeDistance)
+    if (trip.Track != null)
     {
-      SampleTrackAtDistance(trip.Track, stop.ShapeDistanceMeters, out lat, out lng, out bearing);
-      return true;
+      var (lat, lng, bearing) = SampleTrackAtDistance(trip.Track, stop.ShapeDistanceMeters);
+      return (lat, lng, bearing, 0.0);
     }
 
-    if (stop.HasCoords)
-    {
-      lat = stop.Lat;
-      lng = stop.Lng;
-      bearing = ResolveStopFallbackBearing(trip.Stops, stopIndex);
-      return true;
-    }
-
-    lat = lng = bearing = 0.0;
-    return false;
+    return (stop.Lat, stop.Lng, ResolveStopFallbackBearing(trip.Stops, stopIndex), 0.0);
   }
 
-  private static double ResolveStopFallbackBearing(CompiledStopPoint[] stops, int stopIndex)
-  {
-    var current = stops[stopIndex];
-    if (stopIndex + 1 < stops.Length && stops[stopIndex + 1].HasCoords)
-    {
-      var next = stops[stopIndex + 1];
-      return ComputeBearingDegrees(current.Lat, current.Lng, next.Lat, next.Lng);
-    }
+  private static double ResolveStopFallbackBearing(CompiledStopPoint[] stops, int stopIndex) =>
+    stopIndex + 1 < stops.Length
+      ? ComputeBearingDegrees(stops[stopIndex].Lat, stops[stopIndex].Lng, stops[stopIndex + 1].Lat, stops[stopIndex + 1].Lng)
+      : ComputeBearingDegrees(stops[stopIndex - 1].Lat, stops[stopIndex - 1].Lng, stops[stopIndex].Lat, stops[stopIndex].Lng);
 
-    if (stopIndex > 0 && stops[stopIndex - 1].HasCoords)
-    {
-      var prev = stops[stopIndex - 1];
-      return ComputeBearingDegrees(prev.Lat, prev.Lng, current.Lat, current.Lng);
-    }
-
-    return 0.0;
-  }
-
-  private static void SampleTrackAtDistance(
+  private static (double Lat, double Lng, double Bearing) SampleTrackAtDistance(
     CompiledPolyline track,
-    double targetMeters,
-    out double lat,
-    out double lng,
-    out double bearing)
+    double targetMeters)
   {
     var cum = track.CumulativeMeters;
     var pts = track.Points;
@@ -538,28 +437,19 @@ internal static class ScheduledRailPositionEstimator
 
     if (targetMeters <= 0.0)
     {
-      lat = pts[0].Lat;
-      lng = pts[0].Lng;
-      bearing = ComputeBearingDegrees(pts[0].Lat, pts[0].Lng, pts[1].Lat, pts[1].Lng);
-      return;
+      return (pts[0].Lat, pts[0].Lng, ComputeBearingDegrees(pts[0].Lat, pts[0].Lng, pts[1].Lat, pts[1].Lng));
     }
 
     if (targetMeters >= cum[lastIdx])
     {
-      lat = pts[lastIdx].Lat;
-      lng = pts[lastIdx].Lng;
-      bearing = ComputeBearingDegrees(pts[lastIdx - 1].Lat, pts[lastIdx - 1].Lng, pts[lastIdx].Lat, pts[lastIdx].Lng);
-      return;
+      return (pts[lastIdx].Lat, pts[lastIdx].Lng, ComputeBearingDegrees(pts[lastIdx - 1].Lat, pts[lastIdx - 1].Lng, pts[lastIdx].Lat, pts[lastIdx].Lng));
     }
 
     var idx = Array.BinarySearch(cum, targetMeters);
     if (idx >= 0)
     {
-      lat = pts[idx].Lat;
-      lng = pts[idx].Lng;
       var segStart = idx < lastIdx ? idx : lastIdx - 1;
-      bearing = ComputeBearingDegrees(pts[segStart].Lat, pts[segStart].Lng, pts[segStart + 1].Lat, pts[segStart + 1].Lng);
-      return;
+      return (pts[idx].Lat, pts[idx].Lng, ComputeBearingDegrees(pts[segStart].Lat, pts[segStart].Lng, pts[segStart + 1].Lat, pts[segStart + 1].Lng));
     }
 
     var nextIdx = ~idx;
@@ -567,9 +457,10 @@ internal static class ScheduledRailPositionEstimator
     var segLen = cum[nextIdx] - cum[prevIdx];
     var frac = segLen > 0.0 ? Math.Clamp((targetMeters - cum[prevIdx]) / segLen, 0.0, 1.0) : 0.0;
 
-    lat = pts[prevIdx].Lat + (pts[nextIdx].Lat - pts[prevIdx].Lat) * frac;
-    lng = pts[prevIdx].Lng + (pts[nextIdx].Lng - pts[prevIdx].Lng) * frac;
-    bearing = ComputeBearingDegrees(pts[prevIdx].Lat, pts[prevIdx].Lng, pts[nextIdx].Lat, pts[nextIdx].Lng);
+    return (
+      pts[prevIdx].Lat + (pts[nextIdx].Lat - pts[prevIdx].Lat) * frac,
+      pts[prevIdx].Lng + (pts[nextIdx].Lng - pts[prevIdx].Lng) * frac,
+      ComputeBearingDegrees(pts[prevIdx].Lat, pts[prevIdx].Lng, pts[nextIdx].Lat, pts[nextIdx].Lng));
   }
 
   private static CompiledStopPoint[] CompileStops(
@@ -584,7 +475,6 @@ internal static class ScheduledRailPositionEstimator
     for (var i = 0; i < rawStops.Count; i++)
     {
       var st = rawStops[i];
-      var hasShapeDist = false;
       var shapeDist = 0.0;
 
       if (track != null)
@@ -593,17 +483,9 @@ internal static class ScheduledRailPositionEstimator
         shapeDist = Math.Max(prevDist, projectedDist);
         prevDist = shapeDist;
         minSegmentIndex = segIndex;
-        hasShapeDist = true;
       }
 
-      compiled[i] = new CompiledStopPoint(
-        st.ArrivalSecs - originSecs,
-        st.DepartureSecs - originSecs,
-        st.Lat,
-        st.Lng,
-        HasCoords: true,
-        shapeDist,
-        hasShapeDist);
+      compiled[i] = new CompiledStopPoint(st.ArrivalSecs - originSecs, st.Lat, st.Lng, shapeDist);
     }
 
     return compiled;
@@ -617,7 +499,7 @@ internal static class ScheduledRailPositionEstimator
   {
     var pts = track.Points;
     var cum = track.CumulativeMeters;
-    var cosLat = Math.Cos(lat * DegToRad);
+    var cosLat = Math.Cos(double.DegreesToRadians(lat));
     var bestDistSq = double.PositiveInfinity;
     var bestDistanceAlong = cum[Math.Clamp(startSegmentIndex, 0, pts.Length - 1)];
     var bestSegmentIndex = startSegmentIndex;
@@ -660,7 +542,7 @@ internal static class ScheduledRailPositionEstimator
 
     for (var i = 1; i < arr.Length; i++)
     {
-      total += FastDistanceMeters(arr[i - 1].Lat, arr[i - 1].Lng, arr[i].Lat, arr[i].Lng);
+      total += GeoMath.DistanceMeters(arr[i - 1].Lat, arr[i - 1].Lng, arr[i].Lat, arr[i].Lng);
       cum[i] = total;
     }
 
@@ -767,13 +649,6 @@ internal static class ScheduledRailPositionEstimator
       : $"{routeShortName}-{directionId}-{hours:D2}{minutes:D2}{seconds:D2}";
   }
 
-  private static double FastDistanceMeters(double lat1, double lng1, double lat2, double lng2)
-  {
-    var x = (lng2 - lng1) * DegToRad * Math.Cos(((lat1 + lat2) * 0.5) * DegToRad);
-    var y = (lat2 - lat1) * DegToRad;
-    return Math.Sqrt(x * x + y * y) * EarthRadiusMeters;
-  }
-
   private static double ComputeBearingDegrees(double lat1, double lng1, double lat2, double lng2)
   {
     if (Math.Abs(lat2 - lat1) < 1e-12 && Math.Abs(lng2 - lng1) < 1e-12)
@@ -781,12 +656,12 @@ internal static class ScheduledRailPositionEstimator
       return 0.0;
     }
 
-    var phi1 = lat1 * DegToRad;
-    var phi2 = lat2 * DegToRad;
-    var dLon = (lng2 - lng1) * DegToRad;
+    var phi1 = double.DegreesToRadians(lat1);
+    var phi2 = double.DegreesToRadians(lat2);
+    var dLon = double.DegreesToRadians(lng2 - lng1);
     var y = Math.Sin(dLon) * Math.Cos(phi2);
     var x = Math.Cos(phi1) * Math.Sin(phi2) - Math.Sin(phi1) * Math.Cos(phi2) * Math.Cos(dLon);
-    return (Math.Atan2(y, x) * RadToDeg + 360.0) % 360.0;
+    return (double.RadiansToDegrees(Math.Atan2(y, x)) + 360.0) % 360.0;
   }
 
   private static string? ReadString(JsonElement element, string property) =>

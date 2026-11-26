@@ -40,7 +40,7 @@ public sealed class ScheduledRailPositionEstimatorTests
             "properties": {
               "kind": "stop", "route_id": "KJ", "stop_id": "S1",
               "trip_ids": ["KJL_MonFri_0"],
-              "arrival_times": "05:59:42", "departure_times": "06:00:00"
+              "arrival_times": "06:00:00"
             }
           },
           {
@@ -49,7 +49,7 @@ public sealed class ScheduledRailPositionEstimatorTests
             "properties": {
               "kind": "stop", "route_id": "KJ", "stop_id": "S2",
               "trip_ids": ["KJL_MonFri_0"],
-              "arrival_times": "06:03:20", "departure_times": "06:03:20"
+              "arrival_times": "06:03:20"
             }
           }
         ]
@@ -80,7 +80,7 @@ public sealed class ScheduledRailPositionEstimatorTests
   }
 
   [Fact]
-  public void EstimateVehicles_RespectsOffsetStopStartAlongShapeAndDwellAtStation()
+  public void EstimateVehicles_RespectsOffsetStopStartAlongShapeAndStopAtStation()
   {
     // Track starts at 101.00, while S1 is halfway along at 101.01 (like KGL starting past old terminus).
     // Stop features omit trip_ids to also verify symmetric fallback alignment with sorted route trip_ids.
@@ -107,7 +107,7 @@ public sealed class ScheduledRailPositionEstimatorTests
             "geometry": { "type": "Point", "coordinates": [101.01, 3.10] },
             "properties": {
               "kind": "stop", "route_id": "KGL", "stop_id": "S1",
-              "arrival_times": "05:59:42", "departure_times": "06:00:00"
+              "arrival_times": "06:00:00"
             }
           },
           {
@@ -115,7 +115,7 @@ public sealed class ScheduledRailPositionEstimatorTests
             "geometry": { "type": "Point", "coordinates": [101.02, 3.10] },
             "properties": {
               "kind": "stop", "route_id": "KGL", "stop_id": "S2",
-              "arrival_times": "06:01:42", "departure_times": "06:02:00"
+              "arrival_times": "06:02:00"
             }
           }
         ]
@@ -129,13 +129,21 @@ public sealed class ScheduledRailPositionEstimatorTests
 
     var network = ScheduledRailPositionEstimator.CompileForServiceDay(mapGeoJson, frequencies);
 
-    // At 07:59:50 MYT: train is dwelling at S1 (10s before departure)
-    var dwelling = Assert.Single(ScheduledRailPositionEstimator.EstimateVehicles(
+    // At 07:59:50 MYT: train has not started yet; at 08:00:00 MYT: train is at S1
+    Assert.Empty(ScheduledRailPositionEstimator.EstimateVehicles(
       network, RapidRail, new DateTimeOffset(2026, 6, 3, 7, 59, 50, MalaysiaTime.Offset)));
-    Assert.Equal("MRT", dwelling.TransportType);
-    Assert.Equal(0f, dwelling.Speed);
-    Assert.InRange(dwelling.Lng, 101.0099f, 101.0101f);
-    Assert.InRange(dwelling.Bearing, 88f, 92f);
+
+    var atOrigin = Assert.Single(ScheduledRailPositionEstimator.EstimateVehicles(
+      network, RapidRail, new DateTimeOffset(2026, 6, 3, 8, 0, 0, MalaysiaTime.Offset)));
+    Assert.Equal("MRT", atOrigin.TransportType);
+    Assert.Equal(0f, atOrigin.Speed);
+    Assert.InRange(atOrigin.Lng, 101.0099f, 101.0101f);
+    Assert.InRange(atOrigin.Bearing, 88f, 92f);
+
+    var atTerminus = Assert.Single(ScheduledRailPositionEstimator.EstimateVehicles(
+      network, RapidRail, new DateTimeOffset(2026, 6, 3, 8, 2, 0, MalaysiaTime.Offset)));
+    Assert.Equal(0f, atTerminus.Speed);
+    Assert.InRange(atTerminus.Lng, 101.0199f, 101.0201f);
   }
 
   [Fact]
@@ -161,8 +169,7 @@ public sealed class ScheduledRailPositionEstimatorTests
             "properties": {
               "kind": "stop", "route_id": "AG", "stop_id": "S1",
               "trip_ids": ["AGL_Exp_0", "AGL_Reg_0"],
-              "arrival_times": "06:00:00, 06:00:00",
-              "departure_times": "06:00:00, 06:00:00"
+              "arrival_times": "06:00:00, 06:00:00"
             }
           },
           {
@@ -171,8 +178,7 @@ public sealed class ScheduledRailPositionEstimatorTests
             "properties": {
               "kind": "stop", "route_id": "AG", "stop_id": "S2",
               "trip_ids": ["AGL_Reg_0"],
-              "arrival_times": "06:05:00",
-              "departure_times": "06:05:00"
+              "arrival_times": "06:05:00"
             }
           },
           {
@@ -181,8 +187,7 @@ public sealed class ScheduledRailPositionEstimatorTests
             "properties": {
               "kind": "stop", "route_id": "AG", "stop_id": "S3",
               "trip_ids": ["AGL_Exp_0", "AGL_Reg_0"],
-              "arrival_times": "06:05:00, 06:10:00",
-              "departure_times": "06:05:00, 06:10:00"
+              "arrival_times": "06:05:00, 06:10:00"
             }
           }
         ]
@@ -219,7 +224,7 @@ public sealed class ScheduledRailPositionEstimatorTests
             "properties": {
               "kind": "stop", "route_id": "BRT", "stop_id": "BRT1",
               "trip_ids": ["BRT_MonFri_0"],
-              "arrival_times": "06:00:00", "departure_times": "06:00:00"
+              "arrival_times": "06:00:00"
             }
           },
           {
@@ -228,7 +233,7 @@ public sealed class ScheduledRailPositionEstimatorTests
             "properties": {
               "kind": "stop", "route_id": "BRT", "stop_id": "BRT2",
               "trip_ids": ["BRT_MonFri_0"],
-              "arrival_times": "06:16:00", "departure_times": "06:16:00"
+              "arrival_times": "06:16:00"
             }
           }
         ]

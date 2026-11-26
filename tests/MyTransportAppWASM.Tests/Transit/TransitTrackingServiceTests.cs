@@ -335,12 +335,12 @@ public class TransitTrackingServiceTests
           {
             "type": "Feature",
             "geometry": { "type": "Point", "coordinates": [101.68, 3.13] },
-            "properties": { "kind": "stop", "route_id": "KJ", "stop_id": "KJ1", "trip_ids": ["KJL_MonFri_0"], "arrival_times": "06:00:00", "departure_times": "06:00:00" }
+            "properties": { "kind": "stop", "route_id": "KJ", "stop_id": "KJ1", "trip_ids": ["KJL_MonFri_0"], "arrival_times": "06:00:00" }
           },
           {
             "type": "Feature",
             "geometry": { "type": "Point", "coordinates": [101.70, 3.15] },
-            "properties": { "kind": "stop", "route_id": "KJ", "stop_id": "KJ2", "trip_ids": ["KJL_MonFri_0"], "arrival_times": "06:20:00", "departure_times": "06:20:00" }
+            "properties": { "kind": "stop", "route_id": "KJ", "stop_id": "KJ2", "trip_ids": ["KJL_MonFri_0"], "arrival_times": "06:20:00" }
           }
         ]
       }
@@ -358,12 +358,12 @@ public class TransitTrackingServiceTests
           {
             "type": "Feature",
             "geometry": { "type": "Point", "coordinates": [101.68, 3.13] },
-            "properties": { "kind": "stop", "route_id": "KJ", "stop_id": "KJ1", "trip_ids": ["KJL_Sat_0"], "arrival_times": "06:00:00", "departure_times": "06:00:00" }
+            "properties": { "kind": "stop", "route_id": "KJ", "stop_id": "KJ1", "trip_ids": ["KJL_Sat_0"], "arrival_times": "06:00:00" }
           },
           {
             "type": "Feature",
             "geometry": { "type": "Point", "coordinates": [101.70, 3.15] },
-            "properties": { "kind": "stop", "route_id": "KJ", "stop_id": "KJ2", "trip_ids": ["KJL_Sat_0"], "arrival_times": "06:20:00", "departure_times": "06:20:00" }
+            "properties": { "kind": "stop", "route_id": "KJ", "stop_id": "KJ2", "trip_ids": ["KJL_Sat_0"], "arrival_times": "06:20:00" }
           }
         ]
       }

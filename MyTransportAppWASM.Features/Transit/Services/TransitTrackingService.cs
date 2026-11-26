@@ -490,8 +490,8 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
   {
     if (_staticDataService == null) return;
 
-    var requiredDates = GetRequiredServiceDates(now);
-    PruneStaleScheduledDayNetworks(requiredDates);
+    var todayDate = GetServiceDate(now);
+    PruneStaleScheduledDayNetworks(todayDate);
 
     var freqProviders = new List<TransportProvider>();
     var queuedFreqKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -529,30 +529,27 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
       }
     }
 
-    var mapRequests = new List<(TransportProvider Provider, string ServiceDate, IReadOnlyList<StaticFrequency> Frequencies)>();
+    var mapRequests = new List<(TransportProvider Provider, IReadOnlyList<StaticFrequency> Frequencies)>();
     var queuedDayKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     foreach (var provider in nearbyScheduleProviders)
     {
       if (!provider.HasFrequencyFeed) continue;
       if (!TryGetCachedFrequencies(GetFrequencyKey(provider), out var frequencies) || frequencies.Count == 0) continue;
 
-      foreach (var serviceDate in requiredDates)
-      {
-        var dayKey = GetScheduledDayKey(provider, serviceDate);
-        if (!queuedDayKeys.Add(dayKey) || TryGetCachedScheduledDayNetwork(dayKey, out _)) continue;
-        if (_scheduledNetworkRetryAfter.TryGetValue(dayKey, out var retryAt) && now < retryAt) continue;
-        mapRequests.Add((provider, serviceDate, frequencies));
-      }
+      var dayKey = GetScheduledDayKey(provider, todayDate);
+      if (!queuedDayKeys.Add(dayKey) || TryGetCachedScheduledDayNetwork(dayKey, out _)) continue;
+      if (_scheduledNetworkRetryAfter.TryGetValue(dayKey, out var retryAt) && now < retryAt) continue;
+      mapRequests.Add((provider, frequencies));
     }
 
     if (mapRequests.Count == 0) return;
 
     var dayResults = await Task.WhenAll(
-      mapRequests.Select(req => FetchScheduledDayNetworkAsync(req.Provider, req.ServiceDate, req.Frequencies, cancellationToken)));
+      mapRequests.Select(req => FetchScheduledDayNetworkAsync(req.Provider, todayDate, req.Frequencies, cancellationToken)));
 
-    foreach (var (provider, serviceDate, network) in dayResults)
+    foreach (var (provider, network) in dayResults)
     {
-      var dayKey = GetScheduledDayKey(provider, serviceDate);
+      var dayKey = GetScheduledDayKey(provider, todayDate);
       if (network != null)
       {
         _scheduledDayNetworks[dayKey] = network;
@@ -591,7 +588,7 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
     }
   }
 
-  private async Task<(TransportProvider Provider, string ServiceDate, ScheduledRailDayNetwork? Network)> FetchScheduledDayNetworkAsync(
+  private async Task<(TransportProvider Provider, ScheduledRailDayNetwork? Network)> FetchScheduledDayNetworkAsync(
     TransportProvider provider,
     string serviceDate,
     IReadOnlyList<StaticFrequency> frequencies,
@@ -602,10 +599,10 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
       var mapGeoJson = await _staticDataService!.GetMapAsync(provider.StaticData!, "", serviceDate, cancellationToken);
       if (string.IsNullOrWhiteSpace(mapGeoJson))
       {
-        return (provider, serviceDate, null);
+        return (provider, null);
       }
 
-      return (provider, serviceDate, ScheduledRailPositionEstimator.CompileForServiceDay(mapGeoJson, frequencies));
+      return (provider, ScheduledRailPositionEstimator.CompileForServiceDay(mapGeoJson, frequencies));
     }
     catch (OperationCanceledException)
     {
@@ -614,7 +611,7 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
     catch (Exception ex)
     {
       _logger.LogDebug("Scheduled rail map lookup failed for {Provider} ({Date}): {Message}", provider.Name, serviceDate, ex.Message);
-      return (provider, serviceDate, null);
+      return (provider, null);
     }
   }
 
@@ -624,9 +621,7 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
   {
     if (nearbyScheduleProviders.Count == 0) return [];
 
-    var localNow = MalaysiaTime.Convert(utcNow);
-    var todayDate = FormatServiceDate(localNow.Date);
-
+    var todayDate = GetServiceDate(utcNow);
     var estimated = new List<BusLocation>();
     foreach (var provider in nearbyScheduleProviders)
     {
@@ -642,26 +637,21 @@ public sealed class TransitTrackingService : ITransitTrackingService, IDisposabl
     return estimated;
   }
 
-  private static string[] GetRequiredServiceDates(DateTimeOffset utcNow) =>
-    [FormatServiceDate(MalaysiaTime.Convert(utcNow).Date)];
+  private static string GetServiceDate(DateTimeOffset utcNow) =>
+    FormatServiceDate(MalaysiaTime.Convert(utcNow).Date);
 
-  private void PruneStaleScheduledDayNetworks(string[] requiredDates)
+  private void PruneStaleScheduledDayNetworks(string todayDate)
   {
     if (_scheduledDayNetworks.Count == 0) return;
 
+    var suffix = $"|{todayDate}";
     var staleKeys = new List<string>();
     foreach (var key in _scheduledDayNetworks.Keys)
     {
-      var keep = false;
-      foreach (var date in requiredDates)
+      if (!key.EndsWith(suffix, StringComparison.Ordinal))
       {
-        if (key.EndsWith($"|{date}", StringComparison.Ordinal))
-        {
-          keep = true;
-          break;
-        }
+        staleKeys.Add(key);
       }
-      if (!keep) staleKeys.Add(key);
     }
 
     foreach (var key in staleKeys)

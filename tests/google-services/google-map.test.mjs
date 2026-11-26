@@ -2453,7 +2453,6 @@ test("clicking a static stop toggles an InfoWindow with GeoJSON properties witho
     route_id: "AG",
     trip_ids: ["AGL_MonFri_0", "AGL_MonFri_1"],
     arrival_times: "06:25:20, 08:50:20, 20:25:20",
-    departure_times: "06:25:20, 08:50:20, 20:25:20",
     platform_code: "P1",
     custom_note: "Terminal station",
   };
@@ -2492,7 +2491,6 @@ test("clicking a static stop toggles an InfoWindow with GeoJSON properties witho
     ["Stop ID", "AG1"],
     ["Route", "AG"],
     ["Arrival Times", "06:25:20, 08:50:20, 20:25:20"],
-    ["Departure Times", "06:25:20, 08:50:20, 20:25:20"],
     ["Platform", "P1"],
     ["Custom Note", "Terminal station"],
   ]);

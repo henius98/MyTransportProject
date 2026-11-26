@@ -2896,7 +2896,6 @@ const STOP_PROPERTY_LABELS = {
   route_short_name: "Route",
   route_id: "Route",
   arrival_times: "Arrival Times",
-  departure_times: "Departure Times",
   stop_sequence: "Sequence",
   platform_code: "Platform",
   stop_desc: "Description",
