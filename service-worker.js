@@ -1,15 +1,15 @@
-/* Manifest version: MOtENQp1 */
+/* Manifest version: pK5xHntt */
 // Caution! Be sure you understand the caveats before publishing an application with
 // offline support. See https://aka.ms/blazor-offline-considerations
 
-self.importScripts('./service-worker-assets.js', './js/wasm-gzip.js');
+self.importScripts('./service-worker-assets.js', './js/wasm-gzip.js', './js/static-data-cache.js');
 self.addEventListener('install', event => event.waitUntil(onInstall(event)));
 self.addEventListener('activate', event => event.waitUntil(onActivate(event)));
+self.addEventListener('message', event => self.staticDataCache.handleMessage(event));
 self.addEventListener('fetch', event => event.respondWith(onFetch(event)));
 
 const cacheNamePrefix = 'offline-cache-';
 const cacheName = `${cacheNamePrefix}${self.assetsManifest.version}`;
-const staticDataCacheName = 'static-data-cache-v1';
 const offlineAssetsInclude = [ /\.dll$/, /\.pdb$/, /\.wasm/, /\.html/, /\.js$/, /\.json$/, /\.css$/, /\.woff$/, /\.png$/, /\.jpe?g$/, /\.gif$/, /\.ico$/, /\.blat$/, /\.dat$/, /\.webmanifest$/, /\.svg$/ ];
 const offlineAssetsExclude = [ /^service-worker\.js$/, /^firebase-messaging-sw\.js$/ ];
 
@@ -19,18 +19,6 @@ const base = (self.registration && self.registration.scope)
   : "/";
 const baseUrl = new URL(base, self.origin);
 const manifestUrlList = self.assetsManifest.assets.map(asset => new URL(asset.url, baseUrl).href);
-
-function isGtfsStaticRequest(url) {
-  const selfOrigin = self.origin || (self.location && self.location.origin);
-  const isSelfMapRoute = (selfOrigin && url.origin === selfOrigin) && (url.pathname === '/map' || url.pathname === '/map/');
-  return !isSelfMapRoute && (
-    (url.hostname === 'api.data.gov.my' && url.pathname.includes('/gtfs-static/'))
-    || url.pathname.includes('/data/routes')
-    || url.pathname.includes('/data/frequencies')
-    || url.pathname.includes('/departures')
-    || (url.pathname.endsWith('/map') || url.pathname.includes('/map?') || url.pathname.includes('/map/'))
-  );
-}
 
 function createAssetRequest(asset) {
   return new Request(asset.url, {
@@ -115,27 +103,9 @@ async function onFetch(event) {
 
   const url = new URL(event.request.url);
 
-  // GTFS static routes, departures, and shapes
-  if (event.request.mode !== 'navigate' && isGtfsStaticRequest(url)) {
-    const dataCache = await caches.open(staticDataCacheName);
-    const cachedResponse = await dataCache.match(event.request);
-
-    // Stale-while-revalidate for GTFS static data to enable offline lookups and instant rendering
-    const networkFetch = fetch(event.request).then(async response => {
-      if (response && response.status === 200) {
-        await dataCache.put(event.request, response.clone());
-      }
-      return response;
-    }).catch(() => cachedResponse || new Response(null, { status: 503, statusText: 'Service Unavailable' }));
-
-    if (cachedResponse) {
-      if (event.waitUntil) {
-        event.waitUntil(networkFetch);
-      }
-      return cachedResponse;
-    }
-
-    return networkFetch;
+  // GTFS static routes and shapes (cache-first with daily MYT reset expiry)
+  if (event.request.mode !== 'navigate' && self.staticDataCache.isGtfsStaticRequest(url)) {
+    return self.staticDataCache.handleStaticDataRequest(event.request);
   }
 
   // Navigation requests: serve index.html from cache
@@ -150,21 +120,15 @@ async function onFetch(event) {
     return cachedResponse;
   }
 
-  // Check static data cache if not present in main cache
-  const dataCache = await caches.open(staticDataCacheName);
-  const dataCached = await dataCache.match(event.request);
-  if (dataCached) {
-    return dataCached;
+  // Fallback to static-data-cache-v1 for station catalog if absent from offline cache
+  if (event.request.mode !== 'navigate' && self.staticDataCache.isStationCatalogRequest(url)) {
+    return self.staticDataCache.handleStaticDataRequest(event.request);
   }
 
   try {
-    const networkResponse = await fetch(event.request);
-    if (networkResponse && networkResponse.status === 200 && url.pathname.includes('recreation_centres.json')) {
-      await dataCache.put(event.request, networkResponse.clone());
-    }
-    return networkResponse;
+    return await fetch(event.request);
   } catch (error) {
-    const fallback = await cache.match(request) || await dataCache.match(event.request);
+    const fallback = await cache.match(request);
     if (fallback) return fallback;
     return new Response(null, { status: 503, statusText: 'Service Unavailable' });
   }

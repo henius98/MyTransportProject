@@ -9,7 +9,7 @@
       content="Real-time public transit tracking and weather-aware trip planning for Malaysia. Track buses, plan routes, and check weather forecasts."
     />
     <base href="/MyTransportProject/" />
-    <link href="_framework/dotnet.fux8rzhne2.js" rel="preload" as="script" fetchpriority="high" crossorigin="anonymous" integrity="sha256-qWvzvd2b9ouGesNhdsmwcalx2FqFuynbKmeumTfgtt0=" />
+    <link href="_framework/dotnet.lvzbbje5py.js" rel="preload" as="script" fetchpriority="high" crossorigin="anonymous" integrity="sha256-nz644yPEwVKKmH0DKPX9d+BFmrWvFE5EXaGUqzwxEvI=" />
     <link
       rel="preload"
       as="script"
@@ -231,7 +231,7 @@
     <script type="importmap">{
   "imports": {
     "./_framework/blazor.webassembly.js": "./_framework/blazor.webassembly.zxhwjtv6sc.js",
-    "./_framework/dotnet.js": "./_framework/dotnet.fux8rzhne2.js",
+    "./_framework/dotnet.js": "./_framework/dotnet.lvzbbje5py.js",
     "./_framework/dotnet.native.js": "./_framework/dotnet.native.yo2kiusye5.js",
     "./_framework/dotnet.runtime.js": "./_framework/dotnet.runtime.v2rwe8u38b.js"
   },
@@ -239,8 +239,8 @@
   "integrity": {
     "./_framework/blazor.webassembly.js": "sha256-1xlHuu1iNOJiMMz2BCq95uekwHf6pdpTcgVNKVBboPs=",
     "./_framework/blazor.webassembly.zxhwjtv6sc.js": "sha256-1xlHuu1iNOJiMMz2BCq95uekwHf6pdpTcgVNKVBboPs=",
-    "./_framework/dotnet.fux8rzhne2.js": "sha256-qWvzvd2b9ouGesNhdsmwcalx2FqFuynbKmeumTfgtt0=",
-    "./_framework/dotnet.js": "sha256-qWvzvd2b9ouGesNhdsmwcalx2FqFuynbKmeumTfgtt0=",
+    "./_framework/dotnet.js": "sha256-nz644yPEwVKKmH0DKPX9d+BFmrWvFE5EXaGUqzwxEvI=",
+    "./_framework/dotnet.lvzbbje5py.js": "sha256-nz644yPEwVKKmH0DKPX9d+BFmrWvFE5EXaGUqzwxEvI=",
     "./_framework/dotnet.native.js": "sha256-ohQHKVbf5Ucso3uNGAOBQBb2zqKum4XTeLOzCF3/Agw=",
     "./_framework/dotnet.native.yo2kiusye5.js": "sha256-ohQHKVbf5Ucso3uNGAOBQBb2zqKum4XTeLOzCF3/Agw=",
     "./_framework/dotnet.runtime.js": "sha256-6SBqDbLLy460Bxd7wMZoiO97hZfLTuF+HRhWT3elS7U=",
@@ -249,6 +249,7 @@
 }</script>
     <script src="js/theme-manager.js" defer></script>
     <script src="js/wasm-gzip.js" defer></script>
+    <script src="js/static-data-cache.js" defer></script>
     <script
       src="_framework/blazor.webassembly.zxhwjtv6sc.js"
       autostart="false"
@@ -294,24 +295,55 @@
       })();
     </script>
     <script>
-      if ("serviceWorker" in navigator) {
-        window.addEventListener(
-          "load",
-          function () {
-            var register = function () {
-              navigator.serviceWorker.register("service-worker.js", {
-                updateViaCache: "none",
-              });
-            };
-            if ("requestIdleCallback" in window) {
-              requestIdleCallback(register, { timeout: 2500 });
-            } else {
-              setTimeout(register, 1000);
+      (function () {
+        var pendingStaticDataResetHour = null;
+        function postStaticDataResetHour(worker, resetHour) {
+          var messageType = window.staticDataCache && window.staticDataCache.CONFIG_MESSAGE_TYPE;
+          if (worker && typeof worker.postMessage === "function" && typeof resetHour === "number" && messageType) {
+            worker.postMessage({ type: messageType, resetHour: resetHour });
+          }
+        }
+        window.syncStaticDataResetHour = function (resetHour) {
+          pendingStaticDataResetHour = resetHour;
+          if (!("serviceWorker" in navigator)) {
+            return;
+          }
+          postStaticDataResetHour(navigator.serviceWorker.controller, resetHour);
+          if (navigator.serviceWorker.ready && typeof navigator.serviceWorker.ready.then === "function") {
+            navigator.serviceWorker.ready
+              .then(function (registration) {
+                if (registration && registration.active && pendingStaticDataResetHour !== null) {
+                  postStaticDataResetHour(registration.active, pendingStaticDataResetHour);
+                }
+              })
+              .catch(function () {});
+          }
+        };
+
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.addEventListener("controllerchange", function () {
+            if (pendingStaticDataResetHour !== null) {
+              postStaticDataResetHour(navigator.serviceWorker.controller, pendingStaticDataResetHour);
             }
-          },
-          { once: true },
-        );
-      }
+          });
+          window.addEventListener(
+            "load",
+            function () {
+              var register = function () {
+                navigator.serviceWorker.register("service-worker.js", {
+                  updateViaCache: "none",
+                });
+              };
+              if ("requestIdleCallback" in window) {
+                requestIdleCallback(register, { timeout: 2500 });
+              } else {
+                setTimeout(register, 1000);
+              }
+            },
+            { once: true },
+          );
+        }
+      })();
     </script>
 
     <!-- Dialog Helper and Fallback -->
