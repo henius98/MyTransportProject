@@ -2913,7 +2913,11 @@ function extractFeatureProperties(feature) {
     });
     return props;
   }
-  for (const key of ["stop_name", ...STOP_PROPERTY_ORDER]) {
+  for (const key of [
+    "stop_name",
+    "frequency_arrivals",
+    ...STOP_PROPERTY_ORDER,
+  ]) {
     const value = feature?.getProperty?.(key);
     if (value !== undefined) props[key] = value;
   }
@@ -2948,6 +2952,170 @@ function formatStopPropertyValue(value) {
   }
 }
 
+const STOP_TIME_INLINE_LIMIT = 4;
+const STOP_TIME_NEXT_LIMIT = 4;
+const MAX_FREQUENCY_EXPANSION_STEPS = 2000;
+
+function recordStopTimeEntry(unique, hours, minutes, seconds) {
+  const display = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  const existing = unique.get(display);
+  if (!existing || seconds < existing.seconds) {
+    unique.set(display, { seconds, display });
+  }
+}
+
+function sortStopTimeEntries(unique) {
+  return [...unique.values()].sort(
+    (a, b) => a.seconds - b.seconds || a.display.localeCompare(b.display),
+  );
+}
+
+function expandFrequencyWindows(windows) {
+  if (!Array.isArray(windows) || windows.length === 0) return [];
+  const unique = new Map();
+  for (const w of windows) {
+    const start = Number(w?.start);
+    const end = Number(w?.end);
+    const headway = Number(w?.headway);
+    if (
+      !Number.isFinite(start) ||
+      !Number.isFinite(end) ||
+      !Number.isFinite(headway) ||
+      headway <= 0 ||
+      end < start ||
+      (end > start && (end - start) / headway > MAX_FREQUENCY_EXPANSION_STEPS)
+    ) {
+      continue;
+    }
+    for (let secs = start; secs <= end; secs += headway) {
+      recordStopTimeEntry(
+        unique,
+        Math.floor(secs / 3600),
+        Math.floor((secs % 3600) / 60),
+        secs,
+      );
+    }
+  }
+  return sortStopTimeEntries(unique);
+}
+
+function parseStopTimeList(rawValue) {
+  const rawTokens = Array.isArray(rawValue)
+    ? rawValue.flatMap((item) =>
+        typeof item === "string" ? item.split(",") : [formatStopPropertyValue(item)],
+      )
+    : typeof rawValue === "string"
+      ? rawValue.split(",")
+      : [];
+
+  const unique = new Map();
+  for (const raw of rawTokens) {
+    const token = String(raw ?? "").trim();
+    if (!token) continue;
+    const match = token.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (match) {
+      const hours = Number(match[1]);
+      const minutes = Number(match[2]);
+      const secs = match[3] ? Number(match[3]) : 0;
+      recordStopTimeEntry(unique, hours, minutes, hours * 3600 + minutes * 60 + secs);
+    } else if (!unique.has(token)) {
+      unique.set(token, { seconds: Number.POSITIVE_INFINITY, display: token });
+    }
+  }
+
+  return sortStopTimeEntries(unique);
+}
+
+function getCurrentTimeOfDaySeconds(now = new Date()) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+      timeZone: displayTimeZone || undefined,
+    }).formatToParts(now);
+    const hour = Number(parts.find((p) => p.type === "hour")?.value ?? 0);
+    const minute = Number(parts.find((p) => p.type === "minute")?.value ?? 0);
+    const second = Number(parts.find((p) => p.type === "second")?.value ?? 0);
+    return hour * 3600 + minute * 60 + second;
+  } catch (_) {
+    return now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+  }
+}
+
+function createStopTimeGrid(entries, nextDisplay, scrollable = false) {
+  const grid = document.createElement("div");
+  grid.className = scrollable
+    ? "bus-info-time-grid bus-info-time-grid--scrollable"
+    : "bus-info-time-grid";
+  for (const entry of entries) {
+    const pill = document.createElement("span");
+    pill.className =
+      entry.display === nextDisplay
+        ? "bus-info-time-pill is-next"
+        : "bus-info-time-pill";
+    pill.textContent = entry.display;
+    grid.appendChild(pill);
+  }
+  return grid;
+}
+
+function appendStopScheduleBlock(container, label, entries, nowSeconds) {
+  const block = document.createElement("div");
+  block.className = "bus-info-schedule";
+
+  const heading = document.createElement("b");
+  heading.className = "bus-info-schedule-label";
+  heading.textContent = label;
+  block.appendChild(heading);
+
+  const upcoming = entries.filter(
+    (entry) => Number.isFinite(entry.seconds) && entry.seconds >= nowSeconds,
+  );
+  const nextDisplay = upcoming[0]?.display ?? null;
+
+  if (entries.length <= STOP_TIME_INLINE_LIMIT) {
+    block.appendChild(createStopTimeGrid(entries, nextDisplay, false));
+    container.appendChild(block);
+    return;
+  }
+
+  const nextRow = document.createElement("div");
+  nextRow.className = "bus-info-next-row";
+  const nextLabel = document.createElement("span");
+  nextLabel.className = "bus-info-next-label";
+  nextLabel.textContent = "Next";
+  nextRow.appendChild(nextLabel);
+
+  if (upcoming.length > 0) {
+    nextRow.appendChild(
+      createStopTimeGrid(
+        upcoming.slice(0, STOP_TIME_NEXT_LIMIT),
+        nextDisplay,
+        false,
+      ),
+    );
+  } else {
+    const empty = document.createElement("span");
+    empty.className = "bus-info-time-empty";
+    empty.textContent = "None left today";
+    nextRow.appendChild(empty);
+  }
+  block.appendChild(nextRow);
+
+  const details = document.createElement("details");
+  details.className = "bus-info-schedule-details";
+  const summary = document.createElement("summary");
+  summary.className = "bus-info-schedule-summary";
+  summary.textContent = `All ${entries.length} times (${entries[0].display} \u2013 ${entries[entries.length - 1].display})`;
+  details.appendChild(summary);
+  details.appendChild(createStopTimeGrid(entries, nextDisplay, true));
+  block.appendChild(details);
+
+  container.appendChild(block);
+}
+
 function buildStopInfoContent(feature) {
   const props = extractFeatureProperties(feature);
   const stopName = formatStopPropertyValue(props.stop_name);
@@ -2962,9 +3130,26 @@ function buildStopInfoContent(feature) {
   content.appendChild(header);
 
   const routeShortName = formatStopPropertyValue(props.route_short_name);
-  const seen = new Set(["kind", "stop_name", "trip_ids"]);
+  const expandedArrivals = expandFrequencyWindows(props.frequency_arrivals);
+  const arrivalEntries =
+    expandedArrivals.length > 0
+      ? expandedArrivals
+      : parseStopTimeList(props.arrival_times);
+  const nowSeconds =
+    arrivalEntries.length > 0 ? getCurrentTimeOfDaySeconds() : 0;
+
+  const seen = new Set([
+    "kind",
+    "stop_name",
+    "trip_ids",
+    "frequency_arrivals",
+  ]);
   const orderedKeys = [
-    ...STOP_PROPERTY_ORDER.filter((key) => Object.hasOwn(props, key)),
+    ...STOP_PROPERTY_ORDER.filter(
+      (key) =>
+        Object.hasOwn(props, key) ||
+        (key === "arrival_times" && arrivalEntries.length > 0),
+    ),
     ...Object.keys(props).filter(
       (key) => !seen.has(key) && !STOP_PROPERTY_ORDER.includes(key),
     ),
@@ -2973,6 +3158,17 @@ function buildStopInfoContent(feature) {
   for (const key of orderedKeys) {
     if (seen.has(key)) continue;
     seen.add(key);
+    if (key === "arrival_times") {
+      if (arrivalEntries.length > 0) {
+        appendStopScheduleBlock(
+          content,
+          formatStopPropertyLabel(key),
+          arrivalEntries,
+          nowSeconds,
+        );
+      }
+      continue;
+    }
     const formattedValue = formatStopPropertyValue(props[key]);
     if (!formattedValue) continue;
     if (

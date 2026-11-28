@@ -6,8 +6,10 @@ namespace MyTransportAppWASM.Features.Weather.Services
 {
   public sealed class WeatherPlannerService : IWeatherPlannerService
   {
+    internal const int MaxCacheEntries = WeatherResponseCache.DefaultMaxEntries;
+
     private readonly HttpClient _httpClient;
-    private readonly IAppCache _cache;
+    private readonly WeatherResponseCache _cache;
     private readonly IPlaceResolutionService? _placeResolutionService;
     private readonly IWeatherStationCatalogService? _stationCatalog;
     private readonly TimeSpan _liveCacheExpiration;
@@ -19,14 +21,14 @@ namespace MyTransportAppWASM.Features.Weather.Services
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public WeatherPlannerService(
       HttpClient httpClient,
-      IAppCache cache,
       IOptions<CacheExpirationOptions> cacheExpiration,
       IOptions<WeatherOptions> weatherOptions,
       IPlaceResolutionService? placeResolutionService = null,
-      IWeatherStationCatalogService? stationCatalog = null)
+      IWeatherStationCatalogService? stationCatalog = null,
+      Func<DateTimeOffset>? utcNow = null)
     {
       _httpClient = httpClient;
-      _cache = cache;
+      _cache = new WeatherResponseCache(utcNow ?? (() => DateTimeOffset.UtcNow), MaxCacheEntries);
       var options = weatherOptions.Value ?? new();
       _placeResolutionService = placeResolutionService;
       _stationCatalog = stationCatalog;
@@ -302,22 +304,24 @@ namespace MyTransportAppWASM.Features.Weather.Services
         _cache.Remove(cacheKey);
       }
 
+      Lazy<Task<WeatherProviderResult>>? lazyTask = null;
       try
       {
-        var wasCached = _cache.TryGetValue(cacheKey, out Lazy<Task<WeatherProviderResult>>? cachedTask);
-        var lazyTask = cachedTask ?? _cache.GetOrCreate(
+        var ttl = isOutlook ? _outlookCacheExpiration : _liveCacheExpiration;
+        var (entryTask, wasCached) = _cache.GetOrAdd(
           cacheKey,
-          isOutlook ? _outlookCacheExpiration : _liveCacheExpiration,
+          ttl,
           () => new Lazy<Task<WeatherProviderResult>>(
             () => FetchProviderDataCoreAsync(adapter, endpoint, label, fallback),
             LazyThreadSafetyMode.ExecutionAndPublication));
+        lazyTask = entryTask;
 
         var cachedResult = await lazyTask.Value.WaitAsync(cancellationToken);
 
         if (cachedResult.Tone != WeatherBadgeTone.Live)
         {
           // Replace the entry explicitly so transient failures use the shorter fallback lifetime.
-          _cache.Set(cacheKey, lazyTask, _fallbackCacheExpiration);
+          _cache.ApplyFallbackLifetime(cacheKey, lazyTask, _fallbackCacheExpiration);
           return wasCached
             ? cachedResult with { Status = $"{cachedResult.Status} (Cached)", IsCached = true }
             : cachedResult;
@@ -335,7 +339,7 @@ namespace MyTransportAppWASM.Features.Weather.Services
       }
       catch (Exception)
       {
-        _cache.Remove(cacheKey);
+        _cache.Remove(cacheKey, lazyTask);
         return BuildSample(adapter, "Unavailable", WeatherBadgeTone.Error, fallback, endpoint);
       }
     }

@@ -67,7 +67,21 @@ namespace MyTransportAppWASM
       var languageService = host.Services.GetRequiredService<LanguageService>();
       languageService.LoadDefaultLanguage();
 
+      var jsRuntime = host.Services.GetRequiredService<IJSRuntime>();
+      _ = SyncStaticDataResetHourAsync(jsRuntime, cacheExpiration.Map.StaticDataResetHour);
+
       await host.RunAsync();
+    }
+
+    private static async Task SyncStaticDataResetHourAsync(IJSRuntime jsRuntime, int resetHour)
+    {
+      try
+      {
+        await jsRuntime.InvokeVoidAsync("syncStaticDataResetHour", resetHour);
+      }
+      catch
+      {
+      }
     }
 
     private static void ConfigureLogging(ILoggingBuilder logging, IConfiguration configuration)

@@ -183,23 +183,9 @@ namespace MyTransportAppWASM.Core.Auth
 
       var settings = new UserSettings();
 
-      // Read existing separate keys once for backwards-compatible guest preferences only.
+      // Seed guest preferences from the pre-Blazor theme key once.
       var theme = await _localStorage.GetStringAsync("theme-mode-global");
       if (!string.IsNullOrEmpty(theme)) settings.Theme = theme;
-
-      var language = await _localStorage.GetStringAsync("user_language");
-      if (!string.IsNullOrEmpty(language)) settings.Language = language;
-
-      var hasSeenWelcomeStr = await _localStorage.GetStringAsync("hasSeenWelcome");
-      if (hasSeenWelcomeStr == "true") settings.HasSeenWelcome = true;
-
-      var customLat = await _localStorage.GetDoubleAsync("custom_lat");
-      var customLng = await _localStorage.GetDoubleAsync("custom_lng");
-
-      if (customLat.HasValue && customLng.HasValue)
-      {
-        settings.DefaultLocation = new UserLocation { Latitude = customLat.Value, Longitude = customLng.Value };
-      }
 
       await SyncToLocalStorage(uid, settings);
       return settings;

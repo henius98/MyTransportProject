@@ -7,9 +7,11 @@ const wwwrootDir = new URL("../../MyTransportAppWASM/wwwroot/", import.meta.url)
 const devSource = await readFile(new URL("service-worker.js", wwwrootDir), "utf8");
 const prodSource = await readFile(new URL("service-worker.published.js", wwwrootDir), "utf8");
 const wasmGzipSource = await readFile(new URL("js/wasm-gzip.js", wwwrootDir), "utf8");
+const staticDataCacheSource = await readFile(new URL("js/static-data-cache.js", wwwrootDir), "utf8");
 const indexHtmlSource = await readFile(new URL("index.html", wwwrootDir), "utf8");
 const localScripts = new Map([
-  ["./js/wasm-gzip.js", wasmGzipSource]
+  ["./js/wasm-gzip.js", wasmGzipSource],
+  ["./js/static-data-cache.js", staticDataCacheSource]
 ]);
 
 function createMockCache() {
@@ -17,11 +19,20 @@ function createMockCache() {
   return {
     async match(req) {
       const key = typeof req === "string" ? req : req.url;
-      return store.get(key) || null;
+      const entry = store.get(key);
+      if (!entry) return null;
+      return typeof entry.clone === "function" ? entry.clone() : entry;
     },
     async put(req, res) {
       const key = typeof req === "string" ? req : req.url;
       store.set(key, res);
+    },
+    async keys() {
+      return Array.from(store.keys()).map(url => ({ url }));
+    },
+    async delete(req) {
+      const key = typeof req === "string" ? req : req.url;
+      return store.delete(key);
     },
     async addAll(requests) {
       for (const req of requests) {
@@ -58,33 +69,59 @@ function createMockCaches() {
   };
 }
 
-function setupDevWorker(mockFetch) {
+function createFakeDate(getNowMs) {
+  return class FakeDate extends Date {
+    constructor(...args) {
+      if (args.length === 0) {
+        super(getNowMs());
+      } else {
+        super(...args);
+      }
+    }
+    static now() {
+      return getNowMs();
+    }
+  };
+}
+
+function setupDevWorker(mockFetch, options = {}) {
   const handlers = {};
-  const mockCaches = createMockCaches();
+  const mockCaches = options.caches || createMockCaches();
+  let context;
   const self = {
+    origin: "https://example.com",
     location: new URL("https://example.com/service-worker.js"),
+    importScripts: (...paths) => {
+      for (const path of paths) {
+        const script = localScripts.get(path);
+        if (script) {
+          runInContext(script, context);
+        }
+      }
+    },
     addEventListener: (name, fn) => { handlers[name] = fn; },
     skipWaiting: () => {},
     clients: { claim: async () => {} }
   };
 
-  runInContext(
-    devSource,
-    createContext({
-      self,
-      URL,
-      Response,
-      caches: mockCaches,
-      fetch: mockFetch
-    })
-  );
+  context = createContext({
+    self,
+    URL,
+    Response,
+    Headers,
+    caches: mockCaches,
+    fetch: mockFetch,
+    ...(options.getNowMs ? { Date: createFakeDate(options.getNowMs) } : {})
+  });
+
+  runInContext(devSource, context);
 
   return { handlers, caches: mockCaches };
 }
 
-function setupProdWorker(mockFetch, manifestAssets = [], registrationScope = null, extraGlobals = {}) {
+function setupProdWorker(mockFetch, manifestAssets = [], registrationScope = null, extraGlobals = {}, sharedCaches = null) {
   const handlers = {};
-  const mockCaches = createMockCaches();
+  const mockCaches = sharedCaches || createMockCaches();
   let context;
   const self = {
     origin: "https://example.com",
@@ -130,6 +167,15 @@ function setupProdWorker(mockFetch, manifestAssets = [], registrationScope = nul
   return { handlers, caches: mockCaches };
 }
 
+function dispatchMessage(handlers, data) {
+  let promise = null;
+  handlers.message({
+    data,
+    waitUntil: (p) => { promise = p; }
+  });
+  return promise;
+}
+
 function dispatchFetch(handlers, url, mode) {
   let promise = null;
   handlers.fetch({
@@ -145,15 +191,14 @@ function dispatchInstall(handlers) {
   return promise;
 }
 
-test("dev worker intercepts and caches GTFS static routes via stale-while-revalidate", async () => {
+test("dev worker intercepts and caches GTFS static routes via cache-first with zero background revalidation", async () => {
   let fetchCount = 0;
-  const mockResponse = {
-    status: 200,
-    clone() { return { ...this }; }
-  };
   const mockFetch = async () => {
     fetchCount++;
-    return mockResponse;
+    return new Response(JSON.stringify({ data: [{ route_id: "U60" }] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
   };
 
   const { handlers } = setupDevWorker(mockFetch);
@@ -165,10 +210,11 @@ test("dev worker intercepts and caches GTFS static routes via stale-while-revali
   assert.equal(response.status, 200);
   assert.equal(fetchCount, 1);
 
-  // Subsequent fetch: should return cached version immediately
+  // Subsequent fetch within the same service day: served cache-first without hitting network
   const cachedPromise = dispatchFetch(handlers, "https://api.data.gov.my/gtfs-static/rapid-bus-kl/routes");
   const response2 = await cachedPromise;
   assert.equal(response2.status, 200);
+  assert.equal(fetchCount, 1);
 });
 
 test("dev worker caches recreation_centres.json and bypasses non-static requests", async () => {
@@ -220,7 +266,7 @@ test("prod worker pre-caches manifest assets and caches GTFS static routes with 
   assert.equal(offlineResult.status, 200);
 });
 
-test("dev worker intercepts and caches configured static routes, departures, and map endpoints", async () => {
+test("dev worker intercepts and caches configured static routes and map endpoints", async () => {
   let fetchCount = 0;
   const mockResponse = { status: 200, clone() { return { ...this }; } };
   const mockFetch = async () => {
@@ -232,17 +278,16 @@ test("dev worker intercepts and caches configured static routes, departures, and
 
   for (const [label, url] of [
     ["/data/routes", "http://localhost:8787/rapid-bus-kl/data/routes?limit=100"],
-    ["/departures", "http://localhost:8787/rapid-bus-kl/departures?stop_id=123"],
     ["/map", "http://localhost:8787/rapid-bus-kl/map?route_id=U60"]
   ]) {
     const resPromise = dispatchFetch(handlers, url);
     assert.ok(resPromise, `${label} should be intercepted by dev worker`);
     assert.equal((await resPromise).status, 200);
   }
-  assert.equal(fetchCount, 3);
+  assert.equal(fetchCount, 2);
 });
 
-test("prod worker caches configured static routes and departures with offline fallback", async () => {
+test("prod worker caches configured static routes with offline fallback", async () => {
   const manifest = [
     { url: "data/recreation_centres.json", hash: "sha256-abc" },
     { url: "index.html", hash: "sha256-def" }
@@ -627,4 +672,225 @@ test("wasm-gzip rejects empty integrity and gzipped non-WASM HTML fallback respo
   // Even if an attacker or proxy matched SHA-256 or served gzipped HTML, non-WASM bytes must be rejected.
   const rejected = await context.wasmGzip.fetchDecompressedWasm("https://example.com/_framework/app.wasm.gz", htmlHash);
   assert.equal(rejected, null);
+});
+
+test("static-data-cache-v1 expires at daily 04:00 MYT, prunes old dated maps, and never serves expired entries on failure", async () => {
+  let nowMs = Date.parse("2026-11-26T23:00:00+08:00");
+  let fetchCount = 0;
+  let nextStatus = 200;
+  let failNetwork = false;
+
+  const mockFetch = async (req) => {
+    fetchCount++;
+    if (failNetwork) {
+      throw new TypeError("Offline");
+    }
+    const url = typeof req === "string" ? req : req.url;
+    return new Response(JSON.stringify({ url, fetchCount }), {
+      status: nextStatus,
+      headers: { "Content-Type": "application/json" }
+    });
+  };
+
+  const { handlers, caches } = setupProdWorker(
+    mockFetch,
+    [],
+    null,
+    { Date: createFakeDate(() => nowMs) }
+  );
+
+  const routesUrl = "https://worker.example/rapid-rail-kl/data/routes";
+  const oldMapUrl = "https://worker.example/rapid-rail-kl/map?date=2026-11-26";
+  const freqUrl = "https://worker.example/rapid-rail-kl/data/frequencies";
+
+  // Initial fetches at 23:00 MYT populate static-data-cache-v1 with X-Cache-Day = 2026-11-26
+  assert.equal((await dispatchFetch(handlers, routesUrl)).status, 200);
+  assert.equal((await dispatchFetch(handlers, oldMapUrl)).status, 200);
+  assert.equal((await dispatchFetch(handlers, freqUrl)).status, 200);
+  assert.equal(fetchCount, 3);
+
+  // At 03:59:59 MYT next morning: still same service day -> cache-first with zero network calls
+  nowMs = Date.parse("2026-11-27T03:59:59+08:00");
+  const hitRoutes = await dispatchFetch(handlers, routesUrl);
+  assert.equal(hitRoutes.status, 200);
+  assert.equal(hitRoutes.headers.get("X-Cache-Day"), "2026-11-26");
+  assert.equal(fetchCount, 3);
+
+  // At 04:00:00 MYT: expired -> prunes all 2026-11-26 entries (including unrequested oldMapUrl) and fetches fresh
+  nowMs = Date.parse("2026-11-27T04:00:00+08:00");
+  const refreshedRoutes = await dispatchFetch(handlers, routesUrl);
+  assert.equal(refreshedRoutes.status, 200);
+  assert.equal(fetchCount, 4);
+
+  const staticCache = await caches.open("static-data-cache-v1");
+  assert.equal(await staticCache.match(oldMapUrl), null, "Old dated /map entry must be pruned after 04:00 MYT");
+  assert.equal(await staticCache.match(freqUrl), null, "Old /data/frequencies entry must be pruned after 04:00 MYT");
+  assert.equal((await staticCache.match(routesUrl))?.headers.get("X-Cache-Day"), "2026-11-27");
+
+  // Next day at 04:00:00 MYT with network failure: never serve expired entry, return 503
+  nowMs = Date.parse("2026-11-28T04:00:00+08:00");
+  failNetwork = true;
+  const offlineExpired = await dispatchFetch(handlers, routesUrl);
+  assert.equal(offlineExpired.status, 503);
+
+  // Non-200 response is passed through without caching
+  failNetwork = false;
+  nextStatus = 502;
+  const badGateway = await dispatchFetch(handlers, routesUrl);
+  assert.equal(badGateway.status, 502);
+  assert.equal(await staticCache.match(routesUrl), null);
+});
+
+test("static-data-cache-v1 persists custom StaticDataResetHour from postMessage across SW restarts", async () => {
+  let nowMs = Date.parse("2026-11-27T05:30:00+08:00");
+  let fetchCount = 0;
+  const sharedCaches = createMockCaches();
+  const mockFetch = async () => {
+    fetchCount++;
+    return new Response("{\"data\":[]}", { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+
+  // First SW instance receives StaticDataResetHour = 6 from Blazor startup
+  const sw1 = setupDevWorker(mockFetch, { caches: sharedCaches, getNowMs: () => nowMs });
+  await dispatchMessage(sw1.handlers, { type: "SET_STATIC_DATA_RESET_HOUR", resetHour: 6 });
+
+  const routesUrl = "http://localhost:8787/rapid-bus-kl/data/routes";
+  assert.equal((await dispatchFetch(sw1.handlers, routesUrl)).status, 200);
+  assert.equal(fetchCount, 1);
+
+  // Simulate SW idle termination + fresh restart sharing Cache Storage (no new postMessage)
+  const sw2 = setupDevWorker(mockFetch, { caches: sharedCaches, getNowMs: () => nowMs });
+
+  // At 05:59:59 MYT: still before 06:00 MYT -> cache hit
+  nowMs = Date.parse("2026-11-27T05:59:59+08:00");
+  assert.equal((await dispatchFetch(sw2.handlers, routesUrl)).status, 200);
+  assert.equal(fetchCount, 1);
+
+  // At 06:00:00 MYT: expires cleanly and preserves persisted config entry during prune
+  nowMs = Date.parse("2026-11-27T06:00:00+08:00");
+  assert.equal((await dispatchFetch(sw2.handlers, routesUrl)).status, 200);
+  assert.equal(fetchCount, 2);
+
+  const staticCache = await sharedCaches.open("static-data-cache-v1");
+  const configEntry = await staticCache.match("https://example.com/__static-data-cache-config");
+  assert.ok(configEntry, "Persisted resetHour config entry must survive daily prune");
+  assert.deepEqual(await configEntry.json(), { resetHour: 6 });
+});
+
+test("static-data-cache-v1 strips Content-Encoding/Content-Length and returns live 200 when Cache Storage fails", async () => {
+  const routesUrl = "https://worker.example/rapid-rail-kl/data/routes";
+  const payload = JSON.stringify({ data: [{ route_id: "KJ" }] });
+
+  // Compressed response headers must not be kept on the decompressed cached copy.
+  const swHeader = setupDevWorker(async () => new Response(payload, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Encoding": "gzip",
+      "Content-Length": "12"
+    }
+  }));
+  const liveRes = await dispatchFetch(swHeader.handlers, routesUrl);
+  assert.equal(liveRes.status, 200);
+  const cachedRes = await (await swHeader.caches.open("static-data-cache-v1")).match(routesUrl);
+  assert.ok(cachedRes);
+  assert.equal(cachedRes.headers.get("Content-Encoding"), null);
+  assert.equal(cachedRes.headers.get("Content-Length"), null);
+  assert.equal(cachedRes.headers.get("Content-Type"), "application/json");
+  assert.equal(await cachedRes.text(), payload);
+
+  // QuotaExceededError on cache.put must still return the live 200 response.
+  const baseCaches = createMockCaches();
+  const quotaCaches = {
+    async open(name) {
+      const inner = await baseCaches.open(name);
+      return {
+        match: (req) => inner.match(req),
+        keys: () => inner.keys(),
+        delete: (req) => inner.delete(req),
+        async put() {
+          throw new DOMException("Quota exceeded", "QuotaExceededError");
+        }
+      };
+    }
+  };
+  const swQuota = setupDevWorker(
+    async () => new Response(payload, { status: 200, headers: { "Content-Type": "application/json" } }),
+    { caches: quotaCaches }
+  );
+  const quotaRes = await dispatchFetch(swQuota.handlers, routesUrl);
+  assert.equal(quotaRes.status, 200);
+  assert.equal(await quotaRes.text(), payload);
+
+  // caches.open failure must still fall through to network fetch.
+  const brokenCaches = {
+    async open() {
+      throw new Error("Cache Storage unavailable");
+    }
+  };
+  const swBroken = setupDevWorker(
+    async () => new Response(payload, { status: 200, headers: { "Content-Type": "application/json" } }),
+    { caches: brokenCaches }
+  );
+  const brokenRes = await dispatchFetch(swBroken.handlers, routesUrl);
+  assert.equal(brokenRes.status, 200);
+  assert.equal(await brokenRes.text(), payload);
+});
+
+test("prod worker routes uncached recreation_centres.json through static-data-cache-v1 with X-Cache-Day and index.html reuses CONFIG_MESSAGE_TYPE", async () => {
+  let fetchCount = 0;
+  const rcUrl = "https://example.com/data/recreation_centres.json";
+  const { handlers, caches } = setupProdWorker(
+    async () => {
+      fetchCount++;
+      return new Response("{\"stations\":[]}", {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    },
+    [] // intentionally omit recreation_centres.json from offline manifest
+  );
+
+  const first = await dispatchFetch(handlers, rcUrl);
+  assert.equal(first.status, 200);
+  assert.equal(fetchCount, 1);
+
+  const staticCache = await caches.open("static-data-cache-v1");
+  const cachedRc = await staticCache.match(rcUrl);
+  assert.ok(cachedRc, "Uncached recreation_centres.json must be stored in static-data-cache-v1");
+  assert.ok(cachedRc.headers.get("X-Cache-Day"), "Stored recreation_centres.json must be tagged with X-Cache-Day");
+
+  const second = await dispatchFetch(handlers, rcUrl);
+  assert.equal(second.status, 200);
+  assert.equal(fetchCount, 1);
+
+  // Verify index.html loads static-data-cache.js and reuses CONFIG_MESSAGE_TYPE without hardcoding it
+  assert.match(indexHtmlSource, /<script src="js\/static-data-cache\.js" defer><\/script>/);
+  assert.doesNotMatch(indexHtmlSource, /SET_STATIC_DATA_RESET_HOUR/);
+
+  const swMatch = indexHtmlSource.match(/<script>\s*\(function \(\) \{\s*var pendingStaticDataResetHour[\s\S]*?<\/script>/);
+  assert.ok(swMatch, "Expected syncStaticDataResetHour inline script in index.html");
+  const swScript = swMatch[0].replace(/^<script>|<\/script>$/g, "");
+
+  const posted = [];
+  const controller = { postMessage: (msg) => posted.push(msg) };
+  const windowObj = { addEventListener: () => {} };
+  const context = createContext({
+    window: windowObj,
+    self: windowObj,
+    navigator: {
+      serviceWorker: {
+        controller,
+        addEventListener: () => {},
+        ready: Promise.resolve({ active: controller })
+      }
+    }
+  });
+  runInContext(staticDataCacheSource, context);
+  windowObj.staticDataCache = context.staticDataCache;
+  runInContext(swScript, context);
+
+  windowObj.syncStaticDataResetHour(6);
+  assert.equal(posted.length, 1);
+  assert.deepEqual({ ...posted[0] }, { type: "SET_STATIC_DATA_RESET_HOUR", resetHour: 6 });
 });

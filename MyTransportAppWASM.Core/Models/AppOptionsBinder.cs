@@ -10,7 +10,6 @@ namespace MyTransportAppWASM.Core.Models
       var map = section.GetSection("Map");
       return new CacheExpirationOptions
       {
-        SizeLimit = ParseInt(section["SizeLimit"], 200),
         Weather = new WeatherCacheExpirationOptions
         {
           LiveSeconds = ParseInt(weather["LiveSeconds"], 0),
@@ -19,7 +18,11 @@ namespace MyTransportAppWASM.Core.Models
         },
         Map = new MapCacheExpirationOptions
         {
-          GeolocationSeconds = ParseInt(map["GeolocationSeconds"], 0)
+          GeolocationSeconds = ParseInt(map["GeolocationSeconds"], 0),
+          StaticDataResetHour = Math.Clamp(
+            ParseInt(map["StaticDataResetHour"], MapCacheExpirationOptions.DefaultStaticDataResetHour),
+            0,
+            23)
         }
       };
     }

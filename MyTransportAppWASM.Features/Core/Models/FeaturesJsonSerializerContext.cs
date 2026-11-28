@@ -12,6 +12,7 @@ namespace MyTransportAppWASM.Core.Models
   [JsonSerializable(typeof(ApiResponse<FortuneData>))]
   [JsonSerializable(typeof(CreateProfileRequest))]
   [JsonSerializable(typeof(DateFortuneRequest))]
+  [JsonSerializable(typeof(CachedDateFortune))]
   internal partial class FeaturesJsonSerializerContext : JsonSerializerContext
   {
   }

@@ -33,7 +33,6 @@ public class MapComponentRenderingTests
                 },
                 HasLiveBus = true,
                 LiveTotalDurationSeconds = 900,
-                IsAuspicious = true,
                 NearestBuses =
                 [
                     new LiveBusInfo
@@ -51,8 +50,7 @@ public class MapComponentRenderingTests
                     DurationSeconds = 1800,
                     EncodedPolyline = "def"
                 },
-                HasLiveBus = false,
-                IsAuspicious = false
+                HasLiveBus = false
             }
         };
 
@@ -69,7 +67,6 @@ public class MapComponentRenderingTests
 
     Assert.Contains("Option 1", html);
     Assert.Contains("Option 2", html);
-    Assert.Contains("🌟 Auspicious", html);
     Assert.Contains("Live", html);
     Assert.Contains("Scheduled", html);
     Assert.Contains("Live ETA: 15 mins", html);
@@ -178,7 +175,7 @@ public class MapComponentRenderingTests
             new()
             {
                 Name = "Rapid Bus KL",
-                StaticData = new TransportStaticData("https://example.com", "routes.json", "map.geojson", "departures.json")
+                StaticData = new TransportStaticData("https://example.com", "routes.json", "map.geojson")
             },
             new()
             {
@@ -226,7 +223,7 @@ public class MapComponentRenderingTests
             new()
             {
                 Name = "Rapid Bus KL",
-                StaticData = new TransportStaticData("https://example.com", "routes.json", "map.geojson", "departures.json")
+                StaticData = new TransportStaticData("https://example.com", "routes.json", "map.geojson")
             }
         };
 
@@ -372,7 +369,7 @@ public class MapComponentRenderingTests
   [Fact]
   public async Task Map_FiltersAndRestoresVehicles_WhenStaticRouteSelectedAndCleared()
   {
-    var staticSource = new TransportStaticData("https://worker.example/rapid", "/routes", "/map", "/departures");
+    var staticSource = new TransportStaticData("https://worker.example/rapid", "/routes", "/map");
     var providers = new[]
     {
             new TransportProvider("Rapid Bus KL", "https://feed.test/kl", 3.139, 101.6869, 30, "Bus", staticSource),
@@ -391,7 +388,7 @@ public class MapComponentRenderingTests
     var staticData = new Mock<ITransportStaticDataService>();
     staticData.Setup(s => s.GetRoutesAsync(staticSource, It.IsAny<CancellationToken>()))
         .ReturnsAsync([new StaticRoute("30000019", "401"), new StaticRoute("U4200", "420")]);
-    staticData.Setup(s => s.GetMapAsync(staticSource, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+    staticData.Setup(s => s.GetMapAsync(staticSource, It.IsAny<string>(), null, It.IsAny<CancellationToken>()))
         .ReturnsAsync("""{"type":"FeatureCollection","features":[]}""");
 
     var location = new Mock<ILocationService>();
@@ -457,7 +454,7 @@ public class MapComponentRenderingTests
   [Fact]
   public async Task Map_ShowsAndClearsFullRoute_WhenVehicleSelectedThenDeselected()
   {
-    var staticSource = new TransportStaticData("https://worker.example/rapid", "/routes", "/map", "/departures");
+    var staticSource = new TransportStaticData("https://worker.example/rapid", "/routes", "/map");
     var providers = new[]
     {
             new TransportProvider("Rapid Bus KL", "https://feed.test/kl", 3.139, 101.6869, 30, "Bus", staticSource),
@@ -476,7 +473,7 @@ public class MapComponentRenderingTests
     var staticData = new Mock<ITransportStaticDataService>();
     staticData.Setup(s => s.GetRoutesAsync(staticSource, It.IsAny<CancellationToken>()))
         .ReturnsAsync([new StaticRoute("30000019", "401"), new StaticRoute("U4200", "420")]);
-    staticData.Setup(s => s.GetMapAsync(staticSource, "U4200", It.IsAny<CancellationToken>()))
+    staticData.Setup(s => s.GetMapAsync(staticSource, "U4200", null, It.IsAny<CancellationToken>()))
         .ReturnsAsync("""{"type":"FeatureCollection","features":[]}""");
 
     var location = new Mock<ILocationService>();
@@ -557,7 +554,7 @@ public class MapComponentRenderingTests
   [Fact]
   public async Task Map_RefreshBuses_ClearsAllRoutesAndFetchesLatestVehicles()
   {
-    var staticSource = new TransportStaticData("https://worker.example/rapid", "/routes", "/map", "/departures");
+    var staticSource = new TransportStaticData("https://worker.example/rapid", "/routes", "/map");
     var providers = new[]
     {
       new TransportProvider("Rapid Bus KL", "https://feed.test/kl", 3.139, 101.6869, 30, "Bus", staticSource)
@@ -598,7 +595,7 @@ public class MapComponentRenderingTests
     var staticData = new Mock<ITransportStaticDataService>();
     staticData.Setup(s => s.GetRoutesAsync(staticSource, It.IsAny<CancellationToken>()))
       .ReturnsAsync([new StaticRoute("30000019", "401"), new StaticRoute("U4200", "420")]);
-    staticData.Setup(s => s.GetMapAsync(staticSource, "U4200", It.IsAny<CancellationToken>()))
+    staticData.Setup(s => s.GetMapAsync(staticSource, "U4200", null, It.IsAny<CancellationToken>()))
       .ReturnsAsync("""{"type":"FeatureCollection","features":[]}""");
 
     var location = new Mock<ILocationService>();

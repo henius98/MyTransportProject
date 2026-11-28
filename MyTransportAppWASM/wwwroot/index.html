@@ -231,6 +231,7 @@
     <script type="importmap"></script>
     <script src="js/theme-manager.js" defer></script>
     <script src="js/wasm-gzip.js" defer></script>
+    <script src="js/static-data-cache.js" defer></script>
     <script
       src="_framework/blazor.webassembly#[.{fingerprint}].js"
       autostart="false"
@@ -276,24 +277,55 @@
       })();
     </script>
     <script>
-      if ("serviceWorker" in navigator) {
-        window.addEventListener(
-          "load",
-          function () {
-            var register = function () {
-              navigator.serviceWorker.register("service-worker.js", {
-                updateViaCache: "none",
-              });
-            };
-            if ("requestIdleCallback" in window) {
-              requestIdleCallback(register, { timeout: 2500 });
-            } else {
-              setTimeout(register, 1000);
+      (function () {
+        var pendingStaticDataResetHour = null;
+        function postStaticDataResetHour(worker, resetHour) {
+          var messageType = window.staticDataCache && window.staticDataCache.CONFIG_MESSAGE_TYPE;
+          if (worker && typeof worker.postMessage === "function" && typeof resetHour === "number" && messageType) {
+            worker.postMessage({ type: messageType, resetHour: resetHour });
+          }
+        }
+        window.syncStaticDataResetHour = function (resetHour) {
+          pendingStaticDataResetHour = resetHour;
+          if (!("serviceWorker" in navigator)) {
+            return;
+          }
+          postStaticDataResetHour(navigator.serviceWorker.controller, resetHour);
+          if (navigator.serviceWorker.ready && typeof navigator.serviceWorker.ready.then === "function") {
+            navigator.serviceWorker.ready
+              .then(function (registration) {
+                if (registration && registration.active && pendingStaticDataResetHour !== null) {
+                  postStaticDataResetHour(registration.active, pendingStaticDataResetHour);
+                }
+              })
+              .catch(function () {});
+          }
+        };
+
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.addEventListener("controllerchange", function () {
+            if (pendingStaticDataResetHour !== null) {
+              postStaticDataResetHour(navigator.serviceWorker.controller, pendingStaticDataResetHour);
             }
-          },
-          { once: true },
-        );
-      }
+          });
+          window.addEventListener(
+            "load",
+            function () {
+              var register = function () {
+                navigator.serviceWorker.register("service-worker.js", {
+                  updateViaCache: "none",
+                });
+              };
+              if ("requestIdleCallback" in window) {
+                requestIdleCallback(register, { timeout: 2500 });
+              } else {
+                setTimeout(register, 1000);
+              }
+            },
+            { once: true },
+          );
+        }
+      })();
     </script>
 
     <!-- Dialog Helper and Fallback -->

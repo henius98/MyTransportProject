@@ -98,14 +98,10 @@ firstTransit.DepartureStopName)
 
           <div class="route-option__meta small mt-1 tabular-nums">
             <div class="route-option__badges mb-1">
-              @if (route.IsAuspicious)
-              {
-                <span class="badge bg-warning text-dark me-1" title="Aligns with lucky directions or times">🌟 Auspicious</span>
-              }
-                <span class="badge @(route.HasLiveBus ? "bg-success" : "bg-secondary")">
-                  @(route.HasLiveBus ? T("Live", "Live") : T("Scheduled", "Scheduled"))
-                </span>
-              </div>
+              <span class="badge @(route.HasLiveBus ? "bg-success" : "bg-secondary")">
+                @(route.HasLiveBus ? T("Live", "Live") : T("Scheduled", "Scheduled"))
+              </span>
+            </div>
               <div class="route-option__etas">
                 <span>Base ETA: @RoundMinutes(r.DurationSeconds) mins</span>
                 @if (route.HasLiveBus)

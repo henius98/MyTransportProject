@@ -39,10 +39,8 @@ public class OpenMeteoWeatherCardTests
 
     var options = LoadOpenMeteoOptions();
     Uri? outlookUri = null;
-    using var cache = new AppMemoryCache();
     var realPlanner = new WeatherPlannerService(
         new HttpClient(new CapturingHandler(uri => outlookUri = uri)),
-        cache,
         Options.Create(new CacheExpirationOptions
         {
           Weather = new() { LiveSeconds = 600, OutlookSeconds = 10800, FallbackSeconds = 30 }
@@ -105,10 +103,8 @@ public class OpenMeteoWeatherCardTests
               }
             }
             """;
-    using var cache = new AppMemoryCache();
     var realPlanner = new WeatherPlannerService(
         new HttpClient(new CapturingHandler(uri => hourlyUri = uri, rawHourlyJson)),
-        cache,
         Options.Create(new CacheExpirationOptions
         {
           Weather = new() { LiveSeconds = 600, OutlookSeconds = 10800, FallbackSeconds = 30 }

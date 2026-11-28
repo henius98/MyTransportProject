@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text.Json;
 using Microsoft.JSInterop;
 
@@ -52,27 +51,6 @@ public sealed class BrowserStorageService(IJSRuntime jsRuntime) : IBrowserStorag
     }
   }
 
-  public async ValueTask<double?> GetDoubleAsync(
-    string key,
-    CancellationToken cancellationToken = default)
-  {
-    try
-    {
-      var value = await jsRuntime.InvokeAsync<string?>(
-        "localStorage.getItem",
-        cancellationToken,
-        [key]);
-
-      return double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var result)
-        ? result
-        : null;
-    }
-    catch (Exception ex) when (ex is not OperationCanceledException)
-    {
-      return null;
-    }
-  }
-
   public async ValueTask SetStringAsync(
     string key,
     string value,
@@ -81,6 +59,19 @@ public sealed class BrowserStorageService(IJSRuntime jsRuntime) : IBrowserStorag
     try
     {
       await jsRuntime.InvokeVoidAsync("localStorage.setItem", cancellationToken, key, value);
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException)
+    {
+    }
+  }
+
+  public async ValueTask RemoveAsync(
+    string key,
+    CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      await jsRuntime.InvokeVoidAsync("localStorage.removeItem", cancellationToken, key);
     }
     catch (Exception ex) when (ex is not OperationCanceledException)
     {

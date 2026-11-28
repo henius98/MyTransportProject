@@ -10,14 +10,12 @@ public class BrowserStorageServiceTests
     var runtime = new StorageJsRuntime(new Dictionary<string, string>
     {
       ["theme"] = "dark",
-      ["api-key"] = "\"legacy-secret\"",
-      ["latitude"] = "3.139"
+      ["api-key"] = "\"legacy-secret\""
     });
     var storage = new BrowserStorageService(runtime);
 
     Assert.Equal("dark", await storage.GetStringAsync("theme"));
     Assert.Equal("legacy-secret", await storage.GetStringAsync("api-key"));
-    Assert.Equal(3.139, await storage.GetDoubleAsync("latitude"));
   }
 
   [Fact]
@@ -32,17 +30,31 @@ public class BrowserStorageServiceTests
   }
 
   [Fact]
+  public async Task RemovesValuesFromStorage()
+  {
+    var runtime = new StorageJsRuntime(new Dictionary<string, string>
+    {
+      ["fortune_cache_v1"] = "{\"date\":\"2026-10-12\"}"
+    });
+    var storage = new BrowserStorageService(runtime);
+
+    await storage.RemoveAsync("fortune_cache_v1");
+
+    Assert.False(runtime.Values.ContainsKey("fortune_cache_v1"));
+    Assert.Null(await storage.GetStringAsync("fortune_cache_v1"));
+  }
+
+  [Fact]
   public async Task FailingStorage_ReturnsDefaultWithoutThrowing()
   {
     var runtime = new FailingStorageJsRuntime();
     var storage = new BrowserStorageService(runtime);
 
     var str = await storage.GetStringAsync("key");
-    var num = await storage.GetDoubleAsync("key");
     await storage.SetStringAsync("key", "val");
+    await storage.RemoveAsync("key");
 
     Assert.Null(str);
-    Assert.Null(num);
   }
 
   private sealed class FailingStorageJsRuntime : IJSRuntime
@@ -76,6 +88,12 @@ public class BrowserStorageServiceTests
       {
         Values.TryGetValue(key, out var value);
         return ValueTask.FromResult(value is null ? default! : (TValue)(object)value);
+      }
+
+      if (string.Equals(identifier, "localStorage.removeItem", StringComparison.Ordinal))
+      {
+        Values.Remove(key);
+        return ValueTask.FromResult(default(TValue)!);
       }
 
       Assert.Equal("localStorage.setItem", identifier);

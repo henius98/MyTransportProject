@@ -18,6 +18,13 @@ internal sealed record CompiledFrequencyWindow(
   int EndSecs,
   int HeadwaySecs);
 
+internal readonly record struct StopScheduleFeature(
+  int FeatureIndex,
+  string RouteId,
+  List<string>? TripIds,
+  string ArrivalsRaw,
+  JsonElement? Geometry);
+
 internal sealed record CompiledStopPoint(
   int ArrivalOffsetSecs,
   double Lat,
@@ -125,7 +132,7 @@ internal static class ScheduledRailPositionEstimator
       foreach (var freq in trip.Frequencies)
       {
         // Match GTFS / worker half-open window [start_secs, end_secs).
-        var lastWindowDep = freq.StartSecs + ((freq.EndSecs - freq.StartSecs - 1) / freq.HeadwaySecs) * freq.HeadwaySecs;
+        var lastWindowDep = ComputeLastWindowDeparture(freq);
         var rangeStart = Math.Max(freq.StartSecs, minActiveDep);
         var rangeEnd = Math.Min(lastWindowDep, nowSecs);
         if (rangeStart > rangeEnd)
@@ -166,7 +173,15 @@ internal static class ScheduledRailPositionEstimator
     return vehicles;
   }
 
-  private static Dictionary<string, List<CompiledFrequencyWindow>> IndexFrequenciesByTrip(
+  internal static int CompareFrequencyWindows(CompiledFrequencyWindow a, CompiledFrequencyWindow b)
+  {
+    var cmp = a.StartSecs.CompareTo(b.StartSecs);
+    if (cmp != 0) return cmp;
+    cmp = a.EndSecs.CompareTo(b.EndSecs);
+    return cmp != 0 ? cmp : a.HeadwaySecs.CompareTo(b.HeadwaySecs);
+  }
+
+  internal static Dictionary<string, List<CompiledFrequencyWindow>> IndexFrequenciesByTrip(
     IReadOnlyList<StaticFrequency> frequencies)
   {
     var byTrip = new Dictionary<string, List<CompiledFrequencyWindow>>(StringComparer.Ordinal);
@@ -195,16 +210,80 @@ internal static class ScheduledRailPositionEstimator
 
     foreach (var list in byTrip.Values)
     {
-      list.Sort(static (a, b) =>
-      {
-        var cmp = a.StartSecs.CompareTo(b.StartSecs);
-        if (cmp != 0) return cmp;
-        cmp = a.EndSecs.CompareTo(b.EndSecs);
-        return cmp != 0 ? cmp : a.HeadwaySecs.CompareTo(b.HeadwaySecs);
-      });
+      list.Sort(CompareFrequencyWindows);
     }
 
     return byTrip;
+  }
+
+  internal static void ScanMapFeatures(
+    JsonElement features,
+    string? routeIdFilter,
+    bool collectSchedules,
+    Dictionary<string, SortedSet<string>> routeTripIds,
+    List<StopScheduleFeature> pendingStops,
+    HashSet<int>? includedFeatures = null,
+    Action<string, JsonElement, JsonElement, List<string>?>? onRouteFeature = null)
+  {
+    var hasRouteFilter = !string.IsNullOrEmpty(routeIdFilter);
+    var featureIndex = 0;
+
+    foreach (var feature in features.EnumerateArray())
+    {
+      if (feature.TryGetProperty("properties", out var props) && props.ValueKind == JsonValueKind.Object)
+      {
+        var routeId = ReadString(props, "route_id");
+        if (hasRouteFilter && !string.Equals(routeId, routeIdFilter, StringComparison.OrdinalIgnoreCase))
+        {
+          featureIndex++;
+          continue;
+        }
+
+        includedFeatures?.Add(featureIndex);
+
+        if (collectSchedules)
+        {
+          var hasGeometry = feature.TryGetProperty("geometry", out var geometry);
+          var kind = ReadString(props, "kind");
+          if (string.Equals(kind, "route", StringComparison.OrdinalIgnoreCase))
+          {
+            var featureTripIds = ReadStringArray(props, "trip_ids");
+            if (!string.IsNullOrWhiteSpace(routeId) && featureTripIds != null)
+            {
+              if (!routeTripIds.TryGetValue(routeId, out var set))
+              {
+                set = new SortedSet<string>(StringComparer.Ordinal);
+                routeTripIds[routeId] = set;
+              }
+              foreach (var tripId in featureTripIds)
+              {
+                set.Add(tripId);
+              }
+            }
+
+            if (hasGeometry && onRouteFeature != null && !string.IsNullOrWhiteSpace(routeId))
+            {
+              onRouteFeature(routeId, props, geometry, featureTripIds);
+            }
+          }
+          else if (string.Equals(kind, "stop", StringComparison.OrdinalIgnoreCase))
+          {
+            var arrivalsRaw = ReadString(props, "arrival_times");
+            if (!string.IsNullOrWhiteSpace(routeId) && !string.IsNullOrWhiteSpace(arrivalsRaw))
+            {
+              pendingStops.Add(new StopScheduleFeature(
+                featureIndex,
+                routeId,
+                ReadStringArray(props, "trip_ids"),
+                arrivalsRaw,
+                hasGeometry ? geometry : null));
+            }
+          }
+        }
+      }
+
+      featureIndex++;
+    }
   }
 
   private static void ParseMapGeoJson(
@@ -223,22 +302,18 @@ internal static class ScheduledRailPositionEstimator
       return;
     }
 
-    var pendingStops = new List<(string RouteId, double Lat, double Lng, List<string>? TripIds, string Arrivals)>();
+    var pendingStops = new List<StopScheduleFeature>();
 
-    foreach (var feature in features.EnumerateArray())
-    {
-      if (!feature.TryGetProperty("properties", out var props) ||
-          !feature.TryGetProperty("geometry", out var geometry))
+    ScanMapFeatures(
+      features,
+      routeIdFilter: null,
+      collectSchedules: true,
+      routeTripIds,
+      pendingStops,
+      onRouteFeature: (routeId, props, geometry, featureTripIds) =>
       {
-        continue;
-      }
-
-      var kind = ReadString(props, "kind");
-      if (string.Equals(kind, "route", StringComparison.OrdinalIgnoreCase))
-      {
-        var routeId = ReadString(props, "route_id");
         var shortName = ReadString(props, "route_short_name");
-        if (!string.IsNullOrWhiteSpace(routeId) && !string.IsNullOrWhiteSpace(shortName))
+        if (!string.IsNullOrWhiteSpace(shortName))
         {
           routeShortNames.TryAdd(routeId, shortName);
         }
@@ -264,75 +339,35 @@ internal static class ScheduledRailPositionEstimator
           }
         }
 
-        if (!string.IsNullOrWhiteSpace(routeId))
+        if (featureTripIds != null)
         {
-          var featureTripIds = ReadStringArray(props, "trip_ids");
-          if (featureTripIds != null)
+          foreach (var tripId in featureTripIds)
           {
-            if (!routeTripIds.TryGetValue(routeId, out var set))
-            {
-              set = new SortedSet<string>(StringComparer.Ordinal);
-              routeTripIds[routeId] = set;
-            }
-
-            foreach (var tripId in featureTripIds)
-            {
-              set.Add(tripId);
-              tripMeta.TryAdd(tripId, new TripMeta(routeId, shapeId, InferDirectionId(tripId, shapeId)));
-            }
+            tripMeta.TryAdd(tripId, new TripMeta(routeId, shapeId, InferDirectionId(tripId, shapeId)));
           }
         }
-      }
-      else if (string.Equals(kind, "stop", StringComparison.OrdinalIgnoreCase))
-      {
-        var routeId = ReadString(props, "route_id");
-        var arrivalsRaw = ReadString(props, "arrival_times");
-        if (string.IsNullOrWhiteSpace(routeId) ||
-            string.IsNullOrWhiteSpace(arrivalsRaw) ||
-            !string.Equals(ReadString(geometry, "type"), "Point", StringComparison.OrdinalIgnoreCase) ||
-            !geometry.TryGetProperty("coordinates", out var coord) ||
-            !TryReadGeoJsonCoordinate(coord, out var lat, out var lng))
-        {
-          continue;
-        }
-
-        pendingStops.Add((routeId, lat, lng, ReadStringArray(props, "trip_ids"), arrivalsRaw));
-      }
-    }
+      });
 
     Dictionary<string, string[]>? sortedRouteTrips = null;
 
     foreach (var stop in pendingStops)
     {
-      var arrivals = stop.Arrivals.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-      if (arrivals.Length == 0)
+      if (stop.Geometry is not { } geometry ||
+          !string.Equals(ReadString(geometry, "type"), "Point", StringComparison.OrdinalIgnoreCase) ||
+          !geometry.TryGetProperty("coordinates", out var coord) ||
+          !TryReadGeoJsonCoordinate(coord, out var lat, out var lng))
       {
         continue;
       }
 
-      // Prefer explicit per-stop trip_ids (supports asymmetric/express trips); fall back to sorted route trip_ids when symmetric.
-      IReadOnlyList<string>? alignedTripIds = null;
-      if (stop.TripIds != null && stop.TripIds.Count == arrivals.Length)
-      {
-        alignedTripIds = stop.TripIds;
-      }
-      else if (stop.TripIds == null)
-      {
-        sortedRouteTrips ??= new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
-        if (!sortedRouteTrips.TryGetValue(stop.RouteId, out var fallbackTripIds) &&
-            routeTripIds.TryGetValue(stop.RouteId, out var set))
-        {
-          fallbackTripIds = set.ToArray();
-          sortedRouteTrips[stop.RouteId] = fallbackTripIds;
-        }
-
-        if (fallbackTripIds != null && fallbackTripIds.Length == arrivals.Length)
-        {
-          alignedTripIds = fallbackTripIds;
-        }
-      }
-
-      if (alignedTripIds == null)
+      if (!TryResolveStopTripArrivals(
+            stop.ArrivalsRaw,
+            stop.TripIds,
+            stop.RouteId,
+            routeTripIds,
+            ref sortedRouteTrips,
+            out var alignedTripIds,
+            out var arrivals))
       {
         continue;
       }
@@ -353,9 +388,55 @@ internal static class ScheduledRailPositionEstimator
           list = [];
           tripStops[tripId] = list;
         }
-        list.Add(new RawTripStop(stop.Lat, stop.Lng, arrSecs));
+        list.Add(new RawTripStop(lat, lng, arrSecs));
       }
     }
+  }
+
+  internal static int ComputeLastWindowDeparture(CompiledFrequencyWindow freq) =>
+    freq.StartSecs + ((freq.EndSecs - freq.StartSecs - 1) / freq.HeadwaySecs) * freq.HeadwaySecs;
+
+  internal static bool TryResolveStopTripArrivals(
+    string arrivalsRaw,
+    List<string>? stopTripIds,
+    string routeId,
+    Dictionary<string, SortedSet<string>> routeTripIds,
+    ref Dictionary<string, string[]>? sortedRouteTrips,
+    out IReadOnlyList<string> alignedTripIds,
+    out string[] arrivals)
+  {
+    alignedTripIds = [];
+    arrivals = arrivalsRaw.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+    if (arrivals.Length == 0)
+    {
+      return false;
+    }
+
+    // Prefer explicit per-stop trip_ids (supports asymmetric/express trips); fall back to sorted route trip_ids when symmetric.
+    if (stopTripIds != null && stopTripIds.Count == arrivals.Length)
+    {
+      alignedTripIds = stopTripIds;
+      return true;
+    }
+
+    if (stopTripIds == null)
+    {
+      sortedRouteTrips ??= new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+      if (!sortedRouteTrips.TryGetValue(routeId, out var fallbackTripIds) &&
+          routeTripIds.TryGetValue(routeId, out var set))
+      {
+        fallbackTripIds = set.ToArray();
+        sortedRouteTrips[routeId] = fallbackTripIds;
+      }
+
+      if (fallbackTripIds != null && fallbackTripIds.Length == arrivals.Length)
+      {
+        alignedTripIds = fallbackTripIds;
+        return true;
+      }
+    }
+
+    return false;
   }
 
   private static (double Lat, double Lng, double Bearing, double SpeedMps) InterpolatePosition(

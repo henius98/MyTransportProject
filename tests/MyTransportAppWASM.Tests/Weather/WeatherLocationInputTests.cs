@@ -245,10 +245,8 @@ public class WeatherLocationInputTests
       IPlaceResolutionService placeResolution,
       IWeatherStationCatalogService stationCatalog)
   {
-    var cache = new AppMemoryCache();
     return new WeatherPlannerService(
         new HttpClient(new StubHandler()),
-        cache,
         Options.Create(new CacheExpirationOptions
         {
           Weather = new() { LiveSeconds = 600, OutlookSeconds = 10800, FallbackSeconds = 30 }

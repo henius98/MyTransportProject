@@ -6,7 +6,7 @@ namespace MyTransportAppWASM.Tests;
 public class TransitMapSessionTests
 {
   private static readonly TransportStaticData StaticSource =
-    new("https://worker.example/rapid", "/routes", "/map", "/departures");
+    new("https://worker.example/rapid", "/routes", "/map");
 
   private static TransitMapSession CreateSession(
     Mock<ITransitTrackingService>? tracking = null,
@@ -53,7 +53,7 @@ public class TransitMapSessionTests
     Assert.Null(await firstLoad);
     Assert.Equal(-1, session.SelectedStaticProviderIndex);
     Assert.Empty(session.StaticRoutes);
-    staticData.Verify(s => s.GetMapAsync(StaticSource, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
   }
 
   [Fact]
@@ -84,7 +84,7 @@ public class TransitMapSessionTests
     Assert.Equal(0, session.SelectedStaticProviderIndex);
     var route = Assert.Single(session.StaticRoutes);
     Assert.Equal("R2", route.RouteId);
-    staticData.Verify(s => s.GetMapAsync(StaticSource, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
   }
 
   [Fact]
@@ -100,7 +100,7 @@ public class TransitMapSessionTests
     Assert.Null(geoJson);
     Assert.Single(session.StaticRoutes);
     Assert.Equal("Select a route to view its map.", session.StaticStatus);
-    staticData.Verify(s => s.GetMapAsync(StaticSource, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
   }
 
   [Fact]
@@ -265,11 +265,11 @@ public class TransitMapSessionTests
         new StaticRoute("30000019", "401", "401"),
         new StaticRoute("30000009", null, "T808")
       ]);
-    staticData.Setup(s => s.GetMapAsync(StaticSource, "U4200", It.IsAny<CancellationToken>()))
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "U4200", null, It.IsAny<CancellationToken>()))
       .ReturnsAsync("""{"route":"U4200"}""");
-    staticData.Setup(s => s.GetMapAsync(StaticSource, "30000019", It.IsAny<CancellationToken>()))
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "30000019", null, It.IsAny<CancellationToken>()))
       .ReturnsAsync("""{"route":"30000019"}""");
-    staticData.Setup(s => s.GetMapAsync(StaticSource, "30000009", It.IsAny<CancellationToken>()))
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "30000009", null, It.IsAny<CancellationToken>()))
       .ReturnsAsync("""{"route":"30000009"}""");
 
     var noStaticProvider = new TransportProvider("Rapid Kuantan", "https://feed.test/kuantan", 3.8, 103.3, 40, "Bus");
@@ -310,9 +310,9 @@ public class TransitMapSessionTests
     Assert.Equal(string.Empty, session.SelectedStaticRouteId);
     Assert.False(session.IsStaticRouteVehicleFilterActive);
     Assert.True(session.IsStaticErrorStatus);
-    staticData.Verify(s => s.GetMapAsync(StaticSource, "Unknown Line", It.IsAny<CancellationToken>()), Times.Never);
-    staticData.Verify(s => s.GetMapAsync(StaticSource, "401", It.IsAny<CancellationToken>()), Times.Never);
-    staticData.Verify(s => s.GetMapAsync(StaticSource, "T808", It.IsAny<CancellationToken>()), Times.Never);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, "Unknown Line", It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, "401", It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, "T808", It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
     staticData.Verify(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()), Times.Once);
   }
 
@@ -325,9 +325,9 @@ public class TransitMapSessionTests
         new StaticRoute("30000019", "401", "401"),
         new StaticRoute("30000009", null, "T808")
       ]);
-    staticData.Setup(s => s.GetMapAsync(StaticSource, "30000019", It.IsAny<CancellationToken>()))
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "30000019", null, It.IsAny<CancellationToken>()))
       .ReturnsAsync("""{"route":"30000019"}""");
-    staticData.Setup(s => s.GetMapAsync(StaticSource, "30000009", It.IsAny<CancellationToken>()))
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "30000009", null, It.IsAny<CancellationToken>()))
       .ReturnsAsync("""{"route":"30000009"}""");
 
     using var session = CreateSession(staticData: staticData);
@@ -343,9 +343,9 @@ public class TransitMapSessionTests
     Assert.Equal(string.Empty, session.SelectedStaticRouteId);
     Assert.False(session.IsStaticRouteVehicleFilterActive);
     Assert.True(session.IsStaticErrorStatus);
-    staticData.Verify(s => s.GetMapAsync(StaticSource, "401", It.IsAny<CancellationToken>()), Times.Never);
-    staticData.Verify(s => s.GetMapAsync(StaticSource, "T808", It.IsAny<CancellationToken>()), Times.Never);
-    staticData.Verify(s => s.GetMapAsync(StaticSource, "Missing Route", It.IsAny<CancellationToken>()), Times.Never);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, "401", It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, "T808", It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    staticData.Verify(s => s.GetMapAsync(StaticSource, "Missing Route", It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
   }
 
   [Fact]
@@ -355,9 +355,9 @@ public class TransitMapSessionTests
     var firstGate = new TaskCompletionSource<string>();
     staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
       .ReturnsAsync([new StaticRoute("R1", "Route 1"), new StaticRoute("R2", "Route 2")]);
-    staticData.Setup(s => s.GetMapAsync(StaticSource, "R1", It.IsAny<CancellationToken>()))
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "R1", null, It.IsAny<CancellationToken>()))
       .Returns(() => firstGate.Task);
-    staticData.Setup(s => s.GetMapAsync(StaticSource, "R2", It.IsAny<CancellationToken>()))
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "R2", null, It.IsAny<CancellationToken>()))
       .ReturnsAsync("""{"route":"R2"}""");
 
     using var session = CreateSession(staticData: staticData);
@@ -384,7 +384,7 @@ public class TransitMapSessionTests
     var staticData = new Mock<ITransportStaticDataService>();
     staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
       .ReturnsAsync([new StaticRoute("30000019", "401"), new StaticRoute("U4200", "420")]);
-    staticData.Setup(s => s.GetMapAsync(StaticSource, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+    staticData.Setup(s => s.GetMapAsync(StaticSource, It.IsAny<string>(), null, It.IsAny<CancellationToken>()))
       .ReturnsAsync("""{"type":"FeatureCollection","features":[]}""");
 
     var tracking = new Mock<ITransitTrackingService>();
@@ -431,7 +431,7 @@ public class TransitMapSessionTests
     var staticData = new Mock<ITransportStaticDataService>();
     staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
       .ReturnsAsync([new StaticRoute("R1", "Route 1")]);
-    staticData.SetupSequence(s => s.GetMapAsync(StaticSource, "R1", It.IsAny<CancellationToken>()))
+    staticData.SetupSequence(s => s.GetMapAsync(StaticSource, "R1", null, It.IsAny<CancellationToken>()))
       .ThrowsAsync(new HttpRequestException("503"))
       .ReturnsAsync((string)null!)
       .ReturnsAsync("   ")
@@ -472,7 +472,7 @@ public class TransitMapSessionTests
     var staticData = new Mock<ITransportStaticDataService>();
     staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
       .ReturnsAsync([new StaticRoute("30000019", "401"), new StaticRoute("U4200", "420")]);
-    staticData.Setup(s => s.GetMapAsync(StaticSource, "U4200", It.IsAny<CancellationToken>()))
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "U4200", null, It.IsAny<CancellationToken>()))
       .Returns(() => mapGate.Task);
 
     var tracking = new Mock<ITransitTrackingService>();
@@ -507,7 +507,7 @@ public class TransitMapSessionTests
     var staticData = new Mock<ITransportStaticDataService>();
     staticData.Setup(s => s.GetRoutesAsync(StaticSource, It.IsAny<CancellationToken>()))
       .ReturnsAsync([new StaticRoute("30000019", "401"), new StaticRoute("U4200", "420")]);
-    staticData.Setup(s => s.GetMapAsync(StaticSource, "U4200", It.IsAny<CancellationToken>()))
+    staticData.Setup(s => s.GetMapAsync(StaticSource, "U4200", null, It.IsAny<CancellationToken>()))
       .ReturnsAsync("""{"route":"U4200"}""");
 
     var route = new EnrichedRoute
@@ -563,5 +563,117 @@ public class TransitMapSessionTests
     Assert.False(session.IsErrorStatus);
     Assert.Equal(-1, session.SelectedStaticProviderIndex);
     Assert.Empty(session.RouteOptions);
+  }
+
+  [Fact]
+  public async Task SelectStaticRouteAsync_EnrichesMapWithFrequenciesAndServiceDate_WhenProviderHasFrequencyFeed()
+  {
+    var railSource = new TransportStaticData(
+      "https://worker.example/rapid-rail-kl",
+      "/data/routes",
+      "/map",
+      "/data/frequencies");
+    var providers = new[]
+    {
+      new TransportProvider("Rapid Rail KL", "", 3.139, 101.6869, 60, "Rail", railSource)
+    };
+    const string railMapGeoJson = """
+      {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": [101.68, 3.13] },
+            "properties": {
+              "kind": "stop", "route_id": "KJ", "stop_id": "KJ1",
+              "trip_ids": ["KJ_0"], "arrival_times": "06:00:00"
+            }
+          },
+          {
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": [101.69, 3.14] },
+            "properties": {
+              "kind": "stop", "route_id": "KJ", "stop_id": "KJ2",
+              "trip_ids": ["KJ_0"], "arrival_times": "06:04:00"
+            }
+          },
+          {
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": [101.70, 3.15] },
+            "properties": {
+              "kind": "stop", "route_id": "AG", "stop_id": "AG1",
+              "trip_ids": ["AG_0"], "arrival_times": "06:00:00"
+            }
+          }
+        ]
+      }
+      """;
+
+    var staticData = new Mock<ITransportStaticDataService>();
+    staticData.Setup(s => s.GetRoutesAsync(railSource, It.IsAny<CancellationToken>()))
+      .ReturnsAsync([new StaticRoute("KJ", "KJL", "Kelana Jaya Line")]);
+    staticData.Setup(s => s.GetMapAsync(railSource, string.Empty, It.Is<string?>(d => !string.IsNullOrWhiteSpace(d)), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(railMapGeoJson);
+    staticData.Setup(s => s.GetFrequenciesAsync(railSource, It.IsAny<CancellationToken>()))
+      .ReturnsAsync([new StaticFrequency("KJ_0", "06:00:00", "07:00:00", 600)]);
+
+    using var session = CreateSession(staticData: staticData, providers: providers);
+    await session.SelectStaticProviderAsync(0);
+
+    var result = await session.SelectStaticRouteAsync("KJ");
+    Assert.NotNull(result);
+    using var doc = System.Text.Json.JsonDocument.Parse(result);
+    var features = doc.RootElement.GetProperty("features");
+    Assert.Equal(2, features.GetArrayLength());
+    var stop2Props = features[1].GetProperty("properties");
+    var arrWindow = stop2Props.GetProperty("frequency_arrivals")[0];
+    Assert.Equal(21840, arrWindow.GetProperty("start").GetInt32());
+    Assert.Equal(24840, arrWindow.GetProperty("end").GetInt32());
+    Assert.Equal(600, arrWindow.GetProperty("headway").GetInt32());
+    staticData.Verify(s => s.GetMapAsync(railSource, string.Empty, It.Is<string?>(d => !string.IsNullOrWhiteSpace(d)), It.IsAny<CancellationToken>()), Times.Once);
+    staticData.Verify(s => s.GetFrequenciesAsync(railSource, It.IsAny<CancellationToken>()), Times.Once);
+  }
+
+  [Fact]
+  public async Task SelectStaticRouteAsync_ReturnsFilteredBaseMapGeoJson_WhenFrequenciesRequestFails()
+  {
+    var railSource = new TransportStaticData(
+      "https://worker.example/rapid-rail-kl",
+      "/data/routes",
+      "/map",
+      "/data/frequencies");
+    var providers = new[]
+    {
+      new TransportProvider("Rapid Rail KL", "", 3.139, 101.6869, 60, "Rail", railSource)
+    };
+    const string railMapGeoJson = """
+      {
+        "type": "FeatureCollection",
+        "features": [
+          { "type": "Feature", "geometry": { "type": "Point", "coordinates": [101.68, 3.13] }, "properties": { "kind": "stop", "route_id": "KJ", "stop_id": "KJ1" } },
+          { "type": "Feature", "geometry": { "type": "Point", "coordinates": [101.70, 3.15] }, "properties": { "kind": "stop", "route_id": "AG", "stop_id": "AG1" } }
+        ]
+      }
+      """;
+
+    var staticData = new Mock<ITransportStaticDataService>();
+    staticData.Setup(s => s.GetRoutesAsync(railSource, It.IsAny<CancellationToken>()))
+      .ReturnsAsync([new StaticRoute("KJ", "KJL", "Kelana Jaya Line")]);
+    staticData.Setup(s => s.GetMapAsync(railSource, string.Empty, It.Is<string?>(d => !string.IsNullOrWhiteSpace(d)), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(railMapGeoJson);
+    staticData.Setup(s => s.GetFrequenciesAsync(railSource, It.IsAny<CancellationToken>()))
+      .ThrowsAsync(new HttpRequestException("503"));
+
+    using var session = CreateSession(staticData: staticData, providers: providers);
+    await session.SelectStaticProviderAsync(0);
+
+    var result = await session.SelectStaticRouteAsync("KJ");
+    Assert.NotNull(result);
+    using var doc = System.Text.Json.JsonDocument.Parse(result);
+    var features = doc.RootElement.GetProperty("features");
+    Assert.Equal(1, features.GetArrayLength());
+    Assert.Equal("KJ", features[0].GetProperty("properties").GetProperty("route_id").GetString());
+    Assert.Equal("Select a stop on the map for details.", session.StaticStatus);
+    Assert.False(session.IsStaticErrorStatus);
   }
 }

@@ -167,10 +167,8 @@ public class MetMalaysiaWeatherCardTests
   {
     Uri? requestedEndpoint = null;
     var handler = new CapturingHandler(uri => requestedEndpoint = uri);
-    using var cache = new AppMemoryCache();
     var service = new WeatherPlannerService(
         new HttpClient(handler),
-        cache,
         Options.Create(new CacheExpirationOptions
         {
           Weather = new() { LiveSeconds = 600, OutlookSeconds = 10800, FallbackSeconds = 30 }

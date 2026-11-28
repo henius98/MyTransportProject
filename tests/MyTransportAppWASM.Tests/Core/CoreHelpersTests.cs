@@ -98,7 +98,6 @@ public class CoreHelpersTests
     var config = new ConfigurationBuilder()
       .AddInMemoryCollection(new Dictionary<string, string?>
       {
-        ["CacheExpiration:SizeLimit"] = "150",
         ["CacheExpiration:Weather:LiveSeconds"] = "300",
         ["TransitPolling:IntervalSeconds"] = "2",
         ["TransitPolling:MaximumBackoffSeconds"] = "3",
@@ -119,8 +118,8 @@ public class CoreHelpersTests
     var transit = FeatureOptionsBinder.BindTransitOptions(config);
     var weather = FeatureOptionsBinder.BindWeatherOptions(config.GetSection("WeatherProviders"));
 
-    Assert.Equal(150, cache.SizeLimit);
     Assert.Equal(300, cache.Weather.LiveSeconds);
+    Assert.Equal(MapCacheExpirationOptions.DefaultStaticDataResetHour, cache.Map.StaticDataResetHour);
     Assert.Equal(5, transit.Polling.IntervalSeconds);
     Assert.Equal(5, transit.Polling.MaximumBackoffSeconds);
     Assert.Equal(5, transit.Polling.MaximumSnapshotAgeSeconds);
@@ -129,5 +128,29 @@ public class CoreHelpersTests
     Assert.NotNull(provider.StaticData);
     Assert.True(weather.OpenMeteo.Enabled);
     Assert.Equal("/v1/forecast", weather.OpenMeteo.Endpoints["Realtime"]);
+  }
+
+  [Fact]
+  public void MapCacheExpirationOptions_ComputesServiceDayAndClampsResetHourInMalaysiaTime()
+  {
+    var options = new MapCacheExpirationOptions { StaticDataResetHour = 4 };
+
+    // Service day rolls over at 04:00 MYT (03:59:59 still belongs to previous service day).
+    var daytime = new DateTimeOffset(2026, 11, 26, 11, 15, 0, MalaysiaTime.Offset);
+    var justBeforeReset = new DateTimeOffset(2026, 11, 27, 3, 59, 59, MalaysiaTime.Offset);
+    var exactReset = new DateTimeOffset(2026, 11, 27, 4, 0, 0, MalaysiaTime.Offset);
+    Assert.Equal(new DateTime(2026, 11, 26), options.GetStaticDataServiceDay(daytime.ToUniversalTime()));
+    Assert.Equal(new DateTime(2026, 11, 26), options.GetStaticDataServiceDay(justBeforeReset.ToUniversalTime()));
+    Assert.Equal(new DateTime(2026, 11, 27), options.GetStaticDataServiceDay(exactReset.ToUniversalTime()));
+
+    // Out-of-range config values clamp safely to 0..23.
+    var config = new ConfigurationBuilder()
+      .AddInMemoryCollection(new Dictionary<string, string?>
+      {
+        ["CacheExpiration:Map:StaticDataResetHour"] = "30"
+      })
+      .Build();
+    var bound = AppOptionsBinder.BindCacheExpirationOptions(config.GetSection(CacheExpirationOptions.SectionName));
+    Assert.Equal(23, bound.Map.StaticDataResetHour);
   }
 }

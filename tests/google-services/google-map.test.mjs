@@ -2484,16 +2484,26 @@ test("clicking a static stop toggles an InfoWindow with GeoJSON properties witho
   assert.equal(card.className, "bus-info-window");
   assert.equal(card.children[0].className, "bus-info-header");
   assert.equal(card.children[0].textContent, "SENTUL TIMUR");
-  const rows = card.children
+  const simpleRows = card.children
     .slice(1)
+    .filter((child) => child.className === "bus-info-item")
     .map((row) => [row.children[0].textContent, row.children[1].textContent]);
-  assert.deepEqual(rows, [
+  assert.deepEqual(simpleRows, [
     ["Stop ID", "AG1"],
     ["Route", "AG"],
-    ["Arrival Times", "06:25:20, 08:50:20, 20:25:20"],
     ["Platform", "P1"],
     ["Custom Note", "Terminal station"],
   ]);
+  const scheduleBlocks = card.children.filter(
+    (child) => child.className === "bus-info-schedule",
+  );
+  assert.equal(scheduleBlocks.length, 1);
+  assert.equal(scheduleBlocks[0].children[0].textContent, "Arrival Times");
+  assert.equal(scheduleBlocks[0].children[1].className, "bus-info-time-grid");
+  assert.deepEqual(
+    scheduleBlocks[0].children[1].children.map((pill) => pill.textContent),
+    ["06:25", "08:50", "20:25"],
+  );
   assert.deepEqual(invocations, []);
 
   // Second click on the same stop toggles the InfoWindow closed.
@@ -2570,6 +2580,94 @@ test("clicking a static stop toggles an InfoWindow with GeoJSON properties witho
       ["Route", "420"],
       ["Route ID", "U4200"],
     ],
+  );
+
+  // Clicking a stop with long unsorted arrival times sorts, deduplicates,
+  // and collapses the full list into a scrollable <details> block.
+  const longStopProps = {
+    kind: "stop",
+    stop_id: "12001460",
+    stop_name: "TAMAN ANJUNG DAMAI (OPP)",
+    route_id: "30000124",
+    arrival_times:
+      "18:03:38, 19:23:38, 06:19:33, 24:15:00, 07:53:38, 06:19:33, 12:25:20",
+  };
+  const longStop = {
+    getProperty: (key) => longStopProps[key],
+    forEachProperty: (cb) => {
+      for (const [k, v] of Object.entries(longStopProps)) cb(v, k);
+    },
+    getGeometry: () => ({
+      get: () => ({ lat: () => 5.33, lng: () => 100.3 }),
+    }),
+  };
+  dataClickListener({ feature: longStop });
+  const longCard = openedInfo.at(-1).content;
+  const longSchedules = longCard.children.filter(
+    (child) => child.className === "bus-info-schedule",
+  );
+  assert.equal(longSchedules.length, 1);
+  assert.equal(longSchedules[0].children[0].textContent, "Arrival Times");
+  assert.equal(longSchedules[0].children[1].className, "bus-info-next-row");
+  assert.equal(longSchedules[0].children[1].children[0].textContent, "Next");
+  const detailsEl = longSchedules[0].children[2];
+  assert.equal(detailsEl.className, "bus-info-schedule-details");
+  assert.equal(
+    detailsEl.children[0].textContent,
+    "All 6 times (06:19 \u2013 24:15)",
+  );
+  assert.equal(
+    detailsEl.children[1].className,
+    "bus-info-time-grid bus-info-time-grid--scrollable",
+  );
+  assert.deepEqual(
+    detailsEl.children[1].children.map((pill) => pill.textContent),
+    ["06:19", "07:53", "12:25", "18:03", "19:23", "24:15"],
+  );
+
+  // Clicking a frequency-based rail stop expands frequency_arrivals
+  // without rendering raw frequency properties as rows.
+  const freqStopProps = {
+    kind: "stop",
+    stop_id: "KJ2",
+    stop_name: "TAMAN MELATI",
+    route_id: "KJ",
+    arrival_times: "06:03:00",
+    frequency_arrivals: [
+      { start: 21780, end: 23580, headway: 600 }, // 06:03, 06:13, 06:23, 06:33
+      { start: 86400, end: 87000, headway: 600 }, // 24:00, 24:10
+    ],
+  };
+  const freqStop = {
+    getProperty: (key) => freqStopProps[key],
+    forEachProperty: (cb) => {
+      for (const [k, v] of Object.entries(freqStopProps)) cb(v, k);
+    },
+    getGeometry: () => ({
+      get: () => ({ lat: () => 3.22, lng: () => 101.72 }),
+    }),
+  };
+  dataClickListener({ feature: freqStop });
+  const freqCard = openedInfo.at(-1).content;
+  const freqInfoLabels = freqCard.children
+    .slice(1)
+    .filter((child) => child.className === "bus-info-item")
+    .map((row) => row.children[0].textContent);
+  assert.deepEqual(freqInfoLabels, ["Stop ID", "Route"]);
+  const freqSchedules = freqCard.children.filter(
+    (child) => child.className === "bus-info-schedule",
+  );
+  assert.equal(freqSchedules.length, 1);
+  assert.equal(freqSchedules[0].children[0].textContent, "Arrival Times");
+  assert.equal(freqSchedules[0].children[1].className, "bus-info-next-row");
+  const freqDetails = freqSchedules[0].children[2];
+  assert.equal(
+    freqDetails.children[0].textContent,
+    "All 6 times (06:03 \u2013 24:10)",
+  );
+  assert.deepEqual(
+    freqDetails.children[1].children.map((pill) => pill.textContent),
+    ["06:03", "06:13", "06:23", "06:33", "24:00", "24:10"],
   );
 
   // Clicking the map closes the open stop InfoWindow.

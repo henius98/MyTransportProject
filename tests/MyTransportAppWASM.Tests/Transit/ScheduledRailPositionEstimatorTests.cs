@@ -9,7 +9,7 @@ public sealed class ScheduledRailPositionEstimatorTests
     101.6869,
     60.0,
     "Rail",
-    new TransportStaticData("https://worker.example/rapid-rail-kl", "/data/routes", "/map", "/departures", "/data/frequencies"));
+    new TransportStaticData("https://worker.example/rapid-rail-kl", "/data/routes", "/map", "/data/frequencies"));
 
   [Fact]
   public void EstimateVehicles_FollowsCurvedShapeAndComputesBearingAndSpeed()
@@ -267,5 +267,182 @@ public sealed class ScheduledRailPositionEstimatorTests
       fridayNetwork, RapidRail, new DateTimeOffset(2026, 6, 6, 0, 0, 0, MalaysiaTime.Offset)));
     Assert.Empty(ScheduledRailPositionEstimator.EstimateVehicles(
       fridayNetwork, RapidRail, new DateTimeOffset(2026, 6, 6, 0, 10, 59, MalaysiaTime.Offset)));
+  }
+
+  [Fact]
+  public void EnrichMapGeoJsonWithFrequencies_ShiftsWindowsByStopOffsetAndUsesHalfOpenEnd()
+  {
+    const string mapGeoJson = """
+      {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "geometry": { "type": "LineString", "coordinates": [[101.00, 3.00], [101.02, 3.02]] },
+            "properties": {
+              "kind": "route", "route_id": "KJ", "shape_id": "shp_KJ_0",
+              "trip_ids": ["KJL_MonFri_0"], "route_short_name": "KJL"
+            }
+          },
+          {
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": [101.00, 3.00] },
+            "properties": {
+              "kind": "stop", "route_id": "KJ", "stop_id": "S1", "stop_name": "Gombak",
+              "trip_ids": ["KJL_MonFri_0"],
+              "arrival_times": "06:00:00"
+            }
+          },
+          {
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": [101.02, 3.02] },
+            "properties": {
+              "kind": "stop", "route_id": "KJ", "stop_id": "S2", "stop_name": "Taman Melati",
+              "trip_ids": ["KJL_MonFri_0"],
+              "arrival_times": "06:03:20"
+            }
+          }
+        ]
+      }
+      """;
+
+    IReadOnlyList<StaticFrequency> frequencies =
+    [
+      new("KJL_MonFri_0", "06:00:00", "07:00:00", 600)
+    ];
+
+    var enriched = ScheduledRailMapEnricher.Enrich(mapGeoJson, frequencies);
+    using var doc = System.Text.Json.JsonDocument.Parse(enriched);
+    var features = doc.RootElement.GetProperty("features");
+    Assert.Equal(3, features.GetArrayLength());
+
+    // Route feature remains unchanged without frequency properties.
+    Assert.False(features[0].GetProperty("properties").TryGetProperty("frequency_arrivals", out _));
+
+    // S1 (origin): arrival offset = 0s; last trip in [21600, 25200) at 600s is 24600.
+    var s1Props = features[1].GetProperty("properties");
+    Assert.Equal("Gombak", s1Props.GetProperty("stop_name").GetString());
+    var s1Arr = s1Props.GetProperty("frequency_arrivals")[0];
+    Assert.Equal(21600, s1Arr.GetProperty("start").GetInt32());
+    Assert.Equal(24600, s1Arr.GetProperty("end").GetInt32());
+    Assert.Equal(600, s1Arr.GetProperty("headway").GetInt32());
+
+    // S2 (downstream +200s): shifted window is [21800, 24800] step 600.
+    var s2Props = features[2].GetProperty("properties");
+    var s2Arr = s2Props.GetProperty("frequency_arrivals")[0];
+    Assert.Equal(21800, s2Arr.GetProperty("start").GetInt32());
+    Assert.Equal(24800, s2Arr.GetProperty("end").GetInt32());
+    Assert.Equal(600, s2Arr.GetProperty("headway").GetInt32());
+  }
+
+  [Fact]
+  public void EnrichMapGeoJsonWithFrequencies_SupportsFallbackRouteTripIdsAndMultiWindowTrips()
+  {
+    const string mapGeoJson = """
+      {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "geometry": { "type": "LineString", "coordinates": [[101.01, 3.10], [101.02, 3.10]] },
+            "properties": {
+              "kind": "route", "route_id": "KGL", "shape_id": "shp_MRT_0",
+              "trip_ids": ["KGL_MonFri_0"]
+            }
+          },
+          {
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": [101.01, 3.10] },
+            "properties": {
+              "kind": "stop", "route_id": "KGL", "stop_id": "S1",
+              "arrival_times": "06:00:00"
+            }
+          },
+          {
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": [101.02, 3.10] },
+            "properties": {
+              "kind": "stop", "route_id": "KGL", "stop_id": "S2",
+              "arrival_times": "06:05:00"
+            }
+          }
+        ]
+      }
+      """;
+
+    IReadOnlyList<StaticFrequency> frequencies =
+    [
+      new("KGL_MonFri_0", "06:00:00", "07:00:00", 600),
+      new("KGL_MonFri_0", "07:00:00", "08:00:00", 300)
+    ];
+
+    var enriched = ScheduledRailMapEnricher.Enrich(mapGeoJson, frequencies);
+    using var doc = System.Text.Json.JsonDocument.Parse(enriched);
+    var s2Windows = doc.RootElement.GetProperty("features")[2].GetProperty("properties").GetProperty("frequency_arrivals");
+    Assert.Equal(2, s2Windows.GetArrayLength());
+    Assert.Equal(21900, s2Windows[0].GetProperty("start").GetInt32());
+    Assert.Equal(24900, s2Windows[0].GetProperty("end").GetInt32());
+    Assert.Equal(600, s2Windows[0].GetProperty("headway").GetInt32());
+    Assert.Equal(25500, s2Windows[1].GetProperty("start").GetInt32());
+    Assert.Equal(28800, s2Windows[1].GetProperty("end").GetInt32());
+    Assert.Equal(300, s2Windows[1].GetProperty("headway").GetInt32());
+  }
+
+  [Fact]
+  public void EnrichMapGeoJsonWithFrequencies_FiltersToRequestedRouteId()
+  {
+    const string multiRouteGeoJson = """
+      {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": [101.68, 3.13] },
+            "properties": {
+              "kind": "stop", "route_id": "AG", "stop_id": "AG1",
+              "trip_ids": ["AG_0"], "arrival_times": "06:00:00"
+            }
+          },
+          {
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": [101.69, 3.14] },
+            "properties": {
+              "kind": "stop", "route_id": "AG", "stop_id": "AG7",
+              "trip_ids": ["AG_0"], "arrival_times": "06:09:00"
+            }
+          },
+          {
+            "type": "Feature",
+            "geometry": { "type": "Point", "coordinates": [101.70, 3.15] },
+            "properties": {
+              "kind": "stop", "route_id": "KJ", "stop_id": "KJ1",
+              "trip_ids": ["KJ_0"], "arrival_times": "06:00:00"
+            }
+          }
+        ]
+      }
+      """;
+
+    IReadOnlyList<StaticFrequency> frequencies =
+    [
+      new("AG_0", "06:00:00", "07:00:00", 300),
+      new("KJ_0", "06:00:00", "07:00:00", 600)
+    ];
+
+    var filtered = ScheduledRailMapEnricher.Enrich(multiRouteGeoJson, frequencies, "AG");
+    using var doc = System.Text.Json.JsonDocument.Parse(filtered);
+    var features = doc.RootElement.GetProperty("features");
+    Assert.Equal(2, features.GetArrayLength());
+    Assert.All(features.EnumerateArray(), f => Assert.Equal("AG", f.GetProperty("properties").GetProperty("route_id").GetString()));
+    var ag7Arr = features[1].GetProperty("properties").GetProperty("frequency_arrivals")[0];
+    Assert.Equal(22140, ag7Arr.GetProperty("start").GetInt32());
+    Assert.Equal(25440, ag7Arr.GetProperty("end").GetInt32());
+
+    // Filtering still isolates the selected route when frequencies are empty.
+    var filteredWithoutFreq = ScheduledRailMapEnricher.Enrich(multiRouteGeoJson, [], "KJ");
+    using var docNoFreq = System.Text.Json.JsonDocument.Parse(filteredWithoutFreq);
+    var kjFeatures = docNoFreq.RootElement.GetProperty("features");
+    Assert.Equal(1, kjFeatures.GetArrayLength());
+    Assert.Equal("KJ", kjFeatures[0].GetProperty("properties").GetProperty("route_id").GetString());
   }
 }

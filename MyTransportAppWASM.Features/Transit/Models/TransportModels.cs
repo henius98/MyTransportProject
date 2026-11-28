@@ -13,18 +13,12 @@ namespace MyTransportAppWASM.Features.Transit.Models
     string BaseUrl,
     string RouteInfoPath,
     string GeoJSONUrlPath,
-    string DeparturePath,
     string FrequenciesPath = "");
 
   public record StaticRoute(
     [property: System.Text.Json.Serialization.JsonPropertyName("route_id")] string RouteId,
     [property: System.Text.Json.Serialization.JsonPropertyName("route_short_name")] string? RouteShortName = null,
     [property: System.Text.Json.Serialization.JsonPropertyName("route_long_name")] string? RouteLongName = null);
-
-  public record StaticDeparture(
-    [property: System.Text.Json.Serialization.JsonPropertyName("route_id")] string RouteId,
-    [property: System.Text.Json.Serialization.JsonPropertyName("trip_headsign")] string? TripHeadsign,
-    [property: System.Text.Json.Serialization.JsonPropertyName("estimated_departure_at")] DateTimeOffset? EstimatedDepartureAt);
 
   public sealed record StaticFrequency(
     [property: System.Text.Json.Serialization.JsonPropertyName("trip_id")] string TripId,
@@ -120,7 +114,6 @@ namespace MyTransportAppWASM.Features.Transit.Models
     public int LiveTotalDurationSeconds { get; set; }
     public List<LiveBusInfo> NearestBuses { get; set; } = new();
     public bool HasLiveBus { get; set; }
-    public bool IsAuspicious { get; set; }
   }
 
   public record TransitTrackingResult

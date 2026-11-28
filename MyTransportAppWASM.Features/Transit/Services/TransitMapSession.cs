@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -352,7 +353,26 @@ public sealed class TransitMapSession : IDisposable
     SetStaticStatus("Loading route map...");
     try
     {
-      var geoJson = await _staticData.GetMapAsync(source, routeId, cancellationToken);
+      string geoJson;
+      if (!string.IsNullOrWhiteSpace(source.FrequenciesPath))
+      {
+        var serviceDate = MalaysiaTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        // Request the daily network map without route_id so worker responses include trip_ids and share TransitTrackingService's cache.
+        var mapTask = _staticData.GetMapAsync(source, string.Empty, serviceDate, cancellationToken);
+        var frequenciesTask = FetchFrequenciesOrEmptyAsync(source, cancellationToken);
+        await Task.WhenAll(mapTask, frequenciesTask);
+        geoJson = await mapTask;
+        var frequencies = await frequenciesTask;
+        if (!string.IsNullOrWhiteSpace(geoJson))
+        {
+          geoJson = ScheduledRailMapEnricher.Enrich(geoJson, frequencies, routeId);
+        }
+      }
+      else
+      {
+        geoJson = await _staticData.GetMapAsync(source, routeId, cancellationToken: cancellationToken);
+      }
+
       if (IsStaleStaticRouteSelection(providerSeq, routeSeq)) return null;
       if (string.IsNullOrWhiteSpace(geoJson))
       {
@@ -372,6 +392,25 @@ public sealed class TransitMapSession : IDisposable
       SetStaticStatus("Static route map unavailable.", isError: true);
       _logger.LogWarning("Static route map failed: {Message}", ex.Message);
       return null;
+    }
+  }
+
+  private async Task<List<StaticFrequency>> FetchFrequenciesOrEmptyAsync(
+    TransportStaticData source,
+    CancellationToken cancellationToken)
+  {
+    try
+    {
+      return await _staticData.GetFrequenciesAsync(source, cancellationToken);
+    }
+    catch (OperationCanceledException)
+    {
+      throw;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug("Static frequencies enrichment skipped: {Message}", ex.Message);
+      return [];
     }
   }
 

@@ -124,6 +124,26 @@ public class UserSettingsServiceTests
   }
 
   [Fact]
+  public async Task GuestInitializationSeedsThemeOnly_AndIgnoresLegacyPreferenceKeys()
+  {
+    await using var h = new SettingsHarness(uid: null);
+    h.Js.Storage["theme-mode-global"] = "light";
+    h.Js.Storage["user_language"] = "ms-MY";
+    h.Js.Storage["hasSeenWelcome"] = "true";
+    h.Js.Storage["custom_lat"] = "3.139";
+    h.Js.Storage["custom_lng"] = "101.6869";
+
+    var settings = await h.Settings.GetSettingsAsync();
+
+    Assert.Equal("light", settings.Theme);
+    Assert.Null(settings.Language);
+    Assert.Null(settings.HasSeenWelcome);
+    Assert.Null(settings.DefaultLocation);
+    Assert.Equal(["preferences:guest", "theme-mode-global"], h.Js.StorageReads);
+    Assert.True(h.Js.Storage.ContainsKey("preferences:guest"));
+  }
+
+  [Fact]
   public async Task DisposeDuringAuthStateChange_DoesNotThrowObjectDisposedException()
   {
     await using var h = new SettingsHarness(startUser: false);
@@ -190,6 +210,7 @@ public class UserSettingsServiceTests
   private sealed class SettingsJsRuntime : IJSRuntime
   {
     public Dictionary<string, string> Storage { get; } = new();
+    public List<string> StorageReads { get; } = new();
     public Dictionary<string, UserSettings> Cloud { get; } = new();
     public List<string> Writes { get; } = new();
     public bool FailReads { get; set; }
@@ -212,6 +233,7 @@ public class UserSettingsServiceTests
       switch (identifier)
       {
         case "localStorage.getItem":
+          StorageReads.Add(key);
           Storage.TryGetValue(key, out var value);
           result = value;
           break;

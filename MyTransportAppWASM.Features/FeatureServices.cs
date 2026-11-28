@@ -59,16 +59,13 @@ internal static class FeatureServices
 
     services.AddSingleton(config);
     services.AddSingleton(root.GetRequiredService<IJSRuntime>());
-    var cacheExpiration = root.GetRequiredService<IOptions<CacheExpirationOptions>>();
-    services.AddSingleton<IAppCache>(_ =>
-      new AppMemoryCache(cacheExpiration.Value.SizeLimit > 0 ? cacheExpiration.Value.SizeLimit : 200));
     services.AddSingleton(root.GetRequiredService<ILoggerFactory>());
     services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
     services.AddSingleton(root.GetRequiredService<ILocationService>());
     services.AddSingleton(root.GetRequiredService<IBrowserStorageService>());
     services.AddSingleton(root.GetRequiredService<FirebaseClientService>());
     services.AddSingleton(root.GetRequiredService<IOptions<DefaultLocationOptions>>());
-    services.AddSingleton(cacheExpiration);
+    services.AddSingleton(root.GetRequiredService<IOptions<CacheExpirationOptions>>());
     services.AddSingleton(Options.Create(transitOptions));
     services.AddSingleton(Options.Create(transitOptions.Polling));
     services.AddSingleton(Options.Create(weatherOptions));
@@ -89,15 +86,13 @@ internal static class FeatureServices
     services.AddSingleton<IGtfsService>(sp => new GtfsService(
       httpClients.ExternalApi,
       sp.GetRequiredService<ILogger<GtfsService>>()));
-    services.AddSingleton<ITransportStaticDataService>(sp => new TransportStaticDataService(
-      httpClients.StaticAssets,
-      sp.GetRequiredService<IAppCache>()));
+    services.AddSingleton<ITransportStaticDataService>(_ => new TransportStaticDataService(
+      httpClients.StaticAssets));
     services.AddSingleton<IWeatherStationCatalogService>(_ => new WeatherStationCatalogService(
       httpClients.StaticAssets));
     services.AddSingleton<IPlaceResolutionService, PlaceResolutionService>();
     services.AddSingleton<IWeatherPlannerService>(sp => new WeatherPlannerService(
       sp.GetRequiredKeyedService<HttpClient>(WeatherPlannerClientKey),
-      sp.GetRequiredService<IAppCache>(),
       sp.GetRequiredService<IOptions<CacheExpirationOptions>>(),
       sp.GetRequiredService<IOptions<WeatherOptions>>(),
       sp.GetRequiredService<IPlaceResolutionService>(),

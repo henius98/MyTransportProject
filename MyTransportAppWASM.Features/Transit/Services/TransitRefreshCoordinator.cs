@@ -1,4 +1,3 @@
-
 namespace MyTransportAppWASM.Features.Transit.Services;
 
 public enum ProviderVehicleRefreshStatus

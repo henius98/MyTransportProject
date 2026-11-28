@@ -11,8 +11,7 @@ public class WeatherPlannerServiceTests
   [Fact]
   public async Task GetPlanAsync_CoalescesConcurrentRequestsAndLabelsCachedRealtimeForecasts()
   {
-    var (service, handler, cache) = CreateHarness(delay: TimeSpan.FromMilliseconds(50));
-    using var _ = cache;
+    var (service, handler) = CreateHarness(delay: TimeSpan.FromMilliseconds(50));
     var query = KlQuery();
 
     var plans = await Task.WhenAll(service.GetPlanAsync(query), service.GetPlanAsync(query));
@@ -38,18 +37,45 @@ public class WeatherPlannerServiceTests
   [Fact]
   public async Task GetPlanAsync_PreservesFailureStatusAndCachesBriefly()
   {
-    var (service, handler, cache) = CreateHarness(status: HttpStatusCode.ServiceUnavailable, json: "{}");
-    using var _ = cache;
+    var clock = new TestClock();
+    var (service, handler) = CreateHarness(
+        status: HttpStatusCode.ServiceUnavailable,
+        json: "{}",
+        utcNow: () => clock.UtcNow);
     var query = KlQuery();
 
     var first = (await service.GetPlanAsync(query)).GetRealtime("Open-Meteo")!;
+    clock.Advance(TimeSpan.FromSeconds(20));
     var second = (await service.GetPlanAsync(query)).GetRealtime("Open-Meteo")!;
+    clock.Advance(TimeSpan.FromSeconds(11));
+    var refreshed = (await service.GetPlanAsync(query)).GetRealtime("Open-Meteo")!;
 
-    Assert.Equal(1, handler.RequestCount);
+    Assert.Equal(2, handler.RequestCount);
     Assert.Equal("HTTP 503", first.Status);
     Assert.Equal("HTTP 503 (Cached)", second.Status);
+    Assert.Equal("HTTP 503", refreshed.Status);
     Assert.Equal(WeatherBadgeTone.Error, first.Tone);
     Assert.Equal(WeatherBadgeTone.Error, second.Tone);
+    Assert.False(refreshed.IsCached);
+  }
+
+  [Fact]
+  public async Task GetPlanAsync_ExpiresRealtimeAfterLiveTtl()
+  {
+    var clock = new TestClock();
+    var (service, handler) = CreateHarness(utcNow: () => clock.UtcNow);
+    var query = KlQuery();
+
+    var initial = (await service.GetPlanAsync(query)).GetRealtime("Open-Meteo")!;
+    clock.Advance(TimeSpan.FromSeconds(599));
+    var cached = (await service.GetPlanAsync(query)).GetRealtime("Open-Meteo")!;
+    clock.Advance(TimeSpan.FromSeconds(1));
+    var refreshed = (await service.GetPlanAsync(query)).GetRealtime("Open-Meteo")!;
+
+    Assert.Equal(2, handler.RequestCount);
+    Assert.False(initial.IsCached);
+    Assert.True(cached.IsCached);
+    Assert.False(refreshed.IsCached);
   }
 
   [Theory]
@@ -61,8 +87,7 @@ public class WeatherPlannerServiceTests
       string querySuffix,
       string expectedStatus)
   {
-    var (service, _, cache) = CreateHarness(BuildSingleProviderOptions(querySuffix));
-    using var _ = cache;
+    var (service, _) = CreateHarness(BuildSingleProviderOptions(querySuffix));
     var query = KlQuery(@return: isOutlook ? MalaysiaTime.At(MalaysiaTime.Today.AddDays(1)) : null);
 
     var plan = await service.GetPlanAsync(query);
@@ -74,8 +99,7 @@ public class WeatherPlannerServiceTests
   [Fact]
   public async Task GetPlanAsync_CachesOutlookSeparatelyFromRealtime()
   {
-    var (service, handler, cache) = CreateHarness();
-    using var _ = cache;
+    var (service, handler) = CreateHarness();
     var fullQuery = KlQuery(@return: MalaysiaTime.At(MalaysiaTime.Today.AddDays(1)));
 
     await service.GetPlanAsync(KlQuery());
@@ -92,8 +116,7 @@ public class WeatherPlannerServiceTests
   [Fact]
   public async Task GetPlanAsync_PreservesMetMalaysiaDayPartLabels()
   {
-    var (service, _, cache) = CreateHarness(BuildMetMalaysiaOptions(), "[" + BuildMetMalaysiaDayJson(0) + "]");
-    using var _ = cache;
+    var (service, _) = CreateHarness(BuildMetMalaysiaOptions(), "[" + BuildMetMalaysiaDayJson(0) + "]");
 
     var plan = await service.GetPlanAsync(KlQuery("Ds001", @return: MalaysiaTime.At(MalaysiaTime.Today.AddDays(1))));
     var outlook = plan.GetOutlook("MetMalaysia")!;
@@ -109,8 +132,7 @@ public class WeatherPlannerServiceTests
   public async Task GetPlanAsync_RetainsAll14DaysOfMetMalaysiaPeriodsWhenThreePeriodsPerDay()
   {
     var metJson = "[" + string.Join(",", Enumerable.Range(0, 15).Select(BuildMetMalaysiaDayJson)) + "]";
-    var (service, _, cache) = CreateHarness(BuildMetMalaysiaOptions(), metJson);
-    using var _ = cache;
+    var (service, _) = CreateHarness(BuildMetMalaysiaOptions(), metJson);
 
     var plan = await service.GetPlanAsync(KlQuery("Ds001", @return: MalaysiaTime.At(MalaysiaTime.Today.AddDays(13))));
     var outlook = plan.GetOutlook("MetMalaysia")!;
@@ -123,8 +145,7 @@ public class WeatherPlannerServiceTests
   public async Task GetHourlyForecastAsync_ExpiresOutlookAfterThreeHours()
   {
     var clock = new TestClock();
-    var (service, handler, cache) = CreateHarness(cache: new AppMemoryCache(utcNow: () => clock.UtcNow));
-    using var _ = cache;
+    var (service, handler) = CreateHarness(utcNow: () => clock.UtcNow);
     var query = KlQuery();
     var date = new DateTime(2026, 8, 26);
 
@@ -144,8 +165,7 @@ public class WeatherPlannerServiceTests
   {
     var options = BuildTestWeatherOptions();
     options.OpenMeteo.Name = "";
-    var (service, _, cache) = CreateHarness(options);
-    using var _ = cache;
+    var (service, _) = CreateHarness(options);
     var query = KlQuery(@return: MalaysiaTime.At(MalaysiaTime.Today.AddDays(1)));
 
     var plan = await service.GetPlanAsync(query);
@@ -159,8 +179,7 @@ public class WeatherPlannerServiceTests
   [Fact]
   public async Task GetHourlyForecastAsync_ForceRefreshBypassesCachedProviderResult()
   {
-    var (service, handler, cache) = CreateHarness();
-    using var _ = cache;
+    var (service, handler) = CreateHarness();
     var query = KlQuery();
     var date = new DateTime(2026, 8, 26);
 
@@ -178,12 +197,11 @@ public class WeatherPlannerServiceTests
   [Fact]
   public async Task GetPlanAsync_TimesOutWhileReadingResponseBody()
   {
-    using var cache = new AppMemoryCache();
     using var client = new HttpClient(new HangingContentHandler())
     {
       Timeout = TimeSpan.FromMilliseconds(50)
     };
-    var service = CreateService(client, cache, BuildSingleProviderOptions());
+    var service = CreateService(client, BuildSingleProviderOptions());
 
     var plan = await service
         .GetPlanAsync(KlQuery())
@@ -195,8 +213,7 @@ public class WeatherPlannerServiceTests
   [Fact]
   public async Task GetPlanAsync_ReturnsConsolidatedPlan_WithRealtimeAndOutlooks()
   {
-    var (service, _, cache) = CreateHarness(BuildTestWeatherOptions());
-    using var _ = cache;
+    var (service, _) = CreateHarness(BuildTestWeatherOptions());
     var query = KlQuery(
         "Ds001",
         MalaysiaTime.At(MalaysiaTime.Today),
@@ -219,8 +236,7 @@ public class WeatherPlannerServiceTests
   [Fact]
   public async Task GetPlanAsync_GeoBoundsSingaporeNea_IncludedWhenInBounds_ExcludedWhenOutside()
   {
-    var (service, _, cache) = CreateHarness(BuildTestWeatherOptions());
-    using var _ = cache;
+    var (service, _) = CreateHarness(BuildTestWeatherOptions());
     var nextDay = MalaysiaTime.At(MalaysiaTime.Today.AddDays(1));
     var singaporeQuery = new WeatherQuery { Latitude = 1.3521, Longitude = 103.8198, Return = nextDay };
 
@@ -250,8 +266,7 @@ public class WeatherPlannerServiceTests
               }
             }
             """;
-    var (service, _, cache) = CreateHarness(BuildTestWeatherOptions(), hourlyJson);
-    using var _ = cache;
+    var (service, _) = CreateHarness(BuildTestWeatherOptions(), hourlyJson);
     var targetDate = new DateTime(2026, 8, 26);
 
     var result = await service.GetHourlyForecastAsync(KlQuery(), targetDate);
@@ -266,8 +281,7 @@ public class WeatherPlannerServiceTests
   [Fact]
   public async Task RefreshProviderAsync_RefreshesOnlySpecifiedProvider()
   {
-    var (service, handler, cache) = CreateHarness(BuildTestWeatherOptions());
-    using var _ = cache;
+    var (service, handler) = CreateHarness(BuildTestWeatherOptions());
     var query = KlQuery();
 
     var result = await service.RefreshProviderAsync("Open-Meteo", query, isOutlook: false);
@@ -280,20 +294,42 @@ public class WeatherPlannerServiceTests
   }
 
   [Fact]
-  public async Task FetchWeatherAsync_WithBoundedMemoryCache_SucceedsWithSizeLimit()
+  public async Task GetPlanAsync_EvictsExpiredBeforeOldestLiveEntryAtCacheCapacity()
   {
-    var (service, handler, cache) = CreateHarness(
-        BuildTestWeatherOptions(),
-        cache: new AppMemoryCache(sizeLimit: 10));
-    using var _ = cache;
-    var query = KlQuery();
+    var clock = new TestClock();
+    var (service, handler) = CreateHarness(
+        BuildSingleProviderOptions("?lat={lat}&lon={lon}"),
+        utcNow: () => clock.UtcNow);
+    var cap = WeatherPlannerService.MaxCacheEntries;
+    static WeatherQuery QueryAt(int index) => new() { Latitude = 3.0 + index * 0.01, Longitude = 101.0 };
 
-    Assert.NotNull(await service.GetPlanAsync(query, forceRefresh: false));
-    Assert.Equal(1, handler.RequestCount);
+    // Entry 0 is an outlook (3h TTL); entry 1 is realtime (10m TTL); entries 2..cap-1 are outlooks (3h TTL).
+    var baseDate = new DateTime(2026, 8, 26);
+    await service.GetHourlyForecastAsync(QueryAt(0), baseDate);
+    await service.GetPlanAsync(QueryAt(1));
+    for (var i = 2; i < cap; i++)
+    {
+      await service.GetHourlyForecastAsync(QueryAt(i), baseDate);
+    }
+    Assert.Equal(cap, handler.RequestCount);
 
-    // Subsequent call hits cache with SizeLimit without throwing
-    Assert.NotNull(await service.GetPlanAsync(query, forceRefresh: false));
-    Assert.Equal(1, handler.RequestCount);
+    // Advance 11 minutes so only realtime entry 1 expires, then insert a new entry.
+    clock.Advance(TimeSpan.FromMinutes(11));
+    await service.GetHourlyForecastAsync(QueryAt(cap), baseDate);
+    Assert.Equal(cap + 1, handler.RequestCount);
+
+    // Entry 0 must still be cached because expired entry 1 was evicted instead of oldest live entry 0.
+    var entry0Cached = await service.GetHourlyForecastAsync(QueryAt(0), baseDate);
+    Assert.True(entry0Cached.IsCached);
+    Assert.Equal(cap + 1, handler.RequestCount);
+
+    // Now all entries are live; adding one more evicts the oldest live entry (entry 0).
+    await service.GetHourlyForecastAsync(QueryAt(cap + 1), baseDate);
+    Assert.Equal(cap + 2, handler.RequestCount);
+
+    var entry0Reloaded = await service.GetHourlyForecastAsync(QueryAt(0), baseDate);
+    Assert.False(entry0Reloaded.IsCached);
+    Assert.Equal(cap + 3, handler.RequestCount);
   }
 
   private static WeatherQuery KlQuery(
@@ -329,17 +365,16 @@ public class WeatherPlannerServiceTests
     }
   };
 
-  private static (WeatherPlannerService Service, CountingHandler Handler, AppMemoryCache Cache) CreateHarness(
+  private static (WeatherPlannerService Service, CountingHandler Handler) CreateHarness(
       WeatherOptions? weatherOptions = null,
       string json = WeatherJson,
       HttpStatusCode status = HttpStatusCode.OK,
       TimeSpan delay = default,
-      AppMemoryCache? cache = null)
+      Func<DateTimeOffset>? utcNow = null)
   {
     var handler = new CountingHandler(status, json, delay);
-    cache ??= new AppMemoryCache();
-    var service = CreateService(new HttpClient(handler), cache, weatherOptions ?? BuildSingleProviderOptions());
-    return (service, handler, cache);
+    var service = CreateService(new HttpClient(handler), weatherOptions ?? BuildSingleProviderOptions(), utcNow);
+    return (service, handler);
   }
 
   private static WeatherOptions BuildSingleProviderOptions(string endpointSuffix = "") => new()
@@ -398,9 +433,9 @@ public class WeatherPlannerServiceTests
 
   private static WeatherPlannerService CreateService(
       HttpClient client,
-      IAppCache cache,
-      WeatherOptions? weatherOptions = null) =>
-      new(client, cache, Options.Create(new CacheExpirationOptions
+      WeatherOptions? weatherOptions = null,
+      Func<DateTimeOffset>? utcNow = null) =>
+      new(client, Options.Create(new CacheExpirationOptions
       {
         Weather = new()
         {
@@ -408,7 +443,7 @@ public class WeatherPlannerServiceTests
           OutlookSeconds = 10800,
           FallbackSeconds = 30
         }
-      }), Options.Create(weatherOptions ?? new WeatherOptions()));
+      }), Options.Create(weatherOptions ?? new WeatherOptions()), utcNow: utcNow);
 
   private const string WeatherJson = """
         {

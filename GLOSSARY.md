@@ -35,7 +35,7 @@ A point-in-time telemetry snapshot of a transit vehicle containing route identif
 _Avoid_: BusPosition, GPSPoint
 
 **Enriched Route**:
-A navigational transit itinerary cross-referenced against live vehicle telemetry, estimated arrival delays, and optional astrological fortune rating.
+A navigational transit itinerary cross-referenced against live vehicle telemetry and estimated arrival delays.
 _Avoid_: LiveRoute, EvaluatedRoute
 
 ## Place Resolution & Station Catalogs

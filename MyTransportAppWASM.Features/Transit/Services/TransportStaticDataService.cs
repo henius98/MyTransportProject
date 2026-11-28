@@ -4,26 +4,25 @@ using System.Text.Json;
 
 namespace MyTransportAppWASM.Features.Transit.Services;
 
-public sealed class TransportStaticDataService(HttpClient httpClient, IAppCache? cache = null) : ITransportStaticDataService
+public sealed class TransportStaticDataService(HttpClient httpClient) : ITransportStaticDataService
 {
-  private static readonly TimeSpan StaticCacheDuration = TimeSpan.FromMinutes(15);
-  private readonly ConcurrentDictionary<string, Task<string>> _inFlightMaps = new(StringComparer.Ordinal);
-  private readonly ConcurrentDictionary<string, Task<List<StaticFrequency>>> _inFlightFrequencies = new(StringComparer.Ordinal);
+  private readonly ConcurrentDictionary<string, Lazy<Task<List<StaticRoute>>>> _inFlightRoutes = new(StringComparer.Ordinal);
+  private readonly ConcurrentDictionary<string, Lazy<Task<string>>> _inFlightMaps = new(StringComparer.Ordinal);
+  private readonly ConcurrentDictionary<string, Lazy<Task<List<StaticFrequency>>>> _inFlightFrequencies = new(StringComparer.Ordinal);
 
-  public async Task<List<StaticRoute>> GetRoutesAsync(TransportStaticData source, CancellationToken cancellationToken = default)
+  public Task<List<StaticRoute>> GetRoutesAsync(TransportStaticData source, CancellationToken cancellationToken = default)
   {
-    if (string.IsNullOrWhiteSpace(source.BaseUrl)) return [];
+    if (string.IsNullOrWhiteSpace(source.BaseUrl)) return Task.FromResult<List<StaticRoute>>([]);
 
-    var cacheKey = BuildRoutesCacheKey(source);
-    if (cache != null && cache.TryGetValue(cacheKey, out List<StaticRoute>? cached) && cached != null)
-    {
-      return cached;
-    }
+    var inFlightKey = BuildRoutesInFlightKey(source);
+    return CoalesceAsync(_inFlightRoutes, inFlightKey, () => FetchRoutesAsync(source), cancellationToken);
+  }
 
-    List<StaticRoute> routes;
+  private async Task<List<StaticRoute>> FetchRoutesAsync(TransportStaticData source)
+  {
     try
     {
-      routes = await GetRoutesFromDataAsync(source, cancellationToken);
+      return await GetRoutesFromDataAsync(source, CancellationToken.None);
     }
     catch (HttpRequestException ex) when (ex.StatusCode is System.Net.HttpStatusCode.ServiceUnavailable or System.Net.HttpStatusCode.TooManyRequests)
     {
@@ -31,12 +30,8 @@ public sealed class TransportStaticDataService(HttpClient httpClient, IAppCache?
     }
     catch (Exception ex) when (ex is not OperationCanceledException)
     {
-      routes = await GetRoutesFromMapAsync(source, cancellationToken);
+      return await GetRoutesFromMapAsync(source, CancellationToken.None);
     }
-
-    cache?.Set(cacheKey, routes, StaticCacheDuration);
-
-    return routes;
   }
 
   private async Task<List<StaticRoute>> GetRoutesFromDataAsync(TransportStaticData source, CancellationToken cancellationToken)
@@ -65,7 +60,7 @@ public sealed class TransportStaticDataService(HttpClient httpClient, IAppCache?
 
   private async Task<List<StaticRoute>> GetRoutesFromMapAsync(TransportStaticData source, CancellationToken cancellationToken)
   {
-    var geoJson = await GetMapAsync(source, "", cancellationToken);
+    var geoJson = await GetMapAsync(source, cancellationToken: cancellationToken);
     if (string.IsNullOrEmpty(geoJson)) return [];
     using var document = JsonDocument.Parse(geoJson);
     var routes = new Dictionary<string, StaticRoute>(StringComparer.Ordinal);
@@ -80,12 +75,9 @@ public sealed class TransportStaticDataService(HttpClient httpClient, IAppCache?
     return routes.Values.OrderBy(route => route.RouteShortName ?? route.RouteId, StringComparer.OrdinalIgnoreCase).ToList();
   }
 
-  public Task<string> GetMapAsync(TransportStaticData source, string routeId = "", CancellationToken cancellationToken = default) =>
-    GetMapAsync(source, routeId, serviceDate: null, cancellationToken);
-
-  public async Task<string> GetMapAsync(TransportStaticData source, string routeId, string? serviceDate, CancellationToken cancellationToken = default)
+  public Task<string> GetMapAsync(TransportStaticData source, string routeId = "", string? serviceDate = null, CancellationToken cancellationToken = default)
   {
-    if (string.IsNullOrWhiteSpace(source.BaseUrl)) return "";
+    if (string.IsNullOrWhiteSpace(source.BaseUrl)) return Task.FromResult("");
     var trimmedRouteId = routeId?.Trim() ?? string.Empty;
     var trimmedDate = serviceDate?.Trim() ?? string.Empty;
     var queryParts = new List<string>(2);
@@ -99,108 +91,71 @@ public sealed class TransportStaticDataService(HttpClient httpClient, IAppCache?
     }
     var query = queryParts.Count == 0 ? "" : $"?{string.Join('&', queryParts)}";
     var url = BuildUrl(source, source.GeoJSONUrlPath, query);
-    var cacheKey = $"static_map:{url}";
-
-    if (cache != null && cache.TryGetValue(cacheKey, out string? cached) && cached != null)
-    {
-      return cached;
-    }
-
-    var sharedTask = _inFlightMaps.GetOrAdd(url, key => FetchAndCacheMapAsync(key, cacheKey));
-    return await sharedTask.WaitAsync(cancellationToken);
+    return CoalesceAsync(_inFlightMaps, url, () => httpClient.GetStringAsync(url), cancellationToken);
   }
 
-  private async Task<string> FetchAndCacheMapAsync(string url, string cacheKey)
-  {
-    try
-    {
-      var geoJson = await httpClient.GetStringAsync(url);
-      cache?.Set(cacheKey, geoJson, StaticCacheDuration);
-      return geoJson;
-    }
-    finally
-    {
-      _inFlightMaps.TryRemove(url, out _);
-    }
-  }
-
-  public async Task<List<StaticDeparture>> GetDeparturesAsync(TransportStaticData source, string routeId, string stopId, CancellationToken cancellationToken = default)
-  {
-    var trimmedStopId = stopId?.Trim() ?? string.Empty;
-    if (string.IsNullOrWhiteSpace(source.BaseUrl) || string.IsNullOrEmpty(trimmedStopId)) return [];
-    var trimmedRouteId = routeId?.Trim() ?? string.Empty;
-    var routeQuery = string.IsNullOrEmpty(trimmedRouteId) ? "" : $"&route_id={Uri.EscapeDataString(trimmedRouteId)}";
-    var url = BuildUrl(source, source.DeparturePath,
-      $"?stop_id={Uri.EscapeDataString(trimmedStopId)}{routeQuery}&limit=5");
-    using var response = await httpClient.GetAsync(url, cancellationToken);
-    response.EnsureSuccessStatusCode();
-    using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-    return document.RootElement.GetProperty("departures").EnumerateArray()
-      .Select(row =>
-      {
-        var depStr = row.TryGetProperty("estimated_departure_at", out var depProp) ? depProp.GetString() : null;
-        DateTimeOffset? depTime = DateTimeOffset.TryParse(depStr, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
-          ? parsed
-          : null;
-        return new StaticDeparture(
-          row.TryGetProperty("route_id", out var rProp) ? rProp.GetString() ?? trimmedRouteId : trimmedRouteId,
-          Text(row, "trip_headsign"),
-          depTime);
-      })
-      .ToList();
-  }
-
-  public async Task<List<StaticFrequency>> GetFrequenciesAsync(TransportStaticData source, CancellationToken cancellationToken = default)
+  public Task<List<StaticFrequency>> GetFrequenciesAsync(TransportStaticData source, CancellationToken cancellationToken = default)
   {
     if (string.IsNullOrWhiteSpace(source.BaseUrl) || string.IsNullOrWhiteSpace(source.FrequenciesPath))
     {
-      return [];
+      return Task.FromResult<List<StaticFrequency>>([]);
     }
 
-    var cacheKey = $"static_frequencies:{source.BaseUrl.TrimEnd('/')}|{source.FrequenciesPath.TrimStart('/')}";
-    if (cache != null && cache.TryGetValue(cacheKey, out List<StaticFrequency>? cached) && cached != null)
-    {
-      return cached;
-    }
-
-    var sharedTask = _inFlightFrequencies.GetOrAdd(cacheKey, _ => FetchAndCacheFrequenciesAsync(source, cacheKey));
-    return await sharedTask.WaitAsync(cancellationToken);
+    var inFlightKey = $"static_frequencies:{source.BaseUrl.TrimEnd('/')}|{source.FrequenciesPath.TrimStart('/')}";
+    return CoalesceAsync(_inFlightFrequencies, inFlightKey, () => FetchFrequenciesAsync(source), cancellationToken);
   }
 
-  private async Task<List<StaticFrequency>> FetchAndCacheFrequenciesAsync(TransportStaticData source, string cacheKey)
+  private async Task<List<StaticFrequency>> FetchFrequenciesAsync(TransportStaticData source)
   {
-    try
+    const int pageSize = 1000;
+    const int maxPages = 100;
+    var frequencies = new List<StaticFrequency>();
+    for (var offset = 0; offset < pageSize * maxPages; offset += pageSize)
     {
-      const int pageSize = 1000;
-      const int maxPages = 100;
-      var frequencies = new List<StaticFrequency>();
-      for (var offset = 0; offset < pageSize * maxPages; offset += pageSize)
+      var url = BuildUrl(source, source.FrequenciesPath,
+        $"?include=trip_id,start_time,end_time,headway_secs&sort=trip_id,start_time&limit={pageSize}&offset={offset}");
+      using var response = await httpClient.GetAsync(url);
+      response.EnsureSuccessStatusCode();
+      using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
+      var rows = document.RootElement.GetProperty("data");
+      foreach (var row in rows.EnumerateArray())
       {
-        var url = BuildUrl(source, source.FrequenciesPath,
-          $"?include=trip_id,start_time,end_time,headway_secs&sort=trip_id,start_time&limit={pageSize}&offset={offset}");
-        using var response = await httpClient.GetAsync(url);
-        response.EnsureSuccessStatusCode();
-        using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
-        var rows = document.RootElement.GetProperty("data");
-        foreach (var row in rows.EnumerateArray())
-        {
-          var tripId = Text(row, "trip_id");
-          var startTime = Text(row, "start_time");
-          var endTime = Text(row, "end_time");
-          var headwaySecs = IntValue(row, "headway_secs");
-          if (tripId == null || startTime == null || endTime == null || headwaySecs <= 0) continue;
-          frequencies.Add(new StaticFrequency(tripId, startTime, endTime, headwaySecs));
-        }
-        if (rows.GetArrayLength() < pageSize) break;
+        var tripId = Text(row, "trip_id");
+        var startTime = Text(row, "start_time");
+        var endTime = Text(row, "end_time");
+        var headwaySecs = IntValue(row, "headway_secs");
+        if (tripId == null || startTime == null || endTime == null || headwaySecs <= 0) continue;
+        frequencies.Add(new StaticFrequency(tripId, startTime, endTime, headwaySecs));
       }
+      if (rows.GetArrayLength() < pageSize) break;
+    }
 
-      cache?.Set(cacheKey, frequencies, StaticCacheDuration);
-      return frequencies;
-    }
-    finally
+    return frequencies;
+  }
+
+  private static async Task<T> CoalesceAsync<T>(
+    ConcurrentDictionary<string, Lazy<Task<T>>> inFlightMap,
+    string key,
+    Func<Task<T>> fetch,
+    CancellationToken cancellationToken)
+  {
+    var inFlight = inFlightMap.GetOrAdd(key, _ =>
     {
-      _inFlightFrequencies.TryRemove(cacheKey, out _);
-    }
+      Lazy<Task<T>>? entry = null;
+      entry = new Lazy<Task<T>>(async () =>
+      {
+        try
+        {
+          return await fetch();
+        }
+        finally
+        {
+          inFlightMap.TryRemove(new KeyValuePair<string, Lazy<Task<T>>>(key, entry!));
+        }
+      });
+      return entry;
+    });
+    return await inFlight.Value.WaitAsync(cancellationToken);
   }
 
   private static int IntValue(JsonElement row, string property) =>
@@ -210,7 +165,7 @@ public sealed class TransportStaticDataService(HttpClient httpClient, IAppCache?
           : (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : 0))
       : 0;
 
-  private static string BuildRoutesCacheKey(TransportStaticData source) =>
+  private static string BuildRoutesInFlightKey(TransportStaticData source) =>
     $"static_routes:{source.BaseUrl.TrimEnd('/')}|{source.RouteInfoPath.TrimStart('/')}|{source.GeoJSONUrlPath.TrimStart('/')}";
 
   private static string BuildUrl(TransportStaticData source, string path, string query) =>

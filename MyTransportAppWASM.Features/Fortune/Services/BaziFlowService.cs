@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -9,7 +10,9 @@ namespace MyTransportAppWASM.Features.Fortune.Services
       ILogger<BaziFlowService>? logger = null) : IBaziFlowService
   {
     private readonly ILogger<BaziFlowService> _logger = logger ?? NullLogger<BaziFlowService>.Instance;
+    private CachedDateFortune? _cachedFortune;
     internal const string ApiKeyStorageKey = "baziflow_api_key";
+    internal const string FortuneCacheStorageKey = "fortune_cache_v1";
 
     private async Task<string?> GetApiKeyAsync(CancellationToken cancellationToken = default)
     {
@@ -18,7 +21,12 @@ namespace MyTransportAppWASM.Features.Fortune.Services
 
     public async Task SaveApiKeyAsync(string apiKey, CancellationToken cancellationToken = default)
     {
+      var previousKey = await GetApiKeyAsync(cancellationToken);
       await localStorage.SetStringAsync(ApiKeyStorageKey, apiKey, cancellationToken);
+      if (string.IsNullOrEmpty(apiKey) || !string.Equals(previousKey, apiKey, StringComparison.Ordinal))
+      {
+        await ClearFortuneCacheAsync(cancellationToken);
+      }
     }
 
     public async Task<bool> SetupProfileAsync(string apiKey, CreateProfileRequest request, CancellationToken cancellationToken = default)
@@ -89,7 +97,12 @@ namespace MyTransportAppWASM.Features.Fortune.Services
             request,
             FeaturesJsonSerializerContext.Default.CreateProfileRequest,
             cancellationToken);
-        return response.IsSuccessStatusCode;
+        if (response.IsSuccessStatusCode)
+        {
+          await ClearFortuneCacheAsync(cancellationToken);
+          return true;
+        }
+        return false;
       }
       catch (OperationCanceledException)
       {
@@ -108,6 +121,36 @@ namespace MyTransportAppWASM.Features.Fortune.Services
       {
         return null;
       }
+
+      var cachedInMemory = _cachedFortune;
+      if (cachedInMemory is { Data: not null } &&
+          string.Equals(cachedInMemory.Date, date, StringComparison.Ordinal))
+      {
+        return cachedInMemory.Data;
+      }
+
+      var storedJson = await localStorage.GetStringAsync(FortuneCacheStorageKey, cancellationToken);
+      if (!string.IsNullOrWhiteSpace(storedJson))
+      {
+        try
+        {
+          var stored = JsonSerializer.Deserialize(
+            storedJson,
+            FeaturesJsonSerializerContext.Default.CachedDateFortune);
+          if (stored is { Data: not null } &&
+              string.Equals(stored.Date, date, StringComparison.Ordinal))
+          {
+            NormalizeFortuneData(stored.Data);
+            _cachedFortune = stored;
+            return stored.Data;
+          }
+        }
+        catch (JsonException ex)
+        {
+          _logger.LogDebug("Ignoring corrupt fortune cache: {Message}", ex.Message);
+        }
+      }
+
       try
       {
         var request = new DateFortuneRequest { Date = date };
@@ -122,9 +165,17 @@ namespace MyTransportAppWASM.Features.Fortune.Services
           var result = await response.Content.ReadJsonAsync(
               FeaturesJsonSerializerContext.Default.ApiResponseFortuneData,
               cancellationToken);
-          result?.Data?.FavorableDirections ??= [];
-          result?.Data?.LuckyHours ??= [];
-          return result?.Data;
+          if (result?.Data is { } fortune)
+          {
+            NormalizeFortuneData(fortune);
+            var entry = new CachedDateFortune { Date = date, Data = fortune };
+            _cachedFortune = entry;
+            var serialized = JsonSerializer.Serialize(
+              entry,
+              FeaturesJsonSerializerContext.Default.CachedDateFortune);
+            await localStorage.SetStringAsync(FortuneCacheStorageKey, serialized, cancellationToken);
+            return fortune;
+          }
         }
         return null;
       }
@@ -137,6 +188,18 @@ namespace MyTransportAppWASM.Features.Fortune.Services
         _logger.LogDebug("Error fetching date fortune: {Message}", ex.Message);
         return null;
       }
+    }
+
+    private async Task ClearFortuneCacheAsync(CancellationToken cancellationToken)
+    {
+      _cachedFortune = null;
+      await localStorage.RemoveAsync(FortuneCacheStorageKey, cancellationToken);
+    }
+
+    private static void NormalizeFortuneData(FortuneData data)
+    {
+      data.FavorableDirections ??= [];
+      data.LuckyHours ??= [];
     }
   }
 }

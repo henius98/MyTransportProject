@@ -27,5 +27,6 @@ This directory contains browser-side JavaScript modules and interop bridges. Fil
 |---|---|---|---|
 | `geolocation.js` | Browser Geolocation API | `Core/Services/LocationService.cs` | GPS coordinate retrieval with fast network fallback and localStorage caching |
 | `locationPicker.js` | Station Map Dialog | `Features/Weather/Components/LocationSearchAutocomplete.razor` | Interactive SVG Malaysia weather station map dialog (zoom, pan, tooltips) |
+| `static-data-cache.js` | Static Data Cache Policy | `wwwroot/service-worker.js`, `wwwroot/service-worker.published.js`, `wwwroot/index.html`, `Program.cs` | Shared cache-first `static-data-cache-v1` policy with daily MYT reset expiry, stale pruning, and `StaticDataResetHour` persistence |
 | `theme-manager.js` | Theme Management | `MyTransportAppWASM.Core/Services/ThemeService.cs` | Pre-Blazor theme flash prevention and body class synchronization |
 | `wasm-gzip.js` | Compressed WASM Loader | `wwwroot/index.html`, `wwwroot/service-worker.published.js` | Gzip decompression (`DecompressionStream`), WebAssembly header validation, and SHA-256 integrity verification for `.wasm.gz` assets |

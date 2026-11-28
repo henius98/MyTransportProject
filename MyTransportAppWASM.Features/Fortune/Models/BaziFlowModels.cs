@@ -41,4 +41,10 @@ namespace MyTransportAppWASM.Features.Fortune.Models
     public List<string> FavorableDirections { get; set; } = new();
     public List<int> LuckyHours { get; set; } = new();
   }
+
+  public record CachedDateFortune
+  {
+    public string Date { get; set; } = string.Empty;
+    public FortuneData? Data { get; set; }
+  }
 }
